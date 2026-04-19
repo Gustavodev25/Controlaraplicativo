@@ -18,6 +18,9 @@
       "infoPlist": {
         "CFBundleDisplayName": "Controlar+",
         "NSFaceIDUsageDescription": "Usamos Face ID para proteger seu acesso ao app",
+        "NSCameraUsageDescription": "Usamos a câmera para leitura de documentos e QR codes.",
+        "NSPhotoLibraryUsageDescription": "Usamos a galeria para importar comprovantes e documentos.",
+        "NSMicrophoneUsageDescription": "Acesso ao microfone necessário para algumas funcionalidades de mídia.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.gustavodev25.controlarapp",
