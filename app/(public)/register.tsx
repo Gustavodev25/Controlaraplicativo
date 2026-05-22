@@ -1,7 +1,10 @@
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, User as UserIcon } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import type { KeyboardAvoidingViewProps } from 'react-native';
+
+import { ThemedText } from '@/components/themed-text';
 
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { AuthButton } from '@/components/ui/AuthButton';
@@ -9,7 +12,7 @@ import { AuthInput } from '@/components/ui/AuthInput';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 
-const KEYBOARD_BEHAVIOR = Platform.select({ ios: 'padding', android: 'height' });
+const KEYBOARD_BEHAVIOR: KeyboardAvoidingViewProps['behavior'] = Platform.select({ ios: 'padding', android: 'height' });
 
 export default function RegisterScreen() {
     const router = useRouter();
@@ -82,13 +85,14 @@ export default function RegisterScreen() {
                     <View style={styles.centerContainer}>
                         <View style={styles.titleSection}>
                             <View style={styles.logoContainer}>
-                                <Image 
-                                    source={require('@/assets/images/android-icon-foreground.png')} 
+                                <Image
+                                    source={require('@/assets/images/icon.png')}
                                     style={styles.logo}
                                     resizeMode="contain"
                                 />
                             </View>
-                            <Text style={styles.subtitle}>Crie sua conta para começar</Text>
+                            <ThemedText type="title" style={styles.title}>Comece sua jornada</ThemedText>
+                            <ThemedText style={styles.subtitle}>Crie sua conta e assuma o controle total das suas finanças.</ThemedText>
                         </View>
 
                         <View style={styles.form}>
@@ -174,50 +178,61 @@ const styles = StyleSheet.create({
         paddingVertical: 100,
     },
     titleSection: {
-        alignItems: 'center',
-        marginBottom: 32,
+        alignItems: 'flex-start',
+        marginBottom: 40,
     },
     logoContainer: {
-        width: 80,
-        height: 80,
+        width: 56,
+        height: 56,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 20,
     },
     logo: {
-        width: 60,
-        height: 60,
-        borderRadius: 12,
+        width: 56,
+        height: 56,
+        borderRadius: 14,
     },
-    subtitle: { 
-        fontSize: 15, 
-        color: '#9ca3af', 
+    title: {
+        fontSize: 32,
+        fontWeight: '800',
+        color: '#faf9f5',
+        marginBottom: 10,
+        textAlign: 'left',
+        letterSpacing: -1,
+    },
+    subtitle: {
+        fontSize: 16,
+        color: '#9ca3af',
         fontWeight: '400',
+        textAlign: 'left',
+        lineHeight: 24,
+        paddingRight: 20,
     },
-    form: { 
+    form: {
         width: '100%',
         gap: 16,
     },
-    button: { 
+    button: {
         marginTop: 12,
     },
-    loginLink: { 
+    loginLink: {
         marginTop: 24,
+        alignItems: 'flex-start',
+    },
+    loginLinkText: {
+        fontSize: 14,
+        color: '#9ca3af',
+    },
+    loginLinkHighlight: {
+        color: '#d97757',
+        fontWeight: 'bold'
+    },
+    termsRow: {
+        flexDirection: 'row',
         alignItems: 'center',
-    },
-    loginLinkText: { 
-        fontSize: 14, 
-        color: '#9ca3af', 
-    },
-    loginLinkHighlight: { 
-        color: '#d97757', 
-        fontWeight: 'bold' 
-    },
-    termsRow: { 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        gap: 10, 
-        marginVertical: 4 
+        gap: 10,
+        marginVertical: 4
     },
     checkbox: {
         width: 18,

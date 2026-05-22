@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     syncingText: {
         color: '#66BB6A',
         fontSize: 13,
-        fontWeight: '500',
+        fontFamily: 'AROneSans_400Regular',
     },
 
     /* ---- Offline ---- */
@@ -171,8 +171,7 @@ const styles = StyleSheet.create({
     offlineText: {
         color: '#ffffff',
         fontSize: 13,
-        fontWeight: '500',
-        fontFamily: 'AROneSans_500Medium',
+        fontFamily: 'AROneSans_400Regular',
         flexShrink: 1,
     },
     retryButton: {
@@ -187,7 +186,6 @@ const styles = StyleSheet.create({
     retryButtonText: {
         color: '#ffffff',
         fontSize: 12,
-        fontWeight: '600',
-        fontFamily: 'AROneSans_500Medium',
+        fontFamily: 'AROneSans_400Regular',
     },
 });

@@ -6,19 +6,11 @@ import { useToast } from '@/contexts/ToastContext';
 import { databaseService } from '@/services/firebase';
 import { Stack, useRouter } from 'expo-router';
 import {
-    Banknote,
-    Calendar,
     ChevronRight,
-    CreditCard,
-    DollarSign,
     Info,
-    Percent,
-    Plus,
-    Tag,
     Trash2,
-    Wallet
 } from 'lucide-react-native';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     KeyboardAvoidingView,
     Platform,
@@ -89,50 +81,38 @@ const SectionHeader = ({ title }: { title: string }) => (
 );
 
 interface ListRowProps {
-    icon: React.ElementType;
     title: string;
     rightComponent?: React.ReactNode;
     subtitle?: string;
     onPress?: () => void;
     showDivider?: boolean;
     isLast?: boolean;
-    color?: string;
 }
 
-const ListRow = ({ icon: Icon, title, subtitle, rightComponent, onPress, showDivider = true, isLast = false, color = '#E0E0E0' }: ListRowProps) => (
+const ListRow = ({ title, subtitle, rightComponent, onPress, showDivider = true, isLast = false }: ListRowProps) => (
     <TouchableOpacity
         style={styles.itemContainer}
         activeOpacity={0.7}
         onPress={onPress}
         disabled={!onPress}
     >
-        <View style={styles.itemIconContainer}>
-            <Icon size={20} color={color} />
+        <View style={styles.itemLeft}>
+            <Text style={styles.itemTitle}>{title}</Text>
+            {subtitle && <Text style={styles.itemSubtitle}>{subtitle}</Text>}
         </View>
-        <View style={styles.itemRightContainer}>
-            <View style={styles.itemContent}>
-                <View>
-                    <Text style={styles.itemTitle}>{title}</Text>
-                    {subtitle && <Text style={styles.itemSubtitle}>{subtitle}</Text>}
-                </View>
-                {rightComponent}
-            </View>
-        </View>
+        {rightComponent}
         {!isLast && showDivider && <View style={styles.itemSeparator} />}
     </TouchableOpacity>
 );
 
 const InputRow = ({
-    icon: Icon,
     title,
     value,
     onChangeText,
     placeholder,
     keyboardType = 'default',
     isLast = false,
-    formatCurrency = false
 }: {
-    icon: React.ElementType,
     title: string,
     value: string,
     onChangeText: (text: string) => void,
@@ -142,23 +122,16 @@ const InputRow = ({
     formatCurrency?: boolean
 }) => (
     <View style={styles.itemContainer}>
-        <View style={styles.itemIconContainer}>
-            <Icon size={20} color="#E0E0E0" />
-        </View>
-        <View style={styles.itemRightContainer}>
-            <View style={styles.itemContent}>
-                <Text style={styles.itemTitle}>{title}</Text>
-                <TextInput
-                    style={styles.inputRight}
-                    value={value}
-                    onChangeText={onChangeText}
-                    placeholder={placeholder}
-                    placeholderTextColor="#555"
-                    keyboardType={keyboardType}
-                    textAlign="right"
-                />
-            </View>
-        </View>
+        <Text style={styles.itemTitle}>{title}</Text>
+        <TextInput
+            style={styles.inputRight}
+            value={value}
+            onChangeText={onChangeText}
+            placeholder={placeholder}
+            placeholderTextColor="#444"
+            keyboardType={keyboardType}
+            textAlign="right"
+        />
         {!isLast && <View style={styles.itemSeparator} />}
     </View>
 );
@@ -189,10 +162,10 @@ const SmoothTabs = ({
 
     return (
         <View style={[{
-            backgroundColor: '#1E1E1E',
-            borderRadius: 12,
-            padding: 4,
-            height: 48,
+            backgroundColor: '#161616',
+            borderRadius: 10,
+            padding: 3,
+            height: 42,
             width: '100%',
         }, style]}>
             <View style={{ flex: 1, flexDirection: 'row', position: 'relative' }}>
@@ -202,10 +175,10 @@ const SmoothTabs = ({
                         top: 0,
                         bottom: 0,
                         width: '50%',
-                        backgroundColor: '#352520', // Brownish/Orange dark tint
-                        borderRadius: 10,
-                        borderWidth: 1,
-                        borderColor: '#4d302a'
+                        backgroundColor: '#222',
+                        borderRadius: 8,
+                        borderWidth: StyleSheet.hairlineWidth,
+                        borderColor: '#2A2A2A',
                     },
                     indicatorStyle
                 ]} />
@@ -217,9 +190,9 @@ const SmoothTabs = ({
                         activeOpacity={0.8}
                     >
                         <Text style={{
-                            color: value === option.value ? '#d97757' : '#666',
-                            fontWeight: value === option.value ? '700' : '600',
-                            fontSize: 14
+                            color: value === option.value ? '#E8E8EA' : '#555',
+                            fontWeight: value === option.value ? '500' : '400',
+                            fontSize: 13,
                         }}>
                             {option.label}
                         </Text>
@@ -264,6 +237,16 @@ export default function FinancialSettingsScreen() {
     const [newDiscountType, setNewDiscountType] = useState<'fixed' | 'percentage'>('fixed');
 
     const [isSaving, setIsSaving] = useState(false);
+
+    const originalSnapshot = useRef<string>('');
+
+    const currentSnapshot = JSON.stringify({
+        baseSalary, paydayType, paydayDate, isSalaryExempt,
+        hasAdvance, advanceType, advanceValue, advanceDay, isAdvanceExempt,
+        otherDiscounts: otherDiscounts.map(d => ({ id: d.id, name: d.name, value: d.value, type: d.type }))
+    });
+
+    const hasChanges = originalSnapshot.current !== '' && currentSnapshot !== originalSnapshot.current;
 
     const calculations = useFinancialCalculations(
         baseSalary,
@@ -316,6 +299,20 @@ export default function FinancialSettingsScreen() {
                         : Number(d.value || 0).toString().replace('.', ',')
                 } as any)));
             }
+            setTimeout(() => {
+                originalSnapshot.current = JSON.stringify({
+                    baseSalary: f.salary?.base !== undefined ? Number(f.salary.base || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '',
+                    paydayType: f.salary?.payday || '5th_business',
+                    paydayDate: f.salary?.paydayDate?.toString() || '1',
+                    isSalaryExempt: !!f.salary?.isExempt,
+                    hasAdvance: !!f.advance?.enabled,
+                    advanceType: f.advance?.type || 'percentage',
+                    advanceValue: f.advance?.value !== undefined ? (f.advance.type === 'percentage' ? Number(f.advance.value || 0).toString().replace('.', ',') : Number(f.advance.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })) : '',
+                    advanceDay: f.advance?.day?.toString() || '20',
+                    isAdvanceExempt: !!f.advance?.isExempt,
+                    otherDiscounts: (f.discounts || []).map((d: any) => ({ id: d.id, name: d.name, value: d.type === 'fixed' ? Number(d.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : Number(d.value || 0).toString().replace('.', ','), type: d.type }))
+                });
+            }, 0);
             return;
         }
 
@@ -380,6 +377,7 @@ export default function FinancialSettingsScreen() {
 
             if (!result.success) throw new Error(result.error || 'Falha ao salvar');
             showSuccess('Configurações salvas com sucesso!');
+            originalSnapshot.current = currentSnapshot;
             await refreshProfile();
             router.back();
         } catch (error: any) {
@@ -411,52 +409,40 @@ export default function FinancialSettingsScreen() {
     };
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top + 20 }]}>
+        <View style={styles.container}>
             <Stack.Screen options={{ headerShown: false }} />
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }} pointerEvents="none">
-                <UniversalBackground
-                    backgroundColor="#0C0C0C"
-                    glowSize={350}
-                    height={280}
-                    showParticles={true}
-                    particleCount={15}
-                />
+                <UniversalBackground backgroundColor="#0C0C0C" glowSize={350} height={280} />
+            </View>
+
+            <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+                <View style={styles.header}>
+                    <TouchableOpacity
+                        onPress={() => router.back()}
+                        style={styles.backButton}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Financeiro</Text>
+                    <View style={styles.headerSpacer} />
+                </View>
             </View>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
-                style={{ flex: 1, zIndex: 5 }}
+                style={{ flex: 1 }}
             >
-                <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <TouchableOpacity
-                            onPress={() => router.back()}
-                            style={styles.backButton}
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                            <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
-                        </TouchableOpacity>
-                        <Text style={styles.headerTitle}>Financeiro</Text>
-
-                        <TouchableOpacity
-                            onPress={handleSave}
-                            disabled={isSaving}
-                            style={styles.headerSaveButton}
-                        >
-                            <Text style={[styles.headerSaveText, isSaving && { opacity: 0.5 }]}>
-                                {isSaving ? 'Salvando...' : 'Salvar'}
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
+                <ScrollView
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: hasChanges ? 100 : 40 }]}
+                    showsVerticalScrollIndicator={false}
+                >
 
                     {/* 1. Renda Mensal */}
                     <SectionHeader title="RENDA MENSAL" />
                     <View style={styles.sectionCard}>
                         {/* Salário */}
                         <InputRow
-                            icon={DollarSign}
                             title="Salário Base"
                             value={baseSalary}
                             onChangeText={(t) => setBaseSalary(formatInputCurrency(t))}
@@ -466,7 +452,6 @@ export default function FinancialSettingsScreen() {
 
                         {/* Dia Pagamento */}
                         <ListRow
-                            icon={Calendar}
                             title="Dia do Pagamento"
                             rightComponent={
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -479,16 +464,12 @@ export default function FinancialSettingsScreen() {
 
                         {/* Isenção */}
                         <ListRow
-                            icon={Banknote}
                             title="Isenção de Impostos"
                             isLast={true}
                             rightComponent={
                                 <ModernSwitch
                                     value={isSalaryExempt}
                                     onValueChange={setIsSalaryExempt}
-                                    activeColor="#d97757"
-                                    width={46}
-                                    height={26}
                                 />
                             }
                             onPress={() => setIsSalaryExempt(!isSalaryExempt)}
@@ -503,16 +484,12 @@ export default function FinancialSettingsScreen() {
                     <SectionHeader title="ADIANTAMENTO (VALE)" />
                     <View style={styles.sectionCard}>
                         <ListRow
-                            icon={Wallet}
                             title="Recebo Adiantamento"
                             isLast={!hasAdvance}
                             rightComponent={
                                 <ModernSwitch
                                     value={hasAdvance}
                                     onValueChange={setHasAdvance}
-                                    activeColor="#d97757"
-                                    width={46}
-                                    height={26}
                                 />
                             }
                             onPress={() => setHasAdvance(!hasAdvance)}
@@ -533,7 +510,6 @@ export default function FinancialSettingsScreen() {
                                 </View>
 
                                 <InputRow
-                                    icon={advanceType === 'percentage' ? Percent : DollarSign}
                                     title={advanceType === 'percentage' ? "Porcentagem" : "Valor"}
                                     value={advanceValue}
                                     onChangeText={(t) => advanceType === 'percentage' ? setAdvanceValue(t) : setAdvanceValue(formatInputCurrency(t))}
@@ -542,7 +518,6 @@ export default function FinancialSettingsScreen() {
                                 />
 
                                 <InputRow
-                                    icon={Calendar}
                                     title="Dia do Recebimento"
                                     value={advanceDay}
                                     onChangeText={setAdvanceDay}
@@ -558,9 +533,7 @@ export default function FinancialSettingsScreen() {
                     <SectionHeader title="OUTROS DESCONTOS" />
                     <View style={styles.sectionCard}>
                         <ListRow
-                            icon={Plus}
                             title="Adicionar Desconto"
-                            color="#d97757"
                             onPress={() => setShowDiscountModal(true)}
                             rightComponent={<ChevronRight size={20} color="#666" />}
                             isLast={otherDiscounts.length === 0}
@@ -569,7 +542,6 @@ export default function FinancialSettingsScreen() {
                         {otherDiscounts.map((discount, index) => (
                             <ListRow
                                 key={discount.id}
-                                icon={CreditCard}
                                 title={discount.name}
                                 subtitle={discount.type === 'fixed'
                                     ? discount.value
@@ -592,44 +564,58 @@ export default function FinancialSettingsScreen() {
                     {/* 4. Resumo */}
                     <SectionHeader title="PROJEÇÃO MENSAL" />
                     <View style={styles.sectionCard}>
-                        <View style={styles.cardPadding}>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Salário Bruto</Text>
+                            <Text style={styles.summaryValue}>{formatCurrency(calculations.grossSalary)}</Text>
+                        </View>
+                        <View style={styles.itemSeparator} />
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>INSS</Text>
+                            <Text style={styles.summaryValue}>- {formatCurrency(calculations.inss)}</Text>
+                        </View>
+                        <View style={styles.itemSeparator} />
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>IRRF</Text>
+                            <Text style={styles.summaryValue}>- {formatCurrency(calculations.irrf)}</Text>
+                        </View>
+                        {hasAdvance && <>
+                            <View style={styles.itemSeparator} />
                             <View style={styles.summaryRow}>
-                                <Text style={styles.summaryLabel}>Salário Bruto</Text>
-                                <Text style={styles.summaryValuePositive}>{formatCurrency(calculations.grossSalary)}</Text>
+                                <Text style={styles.summaryLabel}>Adiantamento</Text>
+                                <Text style={styles.summaryValue}>- {formatCurrency(calculations.advance)}</Text>
                             </View>
+                        </>}
+                        {calculations.otherDiscountsTotal > 0 && <>
+                            <View style={styles.itemSeparator} />
                             <View style={styles.summaryRow}>
-                                <Text style={styles.summaryLabel}>INSS</Text>
-                                <Text style={styles.summaryValueNegative}>- {formatCurrency(calculations.inss)}</Text>
+                                <Text style={styles.summaryLabel}>Outros descontos</Text>
+                                <Text style={styles.summaryValue}>- {formatCurrency(calculations.otherDiscountsTotal)}</Text>
                             </View>
-                            <View style={styles.summaryRow}>
-                                <Text style={styles.summaryLabel}>IRRF</Text>
-                                <Text style={styles.summaryValueNegative}>- {formatCurrency(calculations.irrf)}</Text>
-                            </View>
-                            {hasAdvance && (
-                                <View style={styles.summaryRow}>
-                                    <Text style={styles.summaryLabel}>Adiantamento</Text>
-                                    <Text style={styles.summaryValueNegative}>- {formatCurrency(calculations.advance)}</Text>
-                                </View>
-                            )}
-                            {calculations.otherDiscountsTotal > 0 && (
-                                <View style={styles.summaryRow}>
-                                    <Text style={styles.summaryLabel}>Outros</Text>
-                                    <Text style={styles.summaryValueNegative}>- {formatCurrency(calculations.otherDiscountsTotal)}</Text>
-                                </View>
-                            )}
-
-                            <View style={styles.summaryDivider} />
-
-                            <View style={styles.totalRow}>
-                                <Text style={styles.totalLabel}>Líquido Estimado</Text>
-                                <Text style={styles.totalValue}>{formatCurrency(calculations.netSalary)}</Text>
-                            </View>
+                        </>}
+                        <View style={styles.totalRow}>
+                            <Text style={styles.totalLabel}>Líquido Estimado</Text>
+                            <Text style={styles.totalValue}>{formatCurrency(calculations.netSalary)}</Text>
                         </View>
                     </View>
 
 
 
                 </ScrollView>
+
+                {hasChanges && (
+                    <View style={[styles.saveContainer, { paddingBottom: insets.bottom + 16 }]}>
+                        <TouchableOpacity
+                            style={styles.saveButton}
+                            onPress={handleSave}
+                            disabled={isSaving}
+                            activeOpacity={0.85}
+                        >
+                            <Text style={styles.saveButtonText}>
+                                {isSaving ? 'Salvando...' : 'Salvar alterações'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </KeyboardAvoidingView>
 
             {/* Discount Modal */}
@@ -645,26 +631,19 @@ export default function FinancialSettingsScreen() {
 
                     <View style={styles.sectionCard}>
                         <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                <Tag size={20} color="#E0E0E0" />
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>Nome</Text>
-                                    <TextInput
-                                        style={styles.inputRight}
-                                        value={newDiscountName}
-                                        onChangeText={setNewDiscountName}
-                                        placeholder="Ex: Plano de Saúde"
-                                        placeholderTextColor="#555"
-                                        textAlign="right"
-                                    />
-                                </View>
-                            </View>
+                            <Text style={styles.itemTitle}>Nome</Text>
+                            <TextInput
+                                style={styles.inputRight}
+                                value={newDiscountName}
+                                onChangeText={setNewDiscountName}
+                                placeholder="Ex: Plano de Saúde"
+                                placeholderTextColor="#444"
+                                textAlign="right"
+                            />
+                            <View style={styles.itemSeparator} />
                         </View>
-                        <View style={styles.itemSeparator} />
 
-                        <View style={[styles.itemContainer, { paddingVertical: 12 }]}>
+                        <View style={[styles.itemContainer, { paddingVertical: 10 }]}>
                             <SmoothTabs
                                 value={newDiscountType}
                                 onChange={(v) => setNewDiscountType(v as any)}
@@ -673,29 +652,22 @@ export default function FinancialSettingsScreen() {
                                     { label: 'Porcentagem (%)', value: 'percentage' }
                                 ]}
                             />
+                            <View style={styles.itemSeparator} />
                         </View>
-                        <View style={styles.itemSeparator} />
 
                         <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                {newDiscountType === 'percentage' ? <Percent size={20} color="#E0E0E0" /> : <DollarSign size={20} color="#E0E0E0" />}
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>
-                                        {newDiscountType === 'fixed' ? 'Valor' : 'Porcentagem'}
-                                    </Text>
-                                    <TextInput
-                                        style={styles.inputRight}
-                                        value={newDiscountValue}
-                                        onChangeText={(t) => newDiscountType === 'percentage' ? setNewDiscountValue(t) : setNewDiscountValue(formatInputCurrency(t))}
-                                        keyboardType="numeric"
-                                        placeholder={newDiscountType === 'percentage' ? "Ex: 5" : "R$ 0,00"}
-                                        placeholderTextColor="#555"
-                                        textAlign="right"
-                                    />
-                                </View>
-                            </View>
+                            <Text style={styles.itemTitle}>
+                                {newDiscountType === 'fixed' ? 'Valor' : 'Porcentagem'}
+                            </Text>
+                            <TextInput
+                                style={styles.inputRight}
+                                value={newDiscountValue}
+                                onChangeText={(t) => newDiscountType === 'percentage' ? setNewDiscountValue(t) : setNewDiscountValue(formatInputCurrency(t))}
+                                keyboardType="numeric"
+                                placeholder={newDiscountType === 'percentage' ? "Ex: 5" : "R$ 0,00"}
+                                placeholderTextColor="#444"
+                                textAlign="right"
+                            />
                         </View>
                     </View>
 
@@ -732,30 +704,20 @@ export default function FinancialSettingsScreen() {
                                 <TouchableOpacity
                                     style={[
                                         styles.itemContainer,
-                                        paydayType === opt.value && { backgroundColor: 'rgba(217, 119, 87, 0.05)' }
+                                        paydayType === opt.value && { backgroundColor: 'rgba(217,119,87,0.04)' }
                                     ]}
                                     onPress={() => {
                                         setPaydayType(opt.value as any);
-                                        if (opt.value !== 'manual') {
-                                            setTimeout(() => setShowPaydayModal(false), 200);
-                                        }
+                                        if (opt.value !== 'manual') setTimeout(() => setShowPaydayModal(false), 200);
                                     }}
                                     activeOpacity={0.7}
                                 >
-                                    <View style={styles.itemIconContainer}>
-                                        <Calendar size={20} color={paydayType === opt.value ? "#d97757" : "#E0E0E0"} />
-                                    </View>
-                                    <View style={styles.itemRightContainer}>
-                                        <View style={styles.itemContent}>
-                                            <Text style={[
-                                                styles.itemTitle,
-                                                paydayType === opt.value && { color: '#d97757', fontWeight: '700' }
-                                            ]}>{opt.label}</Text>
-                                            {paydayType === opt.value && <View style={styles.checkCircle}><View style={styles.checkInner} /></View>}
-                                        </View>
-                                    </View>
+                                    <Text style={[styles.itemTitle, paydayType === opt.value && { color: '#d97757' }]}>
+                                        {opt.label}
+                                    </Text>
+                                    {paydayType === opt.value && <View style={styles.checkCircle}><View style={styles.checkInner} /></View>}
+                                    {index < arr.length - 1 && <View style={styles.itemSeparator} />}
                                 </TouchableOpacity>
-                                {index < arr.length - 1 && <View style={styles.itemSeparator} />}
                             </View>
                         ))}
                     </View>
@@ -771,24 +733,17 @@ export default function FinancialSettingsScreen() {
 
                             <View style={styles.sectionCard}>
                                 <View style={styles.itemContainer}>
-                                    <View style={styles.itemIconContainer}>
-                                        <Calendar size={20} color="#E0E0E0" />
-                                    </View>
-                                    <View style={styles.itemRightContainer}>
-                                        <View style={styles.itemContent}>
-                                            <Text style={styles.itemTitle}>Dia do Mês</Text>
-                                            <TextInput
-                                                style={styles.inputRight}
-                                                value={paydayDate}
-                                                onChangeText={setPaydayDate}
-                                                placeholder="1-31"
-                                                placeholderTextColor="#555"
-                                                keyboardType="numeric"
-                                                maxLength={2}
-                                                textAlign="right"
-                                            />
-                                        </View>
-                                    </View>
+                                    <Text style={styles.itemTitle}>Dia do Mês</Text>
+                                    <TextInput
+                                        style={styles.inputRight}
+                                        value={paydayDate}
+                                        onChangeText={setPaydayDate}
+                                        placeholder="1-31"
+                                        placeholderTextColor="#444"
+                                        keyboardType="numeric"
+                                        maxLength={2}
+                                        textAlign="right"
+                                    />
                                 </View>
                             </View>
 
@@ -812,12 +767,44 @@ export default function FinancialSettingsScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0C0C0C' },
     // Header
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
+    headerWrapper: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        height: 52,
+        paddingHorizontal: 20,
+    },
     backButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start' },
-    headerTitle: { fontSize: 20, fontWeight: '600', color: '#E0E0E0' },
-    headerSaveButton: { padding: 8 },
-    headerSaveText: { color: '#d97757', fontWeight: '600', fontSize: 16 },
-    scrollContent: { paddingBottom: 40, paddingHorizontal: 20 },
+    headerTitle: { flex: 1, fontSize: 18, fontWeight: '600', color: '#E8E8EA', textAlign: 'center' },
+    headerSpacer: { width: 40, height: 40 },
+    scrollContent: { paddingHorizontal: 20 },
+    saveContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        backgroundColor: 'rgba(12,12,12,0.85)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.08)',
+    },
+    saveButton: {
+        backgroundColor: '#d97757',
+        borderRadius: 12,
+        height: 50,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    saveButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
 
     // Check Circle
     checkCircle: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#d97757', justifyContent: 'center', alignItems: 'center' },
@@ -825,28 +812,28 @@ const styles = StyleSheet.create({
 
     // Section
     sectionHeader: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#8E8E93',
-        marginTop: 24,
+        fontSize: 11,
+        fontWeight: '500',
+        color: '#555',
+        marginTop: 28,
         marginBottom: 8,
-        marginLeft: 4,
-        letterSpacing: 0.5,
+        marginLeft: 2,
+        letterSpacing: 0.6,
         textTransform: 'uppercase',
     },
     sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+        backgroundColor: '#111111',
+        borderRadius: 12,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
         overflow: 'hidden',
     },
     sectionFooterText: {
         fontSize: 12,
-        color: '#666',
-        marginTop: 8,
-        marginLeft: 16,
-        lineHeight: 16
+        color: '#444',
+        marginTop: 6,
+        marginLeft: 2,
+        lineHeight: 16,
     },
     cardPadding: { padding: 16 },
 
@@ -854,71 +841,74 @@ const styles = StyleSheet.create({
     itemContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        position: 'relative',
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    itemRightContainer: {
-        flex: 1,
-    },
-    itemContent: {
-        flex: 1,
-        flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        minHeight: 52,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        backgroundColor: '#111111',
+        position: 'relative',
+    },
+    itemLeft: {
+        flex: 1,
+        paddingRight: 12,
     },
     itemSeparator: {
         position: 'absolute',
         bottom: 0,
-        left: 0,
+        left: 16,
         right: 0,
-        height: 1,
-        backgroundColor: '#2A2A2A',
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#1A1A1A',
     },
     itemTitle: {
         fontSize: 16,
-        color: '#FFFFFF',
-        fontWeight: '500',
+        color: '#E8E8EA',
+        fontWeight: '400',
     },
     itemSubtitle: {
         fontSize: 12,
-        color: '#909090',
+        color: '#555',
         marginTop: 2,
     },
     valueText: {
-        fontSize: 16,
+        fontSize: 15,
         color: '#8E8E93',
-        marginRight: 8
+        marginRight: 4,
     },
     inputRight: {
-        fontSize: 16,
-        color: '#FFFFFF',
+        fontSize: 15,
+        color: '#8E8E93',
         textAlign: 'right',
         minWidth: 100,
-        padding: 0
+        padding: 0,
+        flex: 1,
     },
 
-    inlinePadding: { padding: 16, paddingBottom: 0 },
+    inlinePadding: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
 
     // Summary
-    summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-    summaryLabel: { color: '#888', fontSize: 14 },
-    summaryValuePositive: { color: '#22c55e', fontSize: 14, fontWeight: '600' },
-    summaryValueNegative: { color: '#ef4444', fontSize: 14, fontWeight: '600' },
-    summaryDivider: { height: 1, backgroundColor: '#333', marginVertical: 12 },
-    totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    totalLabel: { color: '#fff', fontSize: 16, fontWeight: '600' },
-    totalValue: { color: '#d97757', fontSize: 20, fontWeight: 'bold' },
+    summaryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 13,
+        position: 'relative',
+    },
+    summaryLabel: { color: '#666', fontSize: 14 },
+    summaryValue: { color: '#888', fontSize: 14 },
+    totalRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        marginTop: 2,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#1A1A1A',
+    },
+    totalLabel: { color: '#E8E8EA', fontSize: 15 },
+    totalValue: { color: '#d97757', fontSize: 18, fontWeight: '600' },
 
     modalSubtitle: {
         fontSize: 14,

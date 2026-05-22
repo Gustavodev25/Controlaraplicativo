@@ -12,6 +12,7 @@
  */
 
 const { spawn, execSync } = require('child_process');
+const WebSocket = require('ws');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
 const fs = require('fs');
@@ -80,6 +81,53 @@ function log(tag, color, msg) {
     console.log(`${color}[${tag}]${colors.reset} ${msg}`);
 }
 
+function serializeMetroMessage(message) {
+    return JSON.stringify({
+        ...message,
+        version: 2,
+    });
+}
+
+function sendMetroCommand(method, params) {
+    return new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${METRO_PORT}/message`, {
+            handshakeTimeout: 1500,
+        });
+        let settled = false;
+
+        const timeout = setTimeout(() => {
+            settled = true;
+            ws.terminate();
+            reject(new Error('Metro nao respondeu ao comando.'));
+        }, 2500);
+
+        const finish = (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                try { ws.close(); } catch {}
+            }
+            err ? reject(err) : resolve();
+        };
+
+        ws.once('open', () => {
+            ws.send(serializeMetroMessage({ method, params }), finish);
+        });
+
+        ws.once('error', (err) => {
+            finish(err);
+        });
+    });
+}
+
+function reloadApp() {
+    log('expo', colors.green, 'Recarregando aplicativo...');
+    sendMetroCommand('reload').catch((err) => {
+        log('expo', colors.yellow, `Nao foi possivel enviar reload: ${err.message}`);
+    });
+}
+
 function startTunnel(port, tag) {
     return new Promise((resolve, reject) => {
         log(tag, colors.cyan, `Criando tunnel cloudflare na porta ${port}...`);
@@ -142,6 +190,7 @@ function showQRCode(tunnelUrl) {
     console.log(`${colors.cyan}  URL Expo Go: ${colors.bold}${expoUrl}${colors.reset}`);
     console.log(`${colors.cyan}  Tunnel URL:  ${colors.bold}${tunnelUrl}${colors.reset}`);
     console.log(`${colors.dim}  (Ou digite a URL manualmente no Expo Go)${colors.reset}`);
+    console.log(`${colors.dim}  Atalhos: pressione R para recarregar, Q para sair.${colors.reset}`);
     console.log('');
     console.log(`${colors.green}  ══════════════════════════════════════════════${colors.reset}`);
     console.log(`${colors.blue}  📦 Metro:    http://localhost:${METRO_PORT}${colors.reset}`);
@@ -199,6 +248,7 @@ async function main() {
             env: {
                 ...process.env,
                 EXPO_PACKAGER_PROXY_URL: metroTunnel.url,
+                CONTROLAR_KEEP_PACKAGER_PROXY: '1',
             },
         });
         processes.push(expoProc);
@@ -239,9 +289,15 @@ async function main() {
                 cleanup(processes, metroTunnel);
                 return;
             }
+            const input = key.toString().trim().toLowerCase();
+
             // 'q' para sair
-            if (key.toString() === 'q') {
+            if (input === 'q') {
                 cleanup(processes, metroTunnel);
+                return;
+            }
+            if (input === 'r') {
+                reloadApp();
                 return;
             }
             expoProc.stdin.write(key);

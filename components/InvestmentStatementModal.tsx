@@ -1,9 +1,10 @@
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
-import { ArrowDownCircle, ArrowUpCircle } from 'lucide-react-native';
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Search, X as XIcon } from 'lucide-react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 interface Transaction {
     id: string;
@@ -32,6 +33,7 @@ export function InvestmentStatementModal({
     const { user } = useAuthContext();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
     const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
     const loadTransactions = useCallback(async () => {
@@ -50,20 +52,38 @@ export function InvestmentStatementModal({
         if (visible && user && investmentId) {
             loadTransactions();
         }
+        if (!visible) {
+            setSearchQuery('');
+        }
     }, [visible, user, investmentId, loadTransactions]);
+
+    const filteredTransactions = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase();
+        if (!query) return transactions;
+        const normalizedQuery = query.replace(/[.,\s]/g, '');
+        return transactions.filter((item) => {
+            const haystack = [
+                item.description,
+                item.category,
+                item.source,
+                item.type,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+            if (haystack.includes(query)) return true;
+            const amountStr = String(Math.abs(Number(item.amount || 0))).replace('.', '');
+            return amountStr.includes(normalizedQuery);
+        });
+    }, [transactions, searchQuery]);
 
     const getNormalizedType = (item: Transaction): 'deposit' | 'withdraw' => {
         const normalized = String(item.type || '').trim().toLowerCase();
         const depositTokens = ['deposit', 'deposito', 'aplicacao', 'aporte', 'entrada', 'income', 'credit', 'credito', 'guardar'];
         const withdrawTokens = ['withdraw', 'withdrawal', 'resgate', 'retirada', 'saque', 'saida', 'expense', 'debit', 'debito'];
 
-        if (depositTokens.some(token => normalized.includes(token))) {
-            return 'deposit';
-        }
-        if (withdrawTokens.some(token => normalized.includes(token))) {
-            return 'withdraw';
-        }
-
+        if (depositTokens.some(token => normalized.includes(token))) return 'deposit';
+        if (withdrawTokens.some(token => normalized.includes(token))) return 'withdraw';
         return Number(item.amount || 0) >= 0 ? 'deposit' : 'withdraw';
     };
 
@@ -86,9 +106,7 @@ export function InvestmentStatementModal({
             return '-';
         }
 
-        if (isNaN(date.getTime())) {
-            return '-';
-        }
+        if (isNaN(date.getTime())) return '-';
 
         return date.toLocaleDateString('pt-BR', {
             day: '2-digit',
@@ -103,30 +121,24 @@ export function InvestmentStatementModal({
         const normalizedType = getNormalizedType(item);
         const isDeposit = normalizedType === 'deposit';
         const color = isDeposit ? '#04D361' : '#FF453A';
-        const Icon = isDeposit ? ArrowUpCircle : ArrowDownCircle;
-        const title = item.description || item.category || (isDeposit ? 'Aplicacao' : 'Resgate');
+        const title = item.description || item.category || (isDeposit ? 'Aplicação' : 'Resgate');
         const dateLabel = formatDate(item.date || '', item.createdAt);
         const sourceLabel = item.source ? String(item.source).trim() : '';
         const subtitle = sourceLabel ? `${dateLabel} - ${sourceLabel}` : dateLabel;
         const amount = Math.abs(Number(item.amount || 0));
 
         return (
-            <View key={`${item.id}_${index}`} style={styles.itemContainer}>
-                <View style={[styles.itemIconContainer, { backgroundColor: isDeposit ? 'rgba(4, 211, 97, 0.1)' : 'rgba(255, 69, 58, 0.1)' }]}>
-                    <Icon size={20} color={color} />
-                </View>
-                <View style={styles.itemRightContainer}>
-                    <View style={styles.itemContent}>
-                        <View style={{ flex: 1, marginRight: 8 }}>
-                            <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
-                            <Text style={styles.itemSubtitle}>{subtitle}</Text>
-                        </View>
-                        <Text style={[styles.itemAmount, { color }]}>
-                            {isDeposit ? '+' : '-'} {currencyFormatter.format(amount)}
-                        </Text>
+            <View key={`${item.id}_${index}`}>
+                <View style={styles.itemContent}>
+                    <View style={{ flex: 1, marginRight: 12 }}>
+                        <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
+                        <Text style={styles.itemSubtitle}>{subtitle}</Text>
                     </View>
+                    <Text style={[styles.itemAmount, { color }]}>
+                        {isDeposit ? '+' : '-'} {currencyFormatter.format(amount)}
+                    </Text>
                 </View>
-                {!isLast && <View style={styles.itemSeparator} />}
+                {!isLast && <View style={styles.separator} />}
             </View>
         );
     };
@@ -158,24 +170,47 @@ export function InvestmentStatementModal({
             visible={visible}
             onClose={onClose}
             title={titleComponent}
+            titleAlign="start"
         >
             <View style={styles.container}>
                 {loading ? (
-                    <View style={styles.centerContainer}>
-                        <ActivityIndicator size="large" color="#D97757" />
-                    </View>
+                    <IosCoreLoader style={styles.centerContainer} />
                 ) : transactions.length > 0 ? (
-                    <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: Dimensions.get('window').height * 0.6 }}>
-                        <View style={styles.sectionCard}>
-                            {transactions.map((item, index) =>
-                                renderTransaction(item, index, index === transactions.length - 1)
+                    <>
+                        <View style={styles.searchContainer}>
+                            <Search size={16} color="#8E8E93" style={{ marginRight: 8 }} />
+                            <TextInput
+                                style={styles.searchInput}
+                                placeholder="Pesquisar por descrição ou valor..."
+                                placeholderTextColor="#8E8E93"
+                                value={searchQuery}
+                                onChangeText={setSearchQuery}
+                            />
+                            {searchQuery.length > 0 && (
+                                <Pressable onPress={() => setSearchQuery('')} hitSlop={10}>
+                                    <XIcon size={16} color="#8E8E93" />
+                                </Pressable>
                             )}
                         </View>
-                    </ScrollView>
+                        {filteredTransactions.length > 0 ? (
+                            <ScrollView showsVerticalScrollIndicator={false}>
+                                <View style={styles.groupCard}>
+                                    {filteredTransactions.map((item, index) =>
+                                        renderTransaction(item, index, index === filteredTransactions.length - 1)
+                                    )}
+                                </View>
+                            </ScrollView>
+                        ) : (
+                            <View style={styles.centerContainer}>
+                                <Text style={styles.emptyTitle}>Nada encontrado</Text>
+                                <Text style={styles.emptyText}>Tente ajustar a pesquisa.</Text>
+                            </View>
+                        )}
+                    </>
                 ) : (
                     <View style={styles.centerContainer}>
-                        <Text style={styles.emptyTitle}>Nenhuma movimentacao</Text>
-                        <Text style={styles.emptyText}>As movimentacoes aparecerao aqui.</Text>
+                        <Text style={styles.emptyTitle}>Nenhuma movimentação</Text>
+                        <Text style={styles.emptyText}>As movimentações aparecerão aqui.</Text>
                     </View>
                 )}
             </View>
@@ -184,8 +219,23 @@ export function InvestmentStatementModal({
 }
 
 const styles = StyleSheet.create({
-    container: {
-        minHeight: 200,
+    container: {},
+    searchContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#101010',
+        marginBottom: 12,
+        paddingHorizontal: 12,
+        height: 44,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#252525',
+    },
+    searchInput: {
+        flex: 1,
+        color: '#FFF',
+        fontSize: 15,
+        padding: 0,
     },
     centerContainer: {
         flex: 1,
@@ -194,58 +244,37 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 20,
     },
-    sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+    groupCard: {
+        backgroundColor: '#1C1C1E',
+        borderRadius: 12,
         overflow: 'hidden',
-    },
-    itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        position: 'relative',
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    itemRightContainer: {
-        flex: 1,
     },
     itemContent: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        minHeight: 48,
     },
     itemTitle: {
-        fontSize: 15,
+        fontSize: 17,
         color: '#FFFFFF',
-        fontWeight: '500',
+        fontWeight: '400',
     },
     itemSubtitle: {
         fontSize: 12,
-        color: '#707070',
-        marginTop: 2,
+        color: '#8E8E93',
+        marginTop: 1,
     },
     itemAmount: {
         fontSize: 15,
         fontWeight: '600',
     },
-    itemSeparator: {
-        position: 'absolute',
-        bottom: 0,
-        left: 64,
-        right: 16,
-        height: 1,
-        backgroundColor: '#2A2A2A',
+    separator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#38383A',
+        marginLeft: 16,
     },
     emptyTitle: {
         fontSize: 18,
@@ -254,7 +283,7 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     emptyText: {
-        color: '#707070',
+        color: '#8E8E93',
         fontSize: 14,
         textAlign: 'center',
     },

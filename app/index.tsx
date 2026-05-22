@@ -1,11 +1,12 @@
 import { UniversalBackground } from '@/components/UniversalBackground';
+import { ThemedText } from '@/components/themed-text';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useBiometricAuth } from '@/hooks/use-biometric-auth';
 
 import { useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, LogBox, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Image, LogBox, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 // Ignore specific warnings related to Expo Go limitations
 LogBox.ignoreLogs([
@@ -143,6 +144,15 @@ export default function Index() {
             >
                 <View style={styles.centeredContainer}>
                     <View style={styles.unlockContainer}>
+                        <View style={styles.logoContainerSplash}>
+                            <Image
+                                source={require('@/assets/images/icon.png')}
+                                style={styles.logoSplash}
+                                resizeMode="contain"
+                            />
+                            <ThemedText type="title" style={styles.titleSplash}>Controlar</ThemedText>
+                            <ThemedText style={styles.subtitleSplash}>Gerencie suas finanças com simplicidade e elegância.</ThemedText>
+                        </View>
                         <View style={[styles.iconContainer, { width: LOTTIE_VIEW_SIZE, height: LOTTIE_VIEW_SIZE }]}>
                             {/* Loader - some com rotação e escala */}
                             <Animated.View style={{
@@ -153,7 +163,7 @@ export default function Index() {
                                     { rotate: loaderRotate },
                                 ],
                             }}>
-                                <ActivityIndicator size="large" color="#d97757" style={{ transform: [{ scale: 1.5 }] }} />
+                                <ActivityIndicator size="large" color="#F5F5F7" style={{ transform: [{ scale: 1.5 }] }} />
                             </Animated.View>
 
                             {/* Success Lottie - mesmo tamanho, aparece com escala */}
@@ -176,25 +186,26 @@ export default function Index() {
                         {(!isBiometricAuth && !isAnimComplete) && (
                             <View style={{ alignItems: 'center', marginTop: 16, width: '100%' }}>
                                 {error && (
-                                    <Text style={{ color: '#FF4C4C', marginBottom: 16, fontFamily: 'AROneSans_500Medium', textAlign: 'center' }}>
+                                    <Text style={{ color: '#FF4C4C', marginBottom: 16, fontFamily: 'AROneSans_400Regular', textAlign: 'center' }}>
                                         {error}
                                     </Text>
                                 )}
                                 <TouchableOpacity
                                     onPress={() => authenticate()}
                                     style={{
-                                        paddingVertical: 12,
-                                        paddingHorizontal: 24,
+                                        height: 52,
+                                        paddingHorizontal: 32,
                                         backgroundColor: 'rgba(217, 119, 87, 0.15)',
-                                        borderRadius: 30,
+                                        borderRadius: 14,
                                         borderWidth: 1,
                                         borderColor: 'rgba(217, 119, 87, 0.3)',
                                         width: '100%',
-                                        maxWidth: 200,
-                                        alignItems: 'center'
+                                        maxWidth: 220,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
                                     }}
                                 >
-                                    <Text style={{ color: '#d97757', fontWeight: '600', fontSize: 16 }}>
+                                    <Text style={{ color: '#d97757', fontFamily: 'AROneSans_400Regular', fontSize: 16, letterSpacing: -0.2 }}>
                                         {error ? 'Tentar novamente' : 'Desbloquear'}
                                     </Text>
                                 </TouchableOpacity>
@@ -214,7 +225,7 @@ export default function Index() {
             particleCount={15}
         >
             <View style={styles.centeredContainer}>
-                <ActivityIndicator size="large" color="#d97757" style={{ transform: [{ scale: 1.5 }] }} />
+                <ActivityIndicator size="large" color="#F5F5F7" style={{ transform: [{ scale: 1.5 }] }} />
             </View>
         </UniversalBackground>
     );
@@ -233,9 +244,36 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     unlockContainer: {
-        alignItems: 'center',
-        padding: 24,
+        alignItems: 'flex-start',
+        paddingHorizontal: 40,
         width: '100%',
+    },
+    logoContainerSplash: {
+        marginBottom: 24,
+        alignItems: 'flex-start',
+    },
+    logoSplash: {
+        width: 56,
+        height: 56,
+        borderRadius: 14,
+        marginBottom: 20,
+    },
+    titleSplash: {
+        fontSize: 32,
+        color: '#faf9f5',
+        fontFamily: 'AROneSans_400Regular',
+        marginBottom: 10,
+        letterSpacing: -1,
+        textAlign: 'left',
+    },
+    subtitleSplash: {
+        fontSize: 16,
+        color: '#9ca3af',
+        marginBottom: 40,
+        fontWeight: '400',
+        textAlign: 'left',
+        lineHeight: 24,
+        paddingRight: 20,
     },
     iconContainer: {
         marginBottom: 24,
@@ -244,7 +282,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: 'AROneSans_400Regular',
         color: '#E1E1E0',
         marginBottom: 8,
     },
@@ -267,7 +305,7 @@ const styles = StyleSheet.create({
     buttonText: {
         color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
     },
     secondaryButton: {
         paddingVertical: 12,
@@ -279,6 +317,6 @@ const styles = StyleSheet.create({
     secondaryButtonText: {
         color: '#A0A090',
         fontSize: 14,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
     },
 });

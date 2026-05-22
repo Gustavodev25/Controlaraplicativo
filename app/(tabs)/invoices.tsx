@@ -5,6 +5,7 @@
 
 import { CreditCardInvoice } from '@/components/CreditCardInvoice';
 import { UniversalBackground } from '@/components/UniversalBackground';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { db } from '@/services/firebase';
 import { CreditCardAccount, normalizePluggyDate, Transaction } from '@/services/invoiceBuilder';
@@ -21,12 +22,10 @@ import {
     startAfter,
     where
 } from 'firebase/firestore';
-import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     InteractionManager,
     StyleSheet,
-    Text,
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -96,7 +95,6 @@ export default function InvoicesScreen() {
     const [creditCards, setCreditCards] = useState<CreditCardAccount[]>([]);
     const [hasMoreHistory, setHasMoreHistory] = useState(false);
     const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
-    const [loadingDots, setLoadingDots] = useState('');
 
     const transactionsRef = useRef<Transaction[]>([]);
     const knownTransactionIdsRef = useRef<Set<string>>(new Set());
@@ -130,17 +128,6 @@ export default function InvoicesScreen() {
             return merged;
         });
     }, []);
-
-    useEffect(() => {
-        if (!loading) return;
-        const interval = setInterval(() => {
-            setLoadingDots(prev => {
-                if (prev === '...') return '';
-                return prev + '.';
-            });
-        }, 500);
-        return () => clearInterval(interval);
-    }, [loading]);
 
     const updateHistoryState = useCallback((nextCursor: QueryDocumentSnapshot<DocumentData> | null, hasMore: boolean) => {
         historyCursorRef.current = nextCursor;
@@ -422,18 +409,10 @@ export default function InvoicesScreen() {
                 particleCount={8}
             />
 
-            <View style={[styles.container, { paddingTop: insets.top + 20 }]}>
+            <View style={[styles.container, { paddingTop: Math.max(insets.top, 60) }]}>
                 <View style={styles.content}>
                     {loading ? (
-                        <View style={styles.loadingContainer}>
-                            <LottieView
-                                source={require('@/assets/carregando.json')}
-                                autoPlay
-                                loop
-                                style={{ width: 50, height: 50 }}
-                            />
-                            <Text style={styles.loadingText}>Carregando dados da fatura{loadingDots}</Text>
-                        </View>
+                        <IosCoreLoader />
                     ) : (
                         <CreditCardInvoice
                             transactions={transactions}
@@ -481,15 +460,5 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 12,
-    },
-    loadingText: {
-        color: '#888',
-        fontSize: 14,
     },
 });

@@ -6,8 +6,8 @@ import { FilterState } from '@/components/CreditCardFilterModal';
 import { RefundModal } from '@/components/RefundModal';
 import { SwipeTutorial } from '@/components/SwipeTutorial';
 import { TransactionOptionsModal } from '@/components/TransactionOptionsModal';
+import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
 import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
-import { DeleteConfirmationModal } from '@/components/ui/DeleteConfirmationModal';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { useStackCardStyle } from '@/components/ui/StackCarousel';
 import { DEFAULT_CATEGORIES } from '@/constants/defaultCategories';
@@ -31,42 +31,16 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient'; // Added
 import { doc, onSnapshot } from 'firebase/firestore';
 import {
-    ArrowRightLeft,
-    Baby,
-    BookOpen,
-    Car,
-    Cat,
     Check,
-    Clapperboard,
-    Coffee,
-    DollarSign,
-    Dumbbell,
-    Fuel,
-    Gamepad2,
-    Gift,
-    GraduationCap,
-    Heart,
-    Home,
-    Landmark,
-    Music,
-    Plane,
     RotateCcw,
     Search,
-    Settings,
-    Shirt,
-    ShoppingBag,
-    ShoppingCart,
-    Smartphone,
-    Stethoscope,
     Trash2,
-    Utensils,
-    Wifi,
-    Zap
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Dimensions,
+    Image,
     InteractionManager,
     LayoutAnimation,
     Platform,
@@ -91,8 +65,7 @@ import Animated, {
     type SharedValue,
     useAnimatedStyle,
     useSharedValue,
-    withSpring,
-    withTiming
+    withSpring
 } from 'react-native-reanimated';
 
 
@@ -139,18 +112,18 @@ const NeedsConfigurationState = ({ onOpenSettings }: NeedsConfigurationStateProp
                 Para visualizar seus gastos organizados por mês, informe a data de fechamento do cartão.
             </Text>
 
-            <TouchableOpacity
+            <IOSTouchable
                 style={styles.configNeededButton}
                 onPress={onOpenSettings}
-                activeOpacity={0.8}
+                activeOpacity={1}
             >
                 <Text style={styles.configNeededButtonText}>Configurar agora</Text>
-            </TouchableOpacity>
+            </IOSTouchable>
         </View>
     );
 };
 
-type InvoiceTab = 'all' | 'last' | 'current' | `future_${number}`;
+type InvoiceTab = 'all' | 'last' | 'current';
 
 interface CarouselItemData {
     key: string;
@@ -170,14 +143,121 @@ interface CarouselItemData {
 const CARD_WIDTH = SCREEN_WIDTH - 40;
 const SWIPE_THRESHOLD = 100;
 const VELOCITY_THRESHOLD = 500;
+const CURRENT_INVOICE_CARD_INDEX = 2;
 
 const SPRING_CONFIG = {
-    damping: 15,
-    stiffness: 120,
-    mass: 0.8,
+    damping: 20,
+    stiffness: 230,
+    mass: 0.78,
     overshootClamping: false,
-    restDisplacementThreshold: 0.01,
-    restSpeedThreshold: 0.01,
+    restDisplacementThreshold: 0.001,
+    restSpeedThreshold: 0.001,
+};
+
+const IOS_CORE_LAYOUT = LinearTransition
+    .springify()
+    .damping(21)
+    .stiffness(245)
+    .mass(0.72)
+    .overshootClamping(0);
+
+const IOS_FADE_IN = FadeIn.duration(220);
+const IOS_FADE_OUT = FadeOut.duration(140);
+
+const MORPH_PRESS_SPRING = {
+    damping: 16,
+    stiffness: 250,
+    mass: 0.42,
+} as const;
+
+const MORPH_SHAPE_SPRING = {
+    damping: 13,
+    stiffness: 190,
+    mass: 0.48,
+} as const;
+
+const MORPH_RELEASE_PRESS_SPRING = {
+    damping: 15,
+    stiffness: 215,
+    mass: 0.45,
+} as const;
+
+const MORPH_RELEASE_SHAPE_SPRING = {
+    damping: 11,
+    stiffness: 145,
+    mass: 0.52,
+} as const;
+
+const triggerIOSCoreMorph = () => {
+    LayoutAnimation.configureNext({
+        duration: 420,
+        create: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+            property: LayoutAnimation.Properties.opacity,
+        },
+        update: {
+            type: LayoutAnimation.Types.spring,
+            springDamping: 0.76,
+        },
+        delete: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+            property: LayoutAnimation.Properties.opacity,
+        },
+    });
+};
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+const IOSTouchable = ({
+    children,
+    style,
+    disabled,
+    activeOpacity = 1,
+    onPressIn,
+    onPressOut,
+    ...props
+}: any) => {
+    const press = useSharedValue(0);
+    const morph = useSharedValue(0);
+
+    const pressStyle = useAnimatedStyle(() => {
+        const pressed = press.value;
+        const morphed = morph.value;
+
+        return {
+            transform: [
+                { translateY: pressed * 1.4 },
+                { scaleX: 1 + morphed * 0.012 - pressed * 0.012 },
+                { scaleY: 1 + morphed * 0.016 + pressed * 0.008 },
+            ],
+        };
+    });
+
+    return (
+        <AnimatedTouchableOpacity
+            {...props}
+            disabled={disabled}
+            activeOpacity={activeOpacity}
+            onPressIn={(event: any) => {
+                press.value = withSpring(1, MORPH_PRESS_SPRING);
+                morph.value = withSpring(1, MORPH_SHAPE_SPRING);
+                onPressIn?.(event);
+            }}
+            onPressOut={(event: any) => {
+                press.value = withSpring(0, MORPH_RELEASE_PRESS_SPRING);
+                morph.value = withSpring(0, MORPH_RELEASE_SHAPE_SPRING);
+                onPressOut?.(event);
+            }}
+            onTouchCancel={(event: any) => {
+                press.value = withSpring(0, MORPH_RELEASE_PRESS_SPRING);
+                morph.value = withSpring(0, MORPH_RELEASE_SHAPE_SPRING);
+                props.onTouchCancel?.(event);
+            }}
+            style={[style, pressStyle]}
+        >
+            {children}
+        </AnimatedTouchableOpacity>
+    );
 };
 
 const INVOICE_COMPUTE_WINDOW_MONTHS = 24;
@@ -185,6 +265,7 @@ const MAX_INVOICE_COMPUTE_ITEMS = 2000;
 const INVOICE_BUILD_DEBOUNCE_MS = 80;
 
 const toIsoDateValue = (date: Date): string => {
+    if (!date || isNaN(date.getTime())) return '';
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -202,6 +283,30 @@ const parseIsoDateValue = (rawDate?: string | null): Date | null => {
 const normalizeIsoDateValue = (rawDate?: string | null): string | null => {
     const parsed = parseIsoDateValue(rawDate);
     return parsed ? toIsoDateValue(parsed) : null;
+};
+
+const coerceInvoiceDate = (value?: Date | string | null, fallback?: Date): Date => {
+    if (value instanceof Date && !isNaN(value.getTime())) {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        const parsed = parseIsoDateValue(value);
+        if (parsed) return parsed;
+    }
+
+    return fallback && !isNaN(fallback.getTime()) ? fallback : new Date(NaN);
+};
+
+const formatInvoiceRange = (
+    start?: Date | string | null,
+    close?: Date | string | null,
+    fallbackStart?: Date,
+    fallbackClose?: Date
+): string => {
+    const startDate = coerceInvoiceDate(start, fallbackStart);
+    const closeDate = coerceInvoiceDate(close, fallbackClose);
+    return `${formatDateShort(startDate)} - ${formatDateShort(closeDate)}`;
 };
 
 const shiftIsoDateByMonths = (isoDate: string, deltaMonths: number, preferredDay?: number): string | null => {
@@ -351,8 +456,8 @@ const StackCard = React.memo(({
 
     return (
         <Animated.View style={[styles.stackCardWrapper, animatedStyle, { position: 'absolute' }]}>
-            <TouchableOpacity
-                activeOpacity={0.9}
+            <IOSTouchable
+                activeOpacity={1}
                 onPress={() => onPressCard(index)}
                 style={styles.invoiceCard}
             >
@@ -371,9 +476,9 @@ const StackCard = React.memo(({
                             </View>
                         </View>
                         {item.status !== 'all' && (
-                            <View style={[styles.statusBadge, { backgroundColor: item.status === 'CLOSED' ? '#F75555' : item.status === 'PAID' ? '#04D361' : '#EAB308' }]}>
+                            <View style={[styles.statusBadge, { backgroundColor: item.status === 'OVERDUE' ? '#F97316' : item.status === 'CLOSED' ? '#F75555' : item.status === 'PAID' ? '#04D361' : '#EAB308' }]}>
                                 <Text style={[styles.statusBadgeText, { color: '#000' }]}>
-                                    {item.status === 'CLOSED' ? 'FECHADA' : item.status === 'PAID' ? 'PAGA' : 'ABERTA'}
+                                    {item.status === 'OVERDUE' ? 'ATRASADA' : item.status === 'CLOSED' ? 'FECHADA' : item.status === 'PAID' ? 'PAGA' : 'ABERTA'}
                                 </Text>
                             </View>
                         )}
@@ -386,7 +491,7 @@ const StackCard = React.memo(({
                         <Text style={styles.carouselDate}>{item.dateRange}</Text>
                     </View>
                 </View>
-            </TouchableOpacity>
+            </IOSTouchable>
 
             {showFutureBadge && (
                 <Animated.View style={[styles.futureTotalBadge, futureBadgeAnimatedStyle]}>
@@ -412,8 +517,8 @@ const InvoiceCarousel = React.memo(({
     historyTotal: number;
     selectedCard: CreditCardAccount | null;
 }) => {
-    const [currentIndex, setCurrentIndex] = useState(2); // Come├ºa em "Fatura Atual"
-    const animatedIndex = useSharedValue(2);
+    const [currentIndex, setCurrentIndex] = useState(CURRENT_INVOICE_CARD_INDEX); // Começa em "Fatura Atual"
+    const animatedIndex = useSharedValue(CURRENT_INVOICE_CARD_INDEX);
     const translateX = useSharedValue(0);
     const [showTutorial, setShowTutorial] = useState(false);
 
@@ -507,8 +612,16 @@ const InvoiceCarousel = React.memo(({
                 // Soma o valor absoluto de todos os items (exceto pagamentos)
                 // Soma os valores reais (despesas aumentam, estornos diminuem)
                 amount: Math.abs(invoiceData.closedInvoice.total || 0),
-                dateRange: `${formatDateShort(invoiceData.periods.lastInvoiceStart)} - ${formatDateShort(invoiceData.periods.lastClosingDate)}`,
-                dueInfo: formatDueInfo(invoiceData.periods.lastClosingDate, invoiceData.periods.lastDueDate),
+                dateRange: formatInvoiceRange(
+                    invoiceData.closedInvoice.startDate,
+                    invoiceData.closedInvoice.closingDate,
+                    invoiceData.periods.lastInvoiceStart,
+                    invoiceData.periods.lastClosingDate
+                ),
+                dueInfo: formatDueInfo(
+                    coerceInvoiceDate(invoiceData.closedInvoice.closingDate, invoiceData.periods.lastClosingDate),
+                    coerceInvoiceDate(invoiceData.closedInvoice.dueDate, invoiceData.periods.lastDueDate)
+                ),
                 status: invoiceData.closedInvoice.status,
                 tabId: 'last',
                 itemCount: invoiceData.closedInvoice.items.length
@@ -520,9 +633,17 @@ const InvoiceCarousel = React.memo(({
                 // Soma o valor absoluto de todos os items (exceto pagamentos)
                 // Soma os valores reais (despesas aumentam, estornos diminuem)
                 amount: Math.abs(invoiceData.currentInvoice.total || 0),
-                dateRange: `${formatDateShort(invoiceData.periods.currentInvoiceStart)} - ${formatDateShort(invoiceData.periods.currentClosingDate)}`,
-                dueInfo: formatDueInfo(invoiceData.periods.currentClosingDate, invoiceData.periods.currentDueDate),
-                status: 'OPEN',
+                dateRange: formatInvoiceRange(
+                    invoiceData.currentInvoice.startDate,
+                    invoiceData.currentInvoice.closingDate,
+                    invoiceData.periods.currentInvoiceStart,
+                    invoiceData.periods.currentClosingDate
+                ),
+                dueInfo: formatDueInfo(
+                    coerceInvoiceDate(invoiceData.currentInvoice.closingDate, invoiceData.periods.currentClosingDate),
+                    coerceInvoiceDate(invoiceData.currentInvoice.dueDate, invoiceData.periods.currentDueDate)
+                ),
+                status: invoiceData.currentInvoice.status,
                 tabId: 'current',
                 itemCount: invoiceData.currentInvoice.items.length
             }
@@ -533,6 +654,7 @@ const InvoiceCarousel = React.memo(({
 
     const goToCard = useCallback((index: number, emit = true) => {
         if (index >= 0 && index < data.length && index !== currentIndex) {
+            triggerIOSCoreMorph();
             animatedIndex.value = withSpring(index, SPRING_CONFIG);
             setCurrentIndex(index);
             if (emit && data[index]) {
@@ -586,7 +708,7 @@ const InvoiceCarousel = React.memo(({
         });
 
     return (
-        <View style={styles.carouselContainer}>
+        <Animated.View entering={IOS_FADE_IN} layout={IOS_CORE_LAYOUT} style={styles.carouselContainer}>
             <View style={styles.stackContainer}>
                 <GestureDetector gesture={panGesture}>
                     <Animated.View style={styles.gestureContainer}>
@@ -612,20 +734,21 @@ const InvoiceCarousel = React.memo(({
 
                 <View style={styles.paginationOverlay}>
                     {data.map((item, index) => (
-                        <TouchableOpacity
+                        <IOSTouchable
                             key={item.key}
                             onPress={() => goToCard(index)}
                             style={styles.dotTouchable}
+                            activeOpacity={1}
                         >
                             <View style={[
                                 styles.paginationDot,
                                 index === currentIndex && styles.paginationDotActive
                             ]} />
-                        </TouchableOpacity>
+                        </IOSTouchable>
                     ))}
                 </View>
             </View>
-        </View>
+        </Animated.View>
     );
 });
 InvoiceCarousel.displayName = 'InvoiceCarousel';
@@ -663,86 +786,6 @@ const translateCategory = (category?: string) => { ... };
 // ... Wait, I deleted them in the previous step but the linter complained they are missing.
 // I will restore `getCategoryConfig` and integrate `useCategories` hook inside the component.
 
-const getCategoryConfig = (category?: string) => {
-    const cat = category?.toLowerCase() || '';
-
-    // Color Palette (Premium & Dark Mode Friendly)
-    const colors = {
-        transport: '#FF9F0A',     // Orange
-        food: '#FF453A',          // Red
-        shopping: '#30D158',      // Green
-        health: '#64D2FF',        // Cyan
-        bills: '#FFD60A',         // Yellow
-        home: '#AC8E68',          // Gold/Brown (Warm)
-        entertainment: '#FF375F', // Pink (High Energy)
-        tech: '#0A84FF',          // Blue
-        income: '#32D74B',        // Bright Green
-        gray: '#8E8E93',          // Neutral
-        finance: '#A2845E'        // Bronze
-    };
-
-    // Helper to get rgba with opacity
-    const getBg = (hex: string) => {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        const r = result ? parseInt(result[1], 16) : 128;
-        const g = result ? parseInt(result[2], 16) : 128;
-        const b = result ? parseInt(result[3], 16) : 128;
-        return `rgba(${r}, ${g}, ${b}, 0.15)`; // 15% opacity for background
-    };
-
-    let icon = ShoppingBag;
-    let color = colors.gray;
-
-    // Transport
-    if (cat.includes('uber') || cat.includes('99') || cat.includes('transport') || cat.includes('taxi') || cat.includes('cab')) { icon = Car; color = colors.transport; }
-    else if (cat.includes('fuel') || cat.includes('gas') || cat.includes('posto') || cat.includes('shell') || cat.includes('ipiranga')) { icon = Fuel; color = colors.transport; }
-    else if (cat.includes('parking') || cat.includes('estacionamento') || cat.includes('park')) { icon = Car; color = colors.transport; }
-    else if (cat.includes('auto') || cat.includes('repair') || cat.includes('mecanic') || cat.includes('manuten')) { icon = Settings; color = colors.transport; }
-
-    // Travel
-    else if (cat.includes('flight') || cat.includes('airline') || cat.includes('travel') || cat.includes('viagem') || cat.includes('latam') || cat.includes('azul')) { icon = Plane; color = colors.tech; }
-
-    // Food
-    else if (cat.includes('food') || cat.includes('burger') || cat.includes('ifood') || cat.includes('rappi') || cat.includes('comida') || cat.includes('delivery')) { icon = Utensils; color = colors.food; }
-    else if (cat.includes('restaurant') || cat.includes('restaurante') || cat.includes('outback') || cat.includes('madero')) { icon = Utensils; color = colors.food; }
-    else if (cat.includes('coffee') || cat.includes('cafe') || cat.includes('starbucks')) { icon = Coffee; color = colors.home; }
-    else if (cat.includes('market') || cat.includes('grocer') || cat.includes('supermercado') || cat.includes('mercado') || cat.includes('carrefour') || cat.includes('extra')) { icon = ShoppingCart; color = colors.bills; }
-
-    // Shopping
-    else if (cat.includes('shop') || cat.includes('store') || cat.includes('amazon') || cat.includes('mercado livre') || cat.includes('compras')) { icon = ShoppingBag; color = colors.tech; }
-    else if (cat.includes('cloth') || cat.includes('apparel') || cat.includes('fashion') || cat.includes('roupa') || cat.includes('vestu')) { icon = Shirt; color = colors.tech; }
-    else if (cat.includes('eletron') || cat.includes('tech') || cat.includes('apple') || cat.includes('sams')) { icon = Smartphone; color = '#0A84FF'; }
-
-    // Home / Utilities
-    else if (cat.includes('home') || cat.includes('house') || cat.includes('casa') || cat.includes('rent') || cat.includes('aluguel')) { icon = Home; color = colors.home; }
-    else if (cat.includes('internet') || cat.includes('wifi') || cat.includes('vivo') || cat.includes('claro') || cat.includes('tim')) { icon = Wifi; color = colors.home; }
-    else if (cat.includes('light') || cat.includes('water') || cat.includes('luz') || cat.includes('agua') || cat.includes('energy') || cat.includes('energia')) { icon = Zap; color = colors.bills; }
-
-    // Entertainment
-    else if (cat.includes('game') || cat.includes('steam') || cat.includes('xbox') || cat.includes('playstation') || cat.includes('nintendo') || cat.includes('jogos')) { icon = Gamepad2; color = colors.entertainment; }
-    else if (cat.includes('movie') || cat.includes('film') || cat.includes('cinema') || cat.includes('netflix') || cat.includes('disney') || cat.includes('hbo') || cat.includes('tv')) { icon = Clapperboard; color = colors.entertainment; }
-    else if (cat.includes('music') || cat.includes('spotify') || cat.includes('apple music') || cat.includes('show')) { icon = Music; color = colors.entertainment; }
-
-    // Health
-    else if (cat.includes('health') || cat.includes('doctor') || cat.includes('med') || cat.includes('hosp') || cat.includes('clinica') || cat.includes('saude')) { icon = Heart; color = colors.health; }
-    else if (cat.includes('pharmacy') || cat.includes('drug') || cat.includes('farma') || cat.includes('drogasil')) { icon = Stethoscope; color = colors.health; }
-    else if (cat.includes('gym') || cat.includes('fit') || cat.includes('sport') || cat.includes('academia') || cat.includes('smart')) { icon = Dumbbell; color = '#30D158'; }
-
-    // Family / Education
-    else if (cat.includes('school') || cat.includes('college') || cat.includes('univ') || cat.includes('educa') || cat.includes('curso') || cat.includes('udemy')) { icon = GraduationCap; color = '#FF9F0A'; }
-    else if (cat.includes('book') || cat.includes('livro') || cat.includes('read')) { icon = BookOpen; color = '#FF9F0A'; }
-    else if (cat.includes('pet') || cat.includes('dog') || cat.includes('cat') || cat.includes('vet')) { icon = Cat; color = '#AC8E68'; }
-    else if (cat.includes('baby') || cat.includes('kid') || cat.includes('child') || cat.includes('filh')) { icon = Baby; color = '#FFD60A'; }
-
-    // Finance
-    else if (cat.includes('transfer') || cat.includes('send') || cat.includes('pix')) { icon = ArrowRightLeft; color = colors.gray; }
-    else if (cat.includes('bank') || cat.includes('banco') || cat.includes('fee') || cat.includes('taxa') || cat.includes('tax')) { icon = Landmark; color = colors.gray; }
-    else if (cat.includes('salary') || cat.includes('income') || cat.includes('salario') || cat.includes('pagamento')) { icon = DollarSign; color = colors.income; }
-    else if (cat.includes('gift') || cat.includes('present')) { icon = Gift; color = '#FF375F'; }
-
-    return { icon, color, backgroundColor: getBg(color) };
-};
-
 // Cache do Intl.DateTimeFormat para performance
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' });
 const monthShortFormatter = new Intl.DateTimeFormat('pt-BR', { month: 'short' });
@@ -760,7 +803,7 @@ const formatTransactionDate = (dateString: string): string => {
 const getMonthShortUpper = (date: Date) => monthShortFormatter.format(date).toUpperCase().replace('.', '');
 const getMonthLongUpper = (date: Date) => monthLongFormatter.format(date).toUpperCase();
 const formatCardDisplayName = (rawName?: string | null, maxLength = 20): string => {
-    const baseName = (rawName || '').trim() || 'Cart├úo';
+    const baseName = (rawName || '').trim() || 'Cartão';
     const capitalized = `${baseName.charAt(0).toLocaleUpperCase('pt-BR')}${baseName.slice(1)}`;
     if (capitalized.length <= maxLength) return capitalized;
     return `${capitalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
@@ -777,7 +820,6 @@ const TransactionItem = React.memo(({
     getCategoryName,
     animateRow = true,
     isMoving = false,
-    movingLabel = 'Movendo...',
     refundedAmount,
     refundSourceItem
 }: {
@@ -790,7 +832,6 @@ const TransactionItem = React.memo(({
     getCategoryName: (key?: string) => string;
     animateRow?: boolean;
     isMoving?: boolean;
-    movingLabel?: string;
     refundedAmount?: number;
     refundSourceItem?: InvoiceItem;
 }) => {
@@ -811,22 +852,16 @@ const TransactionItem = React.memo(({
 
     const amountColor = isPayment || isRefund ? '#04D361' : (isProjected ? '#60BC57' : '#FFFFFF');
 
-    // Margens aplicadas aos cards individuais
     const borderStyle = {
-        borderTopLeftRadius: hasRefundTag ? 0 : (isFirst ? 16 : 0),
-        borderTopRightRadius: hasRefundTag ? 0 : (isFirst ? 16 : 0),
-        borderBottomLeftRadius: isLast ? 16 : 0,
-        borderBottomRightRadius: isLast ? 16 : 0,
-        marginTop: index === 0 ? 0 : -1,
+        borderTopLeftRadius: hasRefundTag ? 0 : (isFirst ? 12 : 0),
+        borderTopRightRadius: hasRefundTag ? 0 : (isFirst ? 12 : 0),
+        borderBottomLeftRadius: isLast ? 12 : 0,
+        borderBottomRightRadius: isLast ? 12 : 0,
     };
-
-
-
-    // We we overwrite the default styles with our better looking ones
-    const { icon: CategoryIcon, color: categoryColor, backgroundColor: categoryBg } = getCategoryConfig(item.category || item.description);
 
     const handlePress = () => {
         if (isMoving) return;
+        triggerIOSCoreMorph();
         if (showActions) {
             setShowActions(false);
             return;
@@ -859,8 +894,8 @@ const TransactionItem = React.memo(({
     return (
         <View style={styles.transactionCardWrapper}>
             {hasRefundTag && (
-                <TouchableOpacity
-                    activeOpacity={0.9}
+                <IOSTouchable
+                    activeOpacity={1}
                     style={styles.refundTopCardPressable}
                     onPress={handleRefundCardPress}
                     disabled={isMoving}
@@ -874,35 +909,24 @@ const TransactionItem = React.memo(({
                             {`Transação reembolsada no valor de ${formatCurrency(refundedAmount ?? 0)}`}
                         </Text>
                     </View>
-                </TouchableOpacity>
+                </IOSTouchable>
             )}
-            <TouchableOpacity
-                activeOpacity={0.85}
+            <IOSTouchable
+                activeOpacity={1}
                 onPress={handlePress}
                 disabled={isMoving}
                 style={{ width: '100%' }}
             >
                 <Animated.View
                     ref={cardRef}
-                    layout={animateRow ? LinearTransition.duration(300) : undefined}
-                    entering={animateRow ? FadeIn.duration(400) : undefined}
-                    exiting={animateRow ? FadeOut.duration(200) : undefined}
+                    layout={animateRow ? IOS_CORE_LAYOUT : undefined}
+                    entering={animateRow ? IOS_FADE_IN : undefined}
+                    exiting={animateRow ? IOS_FADE_OUT : undefined}
                     style={[
                         styles.transactionCard,
                         borderStyle
                     ]}
                 >
-                    <View style={{
-                        width: 40, height: 40, borderRadius: 12,
-                        backgroundColor: categoryBg,
-                        justifyContent: 'center', alignItems: 'center',
-                        marginRight: 12,
-                        borderWidth: 1,
-                        borderColor: categoryColor + '20' // Subtle border
-                    }}>
-                        <CategoryIcon size={20} color={categoryColor} strokeWidth={2.5} />
-                    </View>
-
                     <View style={styles.detailsContainer}>
                         <View style={styles.descriptionRow}>
                             <Text style={styles.description} numberOfLines={1}>
@@ -932,55 +956,54 @@ const TransactionItem = React.memo(({
                             style={[styles.actionsContainer, { overflow: 'hidden' }]}
                         >
                             <LinearGradient
-                                colors={['transparent', '#151515']}
+                                colors={['transparent', '#101010']}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 0.5, y: 0 }}
                                 style={{ position: 'absolute', top: 0, bottom: 0, left: -40, right: 0 }}
                             />
                             {canRefund && onRefund && (
-                                <TouchableOpacity
+                                <IOSTouchable
                                     style={[styles.actionButton, { backgroundColor: 'transparent', borderWidth: 0, marginRight: 8 }]}
                                     onPress={() => {
                                         setShowActions(false);
                                         onRefund(item);
                                     }}
                                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                    activeOpacity={1}
                                 >
                                     <RotateCcw size={20} color="#4ADE80" />
-                                </TouchableOpacity>
+                                </IOSTouchable>
                             )}
-                            <TouchableOpacity
+                            <IOSTouchable
                                 style={[styles.actionButton, { backgroundColor: 'transparent', borderWidth: 0 }]}
                                 onPress={handleDelete}
                                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                activeOpacity={1}
                             >
                                 <Trash2 size={20} color="#FF453A" />
-                            </TouchableOpacity>
+                            </IOSTouchable>
                         </Animated.View>
                     ) : (
                         <View style={styles.amountContainer}>
                             <Text style={[
                                 styles.amount,
-                                {
-                                    color: amountColor,
-                                    textShadowColor: amountColor + '40',
-                                    textShadowOffset: { width: 0, height: 0 },
-                                    textShadowRadius: 8,
-                                }
+                                { color: amountColor }
                             ]}>
                                 {isPayment || isRefund ? '+ ' : '- '}{formatCurrency(item.amount)}
                             </Text>
 
                             {!hideInstallments && (item.totalInstallments && item.totalInstallments > 1) && (
-                                <Text style={{ fontSize: 10, color: '#666', marginTop: 2, textAlign: 'right', fontWeight: '500' }}>
-                                    {item.installmentNumber}/{item.totalInstallments}
-                                </Text>
+                                <View style={styles.installmentPill}>
+                                    <Text style={styles.installmentPillText}>
+                                        {item.installmentNumber}/{item.totalInstallments}
+                                    </Text>
+                                </View>
                             )}
 
                             {!hideInstallments && isProjected && (!item.totalInstallments || item.totalInstallments <= 1) && (
-                                <Text style={{ fontSize: 9, color: '#60BC57', marginTop: 2, textAlign: 'right', fontWeight: '600' }}>
-                                    PARCELADO
-                                </Text>
+                                <View style={styles.installmentPill}>
+                                    <Text style={styles.installmentPillText}>PARCELADO</Text>
+                                </View>
                             )}
                         </View>
                     )}
@@ -993,14 +1016,13 @@ const TransactionItem = React.memo(({
                                 style={StyleSheet.absoluteFill}
                             />
                             <View style={styles.transactionMovingContent}>
-                                <ActivityIndicator size="small" color="#D97757" />
-                                <Text style={styles.transactionMovingText}>{movingLabel}</Text>
+                                <ActivityIndicator size="small" color="#F5F5F7" />
                             </View>
                         </View>
                     )}
                     {!isLast && <View style={styles.separator} />}
                 </Animated.View>
-            </TouchableOpacity>
+            </IOSTouchable>
         </View>
     );
 });
@@ -1011,7 +1033,7 @@ TransactionItem.displayName = 'CreditCardInvoiceTransactionItem';
 const EmptyTransactionsState = () => {
     return (
         <View style={[styles.emptyContainer, { marginTop: 40, marginBottom: 40 }]}>
-            <Text style={styles.emptyOverlayText}>N├úo encontramos transa├º├Áes com os filtros atuais.</Text>
+            <Text style={styles.emptyOverlayText}>Não encontramos transações com os filtros atuais.</Text>
         </View>
     );
 };
@@ -1025,8 +1047,7 @@ export function CreditCardInvoice({
     refreshing = false,
     onLoadMoreHistory,
     hasMoreHistory = false,
-    loadingMoreHistory = false,
-    onNavigateToOpenFinance
+    loadingMoreHistory = false
 }: CreditCardInvoiceProps) {
     const { getCategoryName } = useCategories();
     const { lod } = usePerformanceBudget();
@@ -1044,10 +1065,10 @@ export function CreditCardInvoice({
                 const newMode = prefs.invoiceViewMode;
                 let tabToSet: InvoiceTab | null = null;
 
-                if (newMode === 'next') {
-                    tabToSet = 'future_0';
-                } else if (newMode === 'all' || newMode === 'last' || newMode === 'current') {
+                if (newMode === 'all' || newMode === 'last' || newMode === 'current') {
                     tabToSet = newMode as InvoiceTab;
+                } else if (newMode === 'next' || newMode === 'overdue' || (typeof newMode === 'string' && /^future_\d+$/.test(newMode))) {
+                    tabToSet = 'current';
                 }
 
                 if (tabToSet) {
@@ -1064,11 +1085,9 @@ export function CreditCardInvoice({
 
     const handleTabChange = useCallback((tab: InvoiceTab) => {
         setSelectedTab(tab);
-        let modeToSave = tab;
-        if (tab.startsWith('future_')) modeToSave = 'next' as any;
 
         if (userId) {
-            databaseService.saveInvoiceViewMode(userId, modeToSave);
+            databaseService.saveInvoiceViewMode(userId, tab);
         }
     }, [userId]);
     const [selectedCardId, setSelectedCardId] = useState<string>('');
@@ -1089,21 +1108,11 @@ export function CreditCardInvoice({
     const [refundModalVisible, setRefundModalVisible] = useState(false);
     const [refundTransaction, setRefundTransaction] = useState<InvoiceItem | null>(null);
 
-    // Arrow Rotation for Collapse
-    const arrowRotation = useSharedValue(showInvoiceCards ? 0 : 180);
-
-    useEffect(() => {
-        arrowRotation.value = withTiming(showInvoiceCards ? 0 : 180, { duration: 300 });
-    }, [showInvoiceCards]);
-
-    const arrowAnimatedStyle = useAnimatedStyle(() => ({
-        transform: [{ rotate: `${arrowRotation.value}deg` }]
-    }));
-
     // Transaction Options State
     const [transactionOptionsVisible, setTransactionOptionsVisible] = useState(false);
     const [selectedTransactionForOptions, setSelectedTransactionForOptions] = useState<InvoiceItem | null>(null);
     const [transactionSearchModalVisible, setTransactionSearchModalVisible] = useState(false);
+    const [invoiceActionsModalVisible, setInvoiceActionsModalVisible] = useState(false);
     const [transactionSearchQuery, setTransactionSearchQuery] = useState('');
     const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<InvoiceItem | null>(null);
@@ -1246,12 +1255,6 @@ export function CreditCardInvoice({
 
         if (selectedTab === 'last') return invoiceData.periods.lastMonthKey;
         if (selectedTab === 'current') return invoiceData.periods.currentMonthKey;
-        if (selectedTab.startsWith('future_')) {
-            const futureIndex = parseInt(selectedTab.split('_')[1], 10);
-            if (!Number.isNaN(futureIndex) && futureIndex >= 0) {
-                return invoiceData.futureInvoices[futureIndex]?.referenceMonth ?? null;
-            }
-        }
 
         return null;
     }, [invoiceData, selectedTab]);
@@ -1435,12 +1438,12 @@ export function CreditCardInvoice({
 
     const handleApplyFilters = (newFilters: FilterState) => {
         // Trigger LayoutAnimation for smooth transition
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        triggerIOSCoreMorph();
         setFilters(newFilters);
     };
 
     const clearFilters = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        triggerIOSCoreMorph();
         setFilters({
             search: '',
             categories: [],
@@ -1770,26 +1773,47 @@ export function CreditCardInvoice({
         if (!invoiceData) return [];
 
         const periods = invoiceData.periods;
-        const candidates: Array<{ label: string; currentDate: string | null }> = [
-            { label: 'Fatura atrasada', currentDate: toIsoDateValue(periods.beforeLastClosingDate) },
-            { label: 'Fatura anterior', currentDate: toIsoDateValue(periods.lastClosingDate) },
-            { label: 'Fatura atual', currentDate: toIsoDateValue(periods.currentClosingDate) },
-            { label: 'Próxima fatura', currentDate: toIsoDateValue(periods.nextClosingDate) },
-            { label: 'Fatura seguinte', currentDate: toIsoDateValue(periods.followingClosingDate) }
+        const getClosingDate = (rawDate: string | undefined, fallbackDate: Date): string | null =>
+            normalizeIsoDateValue(rawDate) || toIsoDateValue(fallbackDate) || null;
+
+        const candidates: Array<{ id: string; label: string; currentDate: string | null }> = [
+            {
+                id: 'overdue',
+                label: 'Fatura atrasada',
+                currentDate: getClosingDate(invoiceData.beforeLastInvoice.closingDate, periods.beforeLastClosingDate)
+            },
+            {
+                id: 'last',
+                label: 'Fatura anterior',
+                currentDate: getClosingDate(invoiceData.closedInvoice.closingDate, periods.lastClosingDate)
+            },
+            {
+                id: 'current',
+                label: 'Fatura atual',
+                currentDate: getClosingDate(invoiceData.currentInvoice.closingDate, periods.currentClosingDate)
+            },
+            {
+                id: 'next',
+                label: 'Próxima fatura',
+                currentDate: getClosingDate(invoiceData.futureInvoices[0]?.closingDate, periods.nextClosingDate)
+            },
+            {
+                id: 'following',
+                label: 'Fatura seguinte',
+                currentDate: getClosingDate(invoiceData.futureInvoices[1]?.closingDate, periods.followingClosingDate)
+            }
         ];
 
-        const monthKeys = new Set<string>();
         const items: ClosingDateItem[] = [];
 
-        candidates.forEach(({ label, currentDate }) => {
+        candidates.forEach(({ id, label, currentDate }) => {
             if (!currentDate) return;
             const monthKey = currentDate.slice(0, 7);
-            if (monthKeys.has(monthKey)) return;
-            monthKeys.add(monthKey);
 
             const monthLabel = formatShortMonthPt(currentDate);
             items.push({
-                id: monthKey,
+                id,
+                monthKey,
                 label: `${label} (${monthLabel})`,
                 subLabel: `Fechamento (${monthLabel})`,
                 currentDate
@@ -1877,11 +1901,6 @@ export function CreditCardInvoice({
                 case 'current':
                     items = invoiceData.currentInvoice.items;
                     break;
-                default:
-                    if (selectedTab.startsWith('future_')) {
-                        const futureIndex = parseInt(selectedTab.split('_')[1]);
-                        items = invoiceData.futureInvoices[futureIndex]?.items || [];
-                    }
             }
         }
 
@@ -2079,9 +2098,9 @@ export function CreditCardInvoice({
     );
 
     const renderSectionHeader = useCallback(({ section }: { section: { title: string } }) => (
-        <View style={styles.groupContainer}>
+        <Animated.View entering={IOS_FADE_IN} layout={IOS_CORE_LAYOUT} style={styles.groupContainer}>
             <Text style={styles.groupHeader}>{section.title}</Text>
-        </View>
+        </Animated.View>
     ), []);
 
     const renderTransactionRow = useCallback(({
@@ -2103,7 +2122,6 @@ export function CreditCardInvoice({
             getCategoryName={getCategoryName}
             animateRow={animateRows}
             isMoving={pendingTransactionAction?.id === item.id}
-            movingLabel={pendingTransactionAction?.label || 'Processando...'}
             refundedAmount={refundAmountByOriginalId.get(item.id)}
             refundSourceItem={refundSourceByOriginalId.get(item.id)}
         />
@@ -2127,33 +2145,40 @@ export function CreditCardInvoice({
         onLoadMoreHistory();
     }, [hasMoreHistory, loadingMoreHistory, onLoadMoreHistory, selectedTab]);
 
-    const toggleInvoiceCards = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setShowInvoiceCards(!showInvoiceCards);
-    };
+    const toggleInvoiceCards = useCallback(() => {
+        triggerIOSCoreMorph();
+        setShowInvoiceCards((prev) => !prev);
+    }, []);
+
+    const closeInvoiceActionsAndRun = useCallback((action: () => void) => {
+        setInvoiceActionsModalVisible(false);
+        action();
+    }, []);
 
     if (creditCards.length === 0) return (
-        <View style={styles.emptyState}>
-            <View style={styles.emptyIconContainer}>
+        <View style={styles.screen}>
+            <View style={styles.headerRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Image
+                        source={require('@/assets/images/icon.png')}
+                        style={styles.headerIcon}
+                        resizeMode="contain"
+                    />
+                    <Text style={styles.screenHeader}>Fatura do cartão</Text>
+                </View>
+            </View>
+            <View style={styles.emptyState}>
                 <DelayedLoopLottie
                     source={require('@/assets/cartabranco.json')}
-                    style={{ width: 80, height: 80 }}
+                    style={styles.emptyLottie}
                     delay={3000}
                     initialDelay={100}
                     jitterRatio={0.2}
                     renderMode="HARDWARE"
                 />
+                <Text style={styles.emptyTitle}>Nenhum cartão</Text>
+                <Text style={styles.emptyText}>Conecte um cartão para visualizar suas faturas.</Text>
             </View>
-            <Text style={styles.emptyTitle}>Nenhum cart├úo conectado</Text>
-            <Text style={styles.emptyText}>Conecte seu cart├úo de cr├®dito via Open Finance para visualizar suas faturas.</Text>
-
-            <TouchableOpacity
-                style={styles.connectButton}
-                onPress={onNavigateToOpenFinance}
-                activeOpacity={0.8}
-            >
-                <Text style={styles.connectButtonText}>Conectar Conta</Text>
-            </TouchableOpacity>
         </View>
     );
 
@@ -2181,8 +2206,11 @@ export function CreditCardInvoice({
                 loading={false}
             />
 
-            <DeleteConfirmationModal
-                visible={deleteConfirmationVisible}
+            <AnimatedInlineBanner
+                show={deleteConfirmationVisible}
+                step="error"
+                error="Excluir transação?"
+                statusText="Excluir transação?"
                 title="Excluir transação?"
                 onCancel={() => {
                     setDeleteConfirmationVisible(false);
@@ -2190,7 +2218,8 @@ export function CreditCardInvoice({
                 }}
                 onConfirm={handleConfirmDeleteTransaction}
                 confirmText="Excluir"
-                cancelText="Cancelar"
+                cancelText="Não"
+                centerActions
             />
 
             <ClosingDateModal
@@ -2241,76 +2270,144 @@ export function CreditCardInvoice({
                     setTransactionSearchModalVisible(false);
                     setTransactionSearchQuery('');
                 }}
-                title="Buscar Transação"
+                title="Buscar transação"
+                titleAlign="start"
+                maxHeightRatio={0.78}
             >
-                <View style={{ maxHeight: 500 }}>
-                    {/* Search Input - Same style as ReminderModal */}
+                <View style={searchStyles.container}>
                     <View style={searchStyles.searchContainer}>
-                        <Search size={16} color="#666" style={{ marginRight: 8 }} />
+                        <Search size={16} color="#8E8E93" style={{ marginRight: 8 }} />
                         <TextInput
                             style={searchStyles.searchInput}
                             placeholder="Buscar por nome, categoria, valor..."
-                            placeholderTextColor="#666"
+                            placeholderTextColor="#8E8E93"
                             value={transactionSearchQuery}
                             onChangeText={setTransactionSearchQuery}
                             autoFocus
                         />
                     </View>
 
-                    {/* Results */}
+                    <Text style={searchStyles.sectionTitle}>RESULTADOS</Text>
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: 20 }}
+                        contentContainerStyle={searchStyles.resultsContent}
                         keyboardShouldPersistTaps="handled"
                     >
                         {transactionSearchResults.length === 0 ? (
-                            <View style={searchStyles.emptyContainer}>
-                                <Text style={searchStyles.emptyText}>
-                                    {transactionSearchQuery.trim() ? 'Nenhuma transação encontrada' : 'Digite para buscar'}
-                                </Text>
+                            <View style={searchStyles.resultsGroup}>
+                                <View style={searchStyles.emptyContainer}>
+                                    <Text style={searchStyles.emptyText}>
+                                        {transactionSearchQuery.trim() ? 'Nenhuma transação encontrada' : 'Digite para buscar'}
+                                    </Text>
+                                </View>
                             </View>
                         ) : (
-                            transactionSearchResults.map((item) => {
-                                const { icon: CatIcon, color: catColor, backgroundColor: catBg } = getCategoryConfig(item.category || item.description);
-                                const isPaymentItem = item.isPayment;
-                                const isRefundItem = item.isRefund;
-                                return (
-                                    <TouchableOpacity
-                                        key={item.id}
-                                        style={searchStyles.resultCard}
-                                        activeOpacity={0.7}
-                                        onPress={() => handleOpenTransactionOptionsFromSearch(item)}
-                                    >
-                                        <View style={[searchStyles.resultIcon, { backgroundColor: catBg, borderColor: catColor + '20' }]}>
-                                            <CatIcon size={18} color={catColor} strokeWidth={2.5} />
-                                        </View>
-                                        <View style={searchStyles.resultDetails}>
-                                            <Text style={searchStyles.resultDescription} numberOfLines={1}>{item.description}</Text>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                <Text style={searchStyles.resultCategory}>{getCategoryName(item.category)}</Text>
-                                                {item.date && <Text style={searchStyles.resultDate}>{formatTransactionDate(item.date)}</Text>}
-                                            </View>
-                                        </View>
-                                        <View style={searchStyles.resultAmountContainer}>
-                                            <Text style={[
-                                                searchStyles.resultAmount,
-                                                { color: isPaymentItem || isRefundItem ? '#4ADE80' : '#FF6B6B' }
-                                            ]}>
-                                                {isPaymentItem || isRefundItem ? '+ ' : '- '}{formatCurrency(item.amount)}
-                                            </Text>
-                                            {item.totalInstallments && item.totalInstallments > 1 && (
-                                                <Text style={searchStyles.resultInstallment}>
-                                                    {item.installmentNumber}/{item.totalInstallments}
-                                                </Text>
+                            <View style={searchStyles.resultsGroup}>
+                                {transactionSearchResults.map((item, index) => {
+                                    const isPaymentItem = item.isPayment;
+                                    const isRefundItem = item.isRefund;
+                                    return (
+                                        <View key={item.id}>
+                                            <IOSTouchable
+                                                style={searchStyles.resultCard}
+                                                activeOpacity={1}
+                                                onPress={() => handleOpenTransactionOptionsFromSearch(item)}
+                                            >
+                                                <View style={searchStyles.resultDetails}>
+                                                    <Text style={searchStyles.resultDescription} numberOfLines={1}>{item.description}</Text>
+                                                    <View style={searchStyles.resultMetaRow}>
+                                                        <Text style={searchStyles.resultCategory} numberOfLines={1}>{getCategoryName(item.category)}</Text>
+                                                        {item.date && <Text style={searchStyles.resultDate}>{formatTransactionDate(item.date)}</Text>}
+                                                    </View>
+                                                </View>
+                                                <View style={searchStyles.resultAmountContainer}>
+                                                    <Text style={[
+                                                        searchStyles.resultAmount,
+                                                        { color: isPaymentItem || isRefundItem ? '#4ADE80' : '#FF6B6B' }
+                                                    ]}>
+                                                        {isPaymentItem || isRefundItem ? '+ ' : '- '}{formatCurrency(item.amount)}
+                                                    </Text>
+                                                    {item.totalInstallments && item.totalInstallments > 1 && (
+                                                        <Text style={searchStyles.resultInstallment}>
+                                                            {item.installmentNumber}/{item.totalInstallments}
+                                                        </Text>
+                                                    )}
+                                                </View>
+                                            </IOSTouchable>
+                                            {index < transactionSearchResults.length - 1 && (
+                                                <View style={searchStyles.resultSeparator} />
                                             )}
                                         </View>
-                                    </TouchableOpacity>
-                                );
-                            })
+                                    );
+                                })}
+                            </View>
                         )}
                     </ScrollView>
                 </View>
             </ModalPadrao>
+
+            <ModalPadrao
+                visible={invoiceActionsModalVisible}
+                onClose={() => setInvoiceActionsModalVisible(false)}
+                title="Ações da fatura"
+                titleAlign="start"
+                maxHeightRatio={0.42}
+            >
+                <View style={styles.invoiceActionsContainer}>
+                    <Text style={styles.invoiceActionsSectionTitle}>FATURA</Text>
+                    <View style={styles.invoiceActionsGroupCard}>
+                        <IOSTouchable
+                            style={styles.invoiceActionItem}
+                            activeOpacity={1}
+                            onPress={() => closeInvoiceActionsAndRun(() => setClosingDateModalVisible(true))}
+                        >
+                            <View style={styles.invoiceActionTextBlock}>
+                                <Text style={styles.invoiceActionTitle}>Configurar fatura</Text>
+                                <Text style={styles.invoiceActionSubtitle}>Fechamento, vencimento e ajustes</Text>
+                            </View>
+                        </IOSTouchable>
+
+                        <View style={styles.invoiceActionSeparator} />
+
+                        <IOSTouchable
+                            style={styles.invoiceActionItem}
+                            activeOpacity={1}
+                            onPress={() => closeInvoiceActionsAndRun(() => setTransactionSearchModalVisible(true))}
+                        >
+                            <View style={styles.invoiceActionTextBlock}>
+                                <Text style={styles.invoiceActionTitle}>Buscar transação</Text>
+                                <Text style={styles.invoiceActionSubtitle}>Encontrar lançamentos nesta fatura</Text>
+                            </View>
+                        </IOSTouchable>
+
+                        <View style={styles.invoiceActionSeparator} />
+
+                        <IOSTouchable
+                            style={styles.invoiceActionItem}
+                            activeOpacity={1}
+                            onPress={() => closeInvoiceActionsAndRun(toggleInvoiceCards)}
+                        >
+                            <View style={styles.invoiceActionTextBlock}>
+                                <Text style={styles.invoiceActionTitle}>
+                                    {showInvoiceCards ? 'Ocultar cartões da fatura' : 'Mostrar cartões da fatura'}
+                                </Text>
+                                <Text style={styles.invoiceActionSubtitle}>Alternar a visualização do carrossel</Text>
+                            </View>
+                        </IOSTouchable>
+                    </View>
+                </View>
+            </ModalPadrao>
+
+            <View style={styles.headerRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <Image
+                        source={require('@/assets/images/icon.png')}
+                        style={styles.headerIcon}
+                        resizeMode="contain"
+                    />
+                    <Text style={styles.screenHeader}>Fatura do cartão</Text>
+                </View>
+            </View>
 
             <SectionList
                 style={styles.container}
@@ -2333,62 +2430,50 @@ export function CreditCardInvoice({
                 ListFooterComponent={
                     selectedTab === 'all' && loadingMoreHistory ? (
                         <View style={{ paddingVertical: 18 }}>
-                            <ActivityIndicator size="small" color="#D97757" />
+                            <ActivityIndicator size="small" color="#F5F5F7" />
                         </View>
                     ) : null
                 }
                 ListHeaderComponent={
                     <>
-                        <View style={styles.headerRow}>
-                            <Text style={styles.screenHeader}>Fatura do Cartão</Text>
-                            <BankSelector
-                                currentCardId={selectedCard?.id || null}
-                                cards={creditCards}
-                                style={{ flexShrink: 1, marginLeft: 16 }}
-                                onSelectCard={(id) => {
-                                    if (id) setSelectedCardId(id);
-                                    else if (creditCards.length > 0) setSelectedCardId(creditCards[0].id);
-                                }}
-                            />
-
-                        </View>
-
                         {selectedCard && (
-                            <View style={styles.cardHeader}>
-                                <View style={[styles.cardHeaderLeft, { flexDirection: 'column', alignItems: 'flex-start', marginLeft: 0 }]}>
-                                    <View style={{ paddingLeft: 0, marginTop: 0 }}>
-                                        <Text style={styles.cardName}>{selectedCard.name}</Text>
-                                    </View>
+                            <Animated.View entering={IOS_FADE_IN} layout={IOS_CORE_LAYOUT} style={styles.cardHeader}>
+                                <View style={styles.cardHeaderLeft}>
+                                    <BankSelector
+                                        currentCardId={selectedCard?.id || null}
+                                        cards={creditCards}
+                                        style={{ flexShrink: 1, marginLeft: 0 }}
+                                        onSelectCard={(id) => {
+                                            if (id) setSelectedCardId(id);
+                                            else if (creditCards.length > 0) setSelectedCardId(creditCards[0].id);
+                                        }}
+                                    />
                                 </View>
                                 <View style={styles.cardHeaderRight}>
-
-                                    <TouchableOpacity style={styles.settingsButton} onPress={() => setClosingDateModalVisible(true)}>
-                                        <TimedLottieIcon source={require('@/assets/fatura.json')} style={{ width: 20, height: 20 }} />
-                                    </TouchableOpacity>
-
-                                    <TouchableOpacity style={styles.settingsButton} onPress={() => setTransactionSearchModalVisible(true)}>
-                                        <TimedLottieIcon source={require('@/assets/buscar.json')} style={{ width: 20, height: 20 }} />
-                                    </TouchableOpacity>
-
-                                    <TouchableOpacity style={styles.toggleButton} onPress={toggleInvoiceCards}>
-                                        <Animated.View style={arrowAnimatedStyle}>
-                                            <TimedLottieIcon source={require('@/assets/cima.json')} style={{ width: 20, height: 20 }} />
-                                        </Animated.View>
-                                    </TouchableOpacity>
+                                    <IOSTouchable
+                                        style={styles.settingsButton}
+                                        onPress={() => {
+                                            triggerIOSCoreMorph();
+                                            setInvoiceActionsModalVisible(true);
+                                        }}
+                                        activeOpacity={1}
+                                    >
+                                        <TimedLottieIcon source={require('@/assets/engrenagem.json')} style={{ width: 20, height: 20 }} />
+                                    </IOSTouchable>
                                 </View>
-                            </View>
+                            </Animated.View>
                         )}
 
                         {showInvoiceCards && invoiceData && (
                             <InvoiceCarousel invoiceData={invoiceData} selectedTab={selectedTab} onTabChange={handleTabChange} historyTotal={historyTotal} selectedCard={selectedCard} />
                         )}
 
-                        <View style={styles.listHeader}>
+                        <Animated.View entering={IOS_FADE_IN} layout={IOS_CORE_LAYOUT} style={styles.listHeader}>
                             <Text style={styles.listHeaderTitle}>
-                                {selectedTab === 'all' ? 'Histórico' : selectedTab === 'last' ? 'Última Fatura' : selectedTab === 'current' ? 'Fatura Atual' : selectedTab === 'future_0' ? 'Próxima Fatura' : `Fatura Futura ${parseInt(selectedTab.split('_')[1]) + 1}`}
+                                {selectedTab === 'all' ? 'Histórico' : selectedTab === 'last' ? 'Última Fatura' : 'Fatura Atual'}
                             </Text>
                             <Text style={styles.listHeaderCount}>{visibleItemsLength} lançamentos</Text>
-                        </View>
+                        </Animated.View>
                     </>
                 }
                 ListEmptyComponent={
@@ -2416,10 +2501,10 @@ const styles = StyleSheet.create({
     },
     segmentContainer: {
         flexDirection: 'row',
-        backgroundColor: '#141414',
+        backgroundColor: '#101010',
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#2B2B2B',
+        borderColor: '#252525',
         height: 44,
         alignItems: 'center',
         overflow: 'hidden',
@@ -2436,37 +2521,41 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 0,
         bottom: 0,
-        backgroundColor: '#1F1F1F',
+        backgroundColor: 'rgba(217,119,87,0.30)',
         zIndex: 0,
     },
     segmentDivider: {
         width: 1,
         height: '100%',
-        backgroundColor: '#2B2B2B',
+        backgroundColor: '#252525',
     },
     segmentText: {
         fontSize: 13,
-        fontWeight: '500',
+        fontWeight: '400',
         color: '#666',
         textAlign: 'center',
     },
     segmentTextActive: {
-        color: '#FFF',
-        fontWeight: '600',
+        color: '#D97757',
+        fontWeight: '400',
     },
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingHorizontal: 20 },
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 20 },
     screenHeader: {
-        fontSize: 24,
-        fontWeight: 'bold',
+        fontSize: 18,
+        fontFamily: 'AROneSans_400Regular',
         color: '#FFFFFF',
-        // removed padding/margins that are now handled by headerRow
+    },
+    headerIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 10,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: 20,
-        marginTop: 20,
+        marginTop: 0,
         marginBottom: 10,
     },
     headerRightAction: {
@@ -2478,12 +2567,54 @@ const styles = StyleSheet.create({
     cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingRight: 8 },
     cardConnectorLogo: { flexShrink: 0 },
     cardInfoBlock: { flexShrink: 1 },
-    cardName: { color: '#FFF', fontSize: 16, fontWeight: '600' },
+    cardName: { color: '#909090', fontSize: 15, fontFamily: 'AROneSans_400Regular' },
     cardSubtitle: { color: '#666', fontSize: 12, marginTop: 2 },
     cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    settingsButton: { padding: 8, borderRadius: 10, backgroundColor: '#151515', borderWidth: 1, borderColor: '#252525' },
-    toggleButton: { padding: 8, borderRadius: 10, backgroundColor: '#151515', borderWidth: 1, borderColor: '#252525' },
-    configPrompt: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#151515', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#D97757', marginHorizontal: 20 },
+    settingsButton: { padding: 9, borderRadius: 16, backgroundColor: '#101010', borderWidth: 1, borderColor: '#252525' },
+    toggleButton: { padding: 9, borderRadius: 16, backgroundColor: '#101010', borderWidth: 1, borderColor: '#252525' },
+    invoiceActionsContainer: {
+        paddingTop: 12,
+        paddingBottom: 0,
+    },
+    invoiceActionsSectionTitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#8E8E93',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    invoiceActionsGroupCard: {
+        backgroundColor: '#101010',
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: '#252525',
+        overflow: 'hidden',
+    },
+    invoiceActionItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        minHeight: 56,
+    },
+    invoiceActionTextBlock: { flex: 1 },
+    invoiceActionTitle: {
+        color: '#FFFFFF',
+        fontSize: 17,
+        fontWeight: '400',
+    },
+    invoiceActionSubtitle: {
+        color: '#8E8E93',
+        fontSize: 12,
+        marginTop: 1,
+    },
+    invoiceActionSeparator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#252525',
+        marginLeft: 16,
+    },
+    configPrompt: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#101010', borderRadius: 22, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#252525', marginHorizontal: 20 },
     configPromptText: { flex: 1 },
     configPromptTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
     configPromptSubtitle: { color: '#888', fontSize: 12, marginTop: 2 },
@@ -2543,28 +2674,28 @@ const styles = StyleSheet.create({
     // Invoice Card
     invoiceCard: {
         width: '100%',
-        backgroundColor: '#151515',
-        borderRadius: 16,
-        paddingTop: 10,
-        paddingHorizontal: 14,
-        paddingBottom: 10,
+        backgroundColor: '#101010',
+        borderRadius: 24,
+        paddingTop: 12,
+        paddingHorizontal: 16,
+        paddingBottom: 12,
         borderWidth: 1,
         borderColor: '#252525',
-        height: 90,
+        height: 92,
         justifyContent: 'space-between',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.24,
+        shadowRadius: 24,
+        elevation: 10,
         overflow: 'hidden',
     },
 
     // Card Content (mantido do carousel)
     carouselHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     carouselHeaderLeft: { flex: 1 },
-    carouselLabel: { color: '#888', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-    carouselDueInline: { color: '#555', fontSize: 10, marginTop: 2 },
+    carouselLabel: { color: '#F5F5F7', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.45 },
+    carouselDueInline: { color: '#8E8E93', fontSize: 10.5, marginTop: 2 },
     carouselContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: 6 },
     carouselHistoryContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     carouselAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
@@ -2597,7 +2728,7 @@ const styles = StyleSheet.create({
 
     // Lists
     // Lists
-    listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 16, paddingHorizontal: 20 },
+    listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, marginTop: 8, paddingHorizontal: 20 },
     listHeaderTitle: {
         fontSize: 12,
         fontWeight: '600',
@@ -2605,7 +2736,7 @@ const styles = StyleSheet.create({
         letterSpacing: 0.5,
         textTransform: 'uppercase',
     },
-    listHeaderCount: { color: '#666', fontSize: 13, marginTop: 2 },
+    listHeaderCount: { color: '#8E8E93', fontSize: 13, marginTop: 2 },
     listHeaderTotal: { color: '#FFF', fontSize: 18, fontWeight: '700' },
     listContent: { paddingBottom: 140 },
     transactionCardWrapper: {
@@ -2640,7 +2771,18 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         flexShrink: 1,
     },
-    transactionCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#151515', padding: 10, borderWidth: 1, borderColor: '#252525', marginHorizontal: 20, overflow: 'hidden' },
+    transactionCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#101010',
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        minHeight: 66,
+        marginHorizontal: 20,
+        overflow: 'hidden',
+        borderColor: '#252525',
+        borderWidth: 1,
+    },
     transactionMovingOverlay: {
         ...StyleSheet.absoluteFillObject,
         justifyContent: 'center',
@@ -2657,22 +2799,37 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 6,
     },
-    transactionMovingText: {
-        marginLeft: 8,
-        color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '600',
+    separator: {
+        position: 'absolute',
+        bottom: 0,
+        left: 14,
+        right: 14,
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#252525',
     },
-    separator: { position: 'absolute', bottom: 0, left: 14, right: 14, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.08)' },
-    detailsContainer: { flex: 1, gap: 2 },
-    descriptionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    description: { fontSize: 14, fontWeight: '600', color: '#FFFFFF', flex: 1 },
+    detailsContainer: { flex: 1, gap: 2, minWidth: 0, paddingRight: 8 },
+    descriptionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+    description: { fontSize: 14, lineHeight: 18, fontWeight: '400', color: '#FFFFFF', flex: 1, flexShrink: 1 },
     paymentBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(4, 211, 97, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
     paymentBadgeText: { color: '#04D361', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
     subDetails: { flexDirection: 'row', alignItems: 'center' },
-    category: { fontSize: 12, color: '#666', marginTop: 1 },
-    amountContainer: { alignItems: 'flex-end', justifyContent: 'center' },
-    amount: { fontSize: 14, fontWeight: '700' },
+    category: { fontSize: 12, color: '#8E8E93', marginTop: 1 },
+    amountContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flexShrink: 0 },
+    amount: { fontSize: 15, fontWeight: '400' },
+    installmentPill: {
+        borderRadius: 999,
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+    },
+    installmentPillText: {
+        fontSize: 9,
+        lineHeight: 11,
+        color: '#B8B8BE',
+        fontWeight: '600',
+    },
     actionsContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2685,19 +2842,19 @@ const styles = StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: '#1C1C1E',
+        backgroundColor: '#101010',
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#2C2C2E',
+        borderColor: '#252525',
     },
     expandOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', zIndex: 50, elevation: 50 },
     expandBlur: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
     expandBackdropPress: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
     expandCard: {
-        backgroundColor: '#151515',
+        backgroundColor: '#101010',
         borderWidth: 1,
-        borderColor: '#2B2B2B',
+        borderColor: '#252525',
         padding: 16,
         overflow: 'hidden',
         shadowColor: '#000',
@@ -2723,10 +2880,10 @@ const styles = StyleSheet.create({
         height: 32,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#2B2B2B',
+        borderColor: '#252525',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#1C1C1C'
+        backgroundColor: '#161616'
     },
     expandDetails: { marginTop: 18, gap: 12 },
     expandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -2734,10 +2891,33 @@ const styles = StyleSheet.create({
     expandValue: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
     expandAmountContainer: { marginTop: 18, alignItems: 'flex-end' },
     expandAmount: { fontSize: 22, fontWeight: '700' },
-    emptyState: { alignItems: 'center', justifyContent: 'center', paddingTop: 60, paddingHorizontal: 20 },
-    emptyIconContainer: { justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-    emptyTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF', marginBottom: 8 },
-    emptyText: { fontSize: 14, color: '#909090', textAlign: 'center', maxWidth: 280, lineHeight: 20, marginBottom: 24 },
+    emptyState: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 28,
+        paddingBottom: 96
+    },
+    emptyLottie: {
+        width: 48,
+        height: 48
+    },
+    emptyTitle: {
+        fontSize: 15,
+        fontFamily: 'AROneSans_400Regular',
+        color: '#E5E5E5',
+        marginTop: 8,
+        marginBottom: 4,
+        textAlign: 'center'
+    },
+    emptyText: {
+        fontSize: 13,
+        color: '#8E8E93',
+        textAlign: 'center',
+        maxWidth: 232,
+        lineHeight: 18,
+        fontFamily: 'AROneSans_400Regular'
+    },
     connectButton: {
         backgroundColor: '#D97757',
         paddingHorizontal: 16,
@@ -2753,7 +2933,7 @@ const styles = StyleSheet.create({
     emptyListState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
     emptyListTitle: { fontSize: 16, fontWeight: '600', color: '#666', marginTop: 12 },
     emptyListText: { fontSize: 13, color: '#555', marginTop: 4 },
-    statusBadge: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6 },
+    statusBadge: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 999 },
     statusBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
 
     // New Empty State Styles
@@ -2819,25 +2999,24 @@ const styles = StyleSheet.create({
     // Groups
     groupContainer: {
         marginTop: 24,
-        marginBottom: 10,
+        marginBottom: 8,
         marginHorizontal: 20,
     },
     groupHeader: {
         fontSize: 12,
-        fontWeight: '600',
-        color: '#888',
+        fontWeight: '500',
+        color: '#8E8E93',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-        marginBottom: 8,
-        marginLeft: 4,
+        marginLeft: 0,
     },
     groupCard: {
-        borderRadius: 16,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 3,
+        borderRadius: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.18,
+        shadowRadius: 22,
+        elevation: 8,
     },
 
     // Stack Selector Styles
@@ -2915,7 +3094,7 @@ const styles = StyleSheet.create({
     },
     stackCardLabel: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'AROneSans_400Regular',
         textTransform: 'uppercase',
         letterSpacing: 1.5,
         textShadowColor: 'rgba(0,0,0,0.3)',
@@ -2959,7 +3138,7 @@ const styles = StyleSheet.create({
     },
     configNeededTitle: {
         fontSize: 20,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
         color: '#FFF',
         marginBottom: 12,
         textAlign: 'center',
@@ -2982,7 +3161,7 @@ const styles = StyleSheet.create({
     configNeededButtonText: {
         color: '#FFF',
         fontSize: 15,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
     },
     // Card Selector Styles
     cardSelectorContainer: {
@@ -2991,10 +3170,8 @@ const styles = StyleSheet.create({
         gap: 4,
         paddingVertical: 4, // kept minimum padding for touch targets or layout
         paddingHorizontal: 0, // removed horizontal padding since no background
-        // backgroundColor: '#1A1A1A', // Removed
         // borderRadius: 20, // Removed
         // borderWidth: 1, // Removed
-        // borderColor: '#2A2A2A', // Removed
     },
     cardSelectorArrow: {
         padding: 4,
@@ -3002,7 +3179,7 @@ const styles = StyleSheet.create({
     cardSelectorText: {
         fontSize: 14,
         color: '#FFF',
-        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
         minWidth: 80,
         textAlign: 'center',
         maxWidth: 140,
@@ -3016,91 +3193,114 @@ const styles = StyleSheet.create({
     globalLoaderContainer: {
         alignItems: 'center',
         gap: 12,
-        backgroundColor: 'rgba(26, 26, 26, 0.8)',
+        backgroundColor: 'rgba(16, 16, 16, 0.92)',
         padding: 24,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#2A2A2A',
+        borderColor: '#252525',
     },
     globalLoadingText: {
         color: '#FFFFFF',
         fontSize: 14,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
     },
 });
 
 // Search Modal Styles
 const searchStyles = StyleSheet.create({
+    container: {
+        paddingTop: 12,
+        maxHeight: 520,
+    },
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#252525',
-        marginBottom: 16,
+        backgroundColor: '#101010',
+        marginBottom: 24,
         paddingHorizontal: 12,
-        height: 40,
-        borderRadius: 10,
+        height: 44,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: '#252525',
     },
     searchInput: {
         flex: 1,
         color: '#FFF',
-        fontSize: 14,
+        fontSize: 15,
         padding: 0,
+    },
+    sectionTitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#8E8E93',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    resultsContent: {
+        paddingBottom: 8,
+    },
+    resultsGroup: {
+        backgroundColor: '#101010',
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: '#252525',
+        overflow: 'hidden',
     },
     emptyContainer: {
         paddingVertical: 40,
         alignItems: 'center',
     },
     emptyText: {
-        color: '#666',
+        color: '#8E8E93',
         fontSize: 14,
     },
     resultCard: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 12,
-        paddingHorizontal: 4,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F1F1F',
-    },
-    resultIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-        borderWidth: 1,
+        paddingHorizontal: 16,
+        minHeight: 58,
     },
     resultDetails: {
         flex: 1,
-        marginRight: 8,
+        marginRight: 12,
     },
     resultDescription: {
         color: '#FFF',
-        fontSize: 14,
-        fontWeight: '500',
+        fontSize: 16,
+        fontWeight: '400',
         marginBottom: 2,
     },
+    resultMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
     resultCategory: {
-        color: '#888',
-        fontSize: 11,
-        fontWeight: '400',
+        color: '#8E8E93',
+        fontSize: 12,
+        flexShrink: 1,
     },
     resultDate: {
-        color: '#555',
-        fontSize: 11,
+        color: '#636366',
+        fontSize: 12,
     },
     resultAmountContainer: {
         alignItems: 'flex-end',
     },
     resultAmount: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 15,
+        fontWeight: '400',
     },
     resultInstallment: {
-        fontSize: 9,
-        color: '#666',
+        fontSize: 10,
+        color: '#8E8E93',
         marginTop: 2,
-        fontWeight: '500',
+    },
+    resultSeparator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#252525',
+        marginLeft: 16,
     },
 });

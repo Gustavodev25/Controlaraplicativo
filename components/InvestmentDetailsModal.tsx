@@ -1,9 +1,7 @@
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { ModernSwitch } from '@/components/ui/ModernSwitch';
-import { ArrowLeftRight, ArrowUpCircle, DollarSign, List, Pencil, Trash2 } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { Keyboard, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 interface InvestmentDetailsModalProps {
     visible: boolean;
@@ -14,6 +12,7 @@ interface InvestmentDetailsModalProps {
     onExtractRequest: () => void;
     investmentName: string;
     currentAmount: number;
+    initialView?: 'menu' | 'movement';
 }
 
 export function InvestmentDetailsModal({
@@ -24,39 +23,19 @@ export function InvestmentDetailsModal({
     onEditRequest,
     onExtractRequest,
     investmentName,
-    currentAmount
+    currentAmount,
+    initialView = 'menu',
 }: InvestmentDetailsModalProps) {
-    const [view, setView] = useState<'menu' | 'movement'>('menu');
+    const [view, setView] = useState<'menu' | 'movement'>(initialView);
     const [amountStr, setAmountStr] = useState('');
     const [type, setType] = useState<'deposit' | 'withdraw'>('deposit');
 
-    // Animation shared value (0 for deposit, 1 for withdraw)
-    const rotation = useSharedValue(0);
-
-    // Update rotation when type changes
-    useEffect(() => {
-        rotation.value = withSpring(type === 'deposit' ? 0 : 180, {
-            damping: 15,
-            stiffness: 120
-        });
-    }, [type]);
-
-    // Animated style for the icon
-    const animatedIconStyle = useAnimatedStyle(() => {
-        return {
-            transform: [{ rotate: `${rotation.value}deg` }]
-        };
-    });
-
-    // Reset state when modal opens
     useEffect(() => {
         if (visible) {
-            setView('menu');
+            setView(initialView);
             setAmountStr('');
             setType('deposit');
-            rotation.value = 0;
         } else {
-            // Dismiss keyboard when modal closes
             Keyboard.dismiss();
         }
     }, [visible]);
@@ -65,7 +44,6 @@ export function InvestmentDetailsModal({
         const rawAmount = parseFloat(amountStr.replace(/\./g, '').replace(',', '.') || '0');
         if (rawAmount <= 0) return;
 
-        // Validation for withdrawal
         if (type === 'withdraw' && rawAmount > currentAmount) {
             alert('Saldo insuficiente para retirar este valor.');
             return;
@@ -87,7 +65,7 @@ export function InvestmentDetailsModal({
         setAmountStr(formatInputCurrency(text));
     };
 
-    // Render Menu Options
+    // Menu view
     if (view === 'menu') {
         const titleComponent = investmentName.includes(' • ') ? (
             <View>
@@ -107,66 +85,29 @@ export function InvestmentDetailsModal({
                 visible={visible}
                 onClose={onClose}
                 title={titleComponent}
+                titleAlign="start"
             >
-                <ScrollView 
-                    contentContainerStyle={{ paddingBottom: 20 }}
-                    showsVerticalScrollIndicator={false}
-                >
-                    <View style={styles.container}>
-                        <View style={styles.sectionCard}>
-                            {/* Extrato */}
-                            <TouchableOpacity style={styles.itemContainer} onPress={onExtractRequest}>
-                                <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
-                                    <List size={20} color="#0A84FF" />
-                                </View>
-                                <View style={styles.itemRightContainer}>
-                                    <View style={styles.itemContent}>
-                                        <Text style={styles.itemTitle}>Extrato</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.itemSeparator} />
-                            </TouchableOpacity>
+                <ScrollView contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
+                    <View style={styles.groupCard}>
+                        <TouchableOpacity style={styles.itemContent} onPress={onExtractRequest}>
+                            <Text style={styles.itemTitle}>Extrato</Text>
+                        </TouchableOpacity>
+                        <View style={styles.separator} />
 
-                            {/* Movimentar */}
-                            <TouchableOpacity style={styles.itemContainer} onPress={() => setView('movement')}>
-                                <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(4, 211, 97, 0.15)' }]}>
-                                    <ArrowLeftRight size={20} color="#04D361" />
-                                </View>
-                                <View style={styles.itemRightContainer}>
-                                    <View style={styles.itemContent}>
-                                        <Text style={styles.itemTitle}>Movimentar</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.itemSeparator} />
-                            </TouchableOpacity>
+                        <TouchableOpacity style={styles.itemContent} onPress={() => setView('movement')}>
+                            <Text style={styles.itemTitle}>Movimentar</Text>
+                        </TouchableOpacity>
+                        <View style={styles.separator} />
 
-                            {/* Editar */}
-                            <TouchableOpacity style={styles.itemContainer} onPress={onEditRequest}>
-                                <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(255, 159, 10, 0.15)' }]}>
-                                    <Pencil size={20} color="#FF9F0A" />
-                                </View>
-                                <View style={styles.itemRightContainer}>
-                                    <View style={styles.itemContent}>
-                                        <Text style={styles.itemTitle}>Editar</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.itemSeparator} />
-                            </TouchableOpacity>
+                        <TouchableOpacity style={styles.itemContent} onPress={onEditRequest}>
+                            <Text style={styles.itemTitle}>Editar</Text>
+                        </TouchableOpacity>
+                        <View style={styles.separator} />
 
-                            {/* Excluir */}
-                            {/* Delete Tutorial (Static) */}
-                            <View style={styles.itemContainer}>
-                                <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(255, 255, 255, 0.05)' }]}>
-                                    <Trash2 size={20} color="#808080" />
-                                </View>
-                                <View style={styles.itemRightContainer}>
-                                    <View style={styles.itemContent}>
-                                        <Text style={[styles.itemTitle, { color: '#808080', fontSize: 13 }]}>
-                                            Segure o card por 5 segundos para excluir
-                                        </Text>
-                                    </View>
-                                </View>
-                            </View>
+                        <View style={styles.itemContent}>
+                            <Text style={styles.itemHint}>
+                                Segure o card por 5 segundos para excluir
+                            </Text>
                         </View>
                     </View>
                 </ScrollView>
@@ -174,22 +115,23 @@ export function InvestmentDetailsModal({
         );
     }
 
-    // Render Movement Form
+    // Movement form view
     return (
         <ModalPadrao
             visible={visible}
             onClose={() => {
                 Keyboard.dismiss();
-                setView('menu');
+                onClose();
             }}
             title={type === 'deposit' ? 'Guardar Dinheiro' : 'Resgatar Dinheiro'}
-            headerRight={
+            titleAlign="start"
+            footer={
                 <TouchableOpacity
                     onPress={handleSave}
                     disabled={!amountStr}
-                    style={{ opacity: (!amountStr) ? 0.5 : 1 }}
+                    style={[styles.saveButton, !amountStr && styles.saveButtonDisabled]}
                 >
-                    <Text style={{ color: '#D97757', fontWeight: 'bold', fontSize: 16 }}>Confirmar</Text>
+                    <Text style={styles.saveButtonText}>Confirmar</Text>
                 </TouchableOpacity>
             }
         >
@@ -198,62 +140,41 @@ export function InvestmentDetailsModal({
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
             >
-                <View style={styles.container}>
-                    <View style={styles.sectionCard}>
-                        {/* Valor */}
-                        <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                <DollarSign size={20} color="#E0E0E0" />
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>Valor</Text>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                        <Text style={{ color: amountStr ? '#FFFFFF' : '#555', fontSize: 16, marginRight: 4 }}>R$</Text>
-                                        <TextInput
-                                            style={styles.inputRight}
-                                            value={amountStr}
-                                            onChangeText={handleChangeAmount}
-                                            placeholder="0,00"
-                                            placeholderTextColor="#555"
-                                            keyboardType="numeric"
-                                            textAlign="right"
-                                            autoFocus
-                                        />
-                                    </View>
-                                </View>
-                            </View>
-                            <View style={styles.itemSeparator} />
+                <View style={styles.groupCard}>
+                    {/* Valor */}
+                    <View style={styles.itemContent}>
+                        <Text style={styles.itemTitle}>Valor</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: amountStr ? '#FFFFFF' : '#555', fontSize: 16, marginRight: 4 }}>R$</Text>
+                            <TextInput
+                                style={styles.inputRight}
+                                value={amountStr}
+                                onChangeText={handleChangeAmount}
+                                placeholder="0,00"
+                                placeholderTextColor="#555"
+                                keyboardType="numeric"
+                                textAlign="right"
+                                autoFocus
+                            />
                         </View>
+                    </View>
+                    <View style={styles.separator} />
 
-                        {/* Tipo de Operação */}
-                        <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                <Animated.View style={animatedIconStyle}>
-                                    <ArrowUpCircle
-                                        size={20}
-                                        color={type === 'deposit' ? "#04D361" : "#FF4C4C"}
-                                    />
-                                </Animated.View>
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <View>
-                                        <Text style={styles.itemTitle}>Operação</Text>
-                                        <Text style={[styles.itemSubtitle, { color: type === 'deposit' ? '#04D361' : '#FF4C4C' }]}>
-                                            {type === 'deposit' ? 'Guardar dinheiro' : 'Resgatar dinheiro'}
-                                        </Text>
-                                    </View>
-                                    <ModernSwitch
-                                        value={type === 'deposit'}
-                                        onValueChange={(val) => setType(val ? 'deposit' : 'withdraw')}
-                                        activeColor="#04D361"
-                                        width={46}
-                                        height={26}
-                                    />
-                                </View>
-                            </View>
+                    {/* Operação */}
+                    <View style={styles.itemContent}>
+                        <View>
+                            <Text style={styles.itemTitle}>Operação</Text>
+                            <Text style={[styles.itemSubtitle, { color: type === 'deposit' ? '#04D361' : '#FF4C4C' }]}>
+                                {type === 'deposit' ? 'Guardar dinheiro' : 'Resgatar dinheiro'}
+                            </Text>
                         </View>
+                        <ModernSwitch
+                            value={type === 'deposit'}
+                            onValueChange={(val) => setType(val ? 'deposit' : 'withdraw')}
+                            activeColor="#04D361"
+                            width={46}
+                            height={26}
+                        />
                     </View>
                 </View>
             </ScrollView>
@@ -262,76 +183,58 @@ export function InvestmentDetailsModal({
 }
 
 const styles = StyleSheet.create({
-    container: {
-        gap: 20,
-    },
-    // Form Styles
-    sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+    groupCard: {
+        backgroundColor: '#1C1C1E',
+        borderRadius: 12,
         overflow: 'hidden',
-    },
-    itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        position: 'relative',
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    itemRightContainer: {
-        flex: 1,
     },
     itemContent: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        minHeight: 48,
     },
     itemTitle: {
-        fontSize: 15,
+        fontSize: 17,
         color: '#FFFFFF',
-        fontWeight: '500',
+        fontWeight: '400',
     },
     itemSubtitle: {
         fontSize: 12,
-        color: '#909090',
-        marginTop: 2,
+        color: '#8E8E93',
+        marginTop: 1,
     },
-    itemSeparator: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 1,
-        backgroundColor: '#2A2A2A',
+    itemHint: {
+        fontSize: 13,
+        color: '#8E8E93',
+    },
+    separator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#38383A',
+        marginLeft: 16,
     },
     inputRight: {
         color: '#FFFFFF',
         fontSize: 16,
         minWidth: 100,
         padding: 0,
+        textAlign: 'right',
     },
     saveButton: {
         backgroundColor: '#D97757',
-        borderRadius: 12,
-        paddingVertical: 16,
+        borderRadius: 14,
+        minHeight: 50,
         alignItems: 'center',
-        marginTop: 8,
+        justifyContent: 'center',
+    },
+    saveButtonDisabled: {
+        opacity: 0.5,
     },
     saveButtonText: {
         color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: '700',
     },
 });

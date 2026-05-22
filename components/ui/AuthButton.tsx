@@ -15,14 +15,15 @@ export const AuthButton = ({ title, isLoading, variant = 'primary', style, ...pr
                 variant === 'primary' && styles.primaryButton,
                 variant === 'secondary' && styles.secondaryButton,
                 variant === 'outline' && styles.outlineButton,
-                props.disabled && styles.disabledButton,
+                (props.disabled || isLoading) && styles.disabledButton,
                 style
             ]}
             disabled={isLoading || props.disabled}
+            activeOpacity={0.8}
             {...props}
         >
             {isLoading ? (
-                <ActivityIndicator color={variant === 'outline' ? '#faf9f5' : '#fff'} />
+                <ActivityIndicator color={variant === 'outline' ? '#faf9f5' : '#fff'} size="small" />
             ) : (
                 <Text style={[
                     styles.text,
@@ -39,47 +40,42 @@ export const AuthButton = ({ title, isLoading, variant = 'primary', style, ...pr
 
 const styles = StyleSheet.create({
     button: {
-        height: 56,
-        borderRadius: 16,
+        height: 52,
+        borderRadius: 14,
         justifyContent: 'center',
         alignItems: 'center',
         flexDirection: 'row',
         width: '100%',
-        shadowColor: "#000",
-        shadowOffset: {
-            width: 0,
-            height: 4,
-        },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 4,
     },
     primaryButton: {
         backgroundColor: '#d97757',
     },
     secondaryButton: {
-        backgroundColor: '#27272a',
+        backgroundColor: '#1C1C1E',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.05)',
     },
     outlineButton: {
         backgroundColor: 'transparent',
-        borderWidth: 1,
-        borderColor: '#3f3f46',
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.1)',
     },
     disabledButton: {
-        opacity: 0.6,
+        opacity: 0.5,
     },
     text: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        letterSpacing: 0.5,
+        fontSize: 17,
+        fontWeight: '600',
+        letterSpacing: 0,
     },
     primaryText: {
         color: '#fff',
     },
     secondaryText: {
-        color: '#faf9f5',
+        color: '#fff',
     },
     outlineText: {
-        color: '#faf9f5',
+        color: '#fff',
     },
 });
+

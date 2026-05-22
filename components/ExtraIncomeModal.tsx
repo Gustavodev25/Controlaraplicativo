@@ -1,4 +1,4 @@
-import { BottomModal } from '@/components/ui/BottomModal';
+import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { ModernSwitch } from '@/components/ui/ModernSwitch';
 import { Banknote, DollarSign, FileText } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
@@ -70,19 +70,22 @@ export function ExtraIncomeModal({ visible, onClose, onSave }: ExtraIncomeModalP
         setAmountStr(formatInputCurrency(text));
     };
 
+    const isSaveDisabled = !description || !amountStr || parseFloat(amountStr.replace(/\./g, '').replace(',', '.') || '0') <= 0;
+
     return (
-        <BottomModal
+        <ModalPadrao
             visible={visible}
             onClose={onClose}
             title="Novo Extra"
-            height="auto"
-            rightElement={
+            titleAlign="start"
+            maxHeightRatio={0.86}
+            footer={
                 <TouchableOpacity
                     onPress={handleSave}
-                    disabled={!amountStr || parseFloat(amountStr.replace(',', '.') || '0') <= 0 || !description}
-                    style={{ opacity: (!amountStr || parseFloat(amountStr.replace(',', '.') || '0') <= 0 || !description) ? 0.5 : 1 }}
+                    disabled={isSaveDisabled}
+                    style={[styles.footerButton, isSaveDisabled && styles.footerButtonDisabled]}
                 >
-                    <Text style={styles.headerSaveText}>Adicionar</Text>
+                    <Text style={styles.footerButtonText}>Adicionar</Text>
                 </TouchableOpacity>
             }
         >
@@ -188,7 +191,7 @@ export function ExtraIncomeModal({ visible, onClose, onSave }: ExtraIncomeModalP
                 </View>
 
             </View>
-        </BottomModal >
+        </ModalPadrao>
     );
 }
 
@@ -302,9 +305,19 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#d97757', // Premium Orange/Brand color
     },
-    headerSaveText: {
-        color: '#d97757',
-        fontWeight: '600',
-        fontSize: 16
+    footerButton: {
+        backgroundColor: '#D97757',
+        borderRadius: 14,
+        minHeight: 50,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    footerButtonDisabled: {
+        opacity: 0.5,
+    },
+    footerButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '700',
+        fontSize: 16,
     },
 });

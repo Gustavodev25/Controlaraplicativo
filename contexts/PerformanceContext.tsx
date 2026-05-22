@@ -23,11 +23,16 @@ import {
 } from '@/services/performance/types';
 
 const DEFAULT_FLAGS: PerformanceFeatureFlags = DEFAULT_PERFORMANCE_FLAGS;
+const IS_DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__;
+const ADAPTIVE_FPS_RUNTIME_ENABLED = process.env.EXPO_PUBLIC_ENABLE_ADAPTIVE_FPS === '1';
+const RUNTIME_MONITOR_ENABLED =
+  process.env.EXPO_PUBLIC_ENABLE_PERF_MONITOR === '1' ||
+  (!IS_DEV_RUNTIME && ADAPTIVE_FPS_RUNTIME_ENABLED);
 
 const DEFAULT_CONFIG: PerformanceConfig = {
-  realtimeHud: __DEV__,
-  logToFile: __DEV__,
-  adaptiveFps: true,
+  realtimeHud: false,
+  logToFile: false,
+  adaptiveFps: RUNTIME_MONITOR_ENABLED,
 };
 
 const FALLBACK_TIER: DeviceTierInfo = {
@@ -133,8 +138,9 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     setConfig((prev) => ({
       ...prev,
-      realtimeHud: __DEV__ && flags.perfV2Enabled,
-      adaptiveFps: flags.adaptiveFpsEnabled,
+      realtimeHud: prev.realtimeHud && flags.perfV2Enabled,
+      logToFile: prev.logToFile && flags.perfV2Enabled,
+      adaptiveFps: RUNTIME_MONITOR_ENABLED && flags.adaptiveFpsEnabled,
     }));
   }, [flags.adaptiveFpsEnabled, flags.perfV2Enabled]);
 
@@ -158,13 +164,24 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
   }, [config]);
 
   useEffect(() => {
-    runtimeMonitor.setConfig(config);
-    if (!flags.perfV2Enabled) {
+    const effectiveConfig = {
+      ...config,
+      adaptiveFps: RUNTIME_MONITOR_ENABLED && config.adaptiveFps,
+    };
+    const shouldRunMonitor =
+      RUNTIME_MONITOR_ENABLED &&
+      flags.perfV2Enabled &&
+      (effectiveConfig.realtimeHud ||
+        effectiveConfig.logToFile ||
+        (effectiveConfig.adaptiveFps && flags.lodDynamicEnabled && flags.adaptiveFpsEnabled));
+
+    runtimeMonitor.setConfig(effectiveConfig);
+    if (!shouldRunMonitor) {
       setLatestSample(null);
       runtimeMonitor.stop();
       return;
     }
-    runtimeMonitor.start(config);
+    runtimeMonitor.start(effectiveConfig);
     const unsubscribe = runtimeMonitor.subscribe((sample) => {
       const currentFlags = flagsRef.current;
       const currentConfig = configRef.current;
@@ -187,7 +204,7 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
       unsubscribe();
       runtimeMonitor.stop();
     };
-  }, [config, flags.perfV2Enabled]);
+  }, [config, flags.adaptiveFpsEnabled, flags.lodDynamicEnabled, flags.perfV2Enabled]);
 
   useEffect(() => {
     runtimeMonitor.setScreen(pathname || 'unknown');

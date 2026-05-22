@@ -1,9 +1,14 @@
 import MonthSelector from '@/components/MonthSelector';
-import { RecurrenceDeleteModal } from '@/components/RecurrenceDeleteModal';
 import { RecurrenceFilterModal, RecurrenceFilterState } from '@/components/RecurrenceFilterModal';
 import { ReminderModal } from '@/components/ReminderModal';
 import { useCategories } from '@/hooks/use-categories';
+import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
 import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
+import { ModalPadrao } from '@/components/ui/ModalPadrao';
+import { ModernSwitch } from '@/components/ui/ModernSwitch';
+import { MorphTouchable } from '@/components/ui/MorphTouchable';
+import { OpenFinanceSyncBanner } from '@/components/ui/OpenFinanceSyncBanner';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
@@ -13,43 +18,230 @@ import { getCategoryConfig } from '@/utils/categoryUtils';
 import { addMonths } from '@/utils/monthWindow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import LottieView from 'lottie-react-native';
 import {
+    CalendarDays,
     Check,
-    CheckCircle2,
     ChevronLeft,
     ChevronRight,
-    Edit2,
-    LayoutList,
-    RotateCcw,
+    MoreVertical,
+    Plus,
+    Search,
     X
 } from 'lucide-react-native';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Dimensions, FlatList,
+    Animated as NativeAnimated,
+    Easing,
+    FlatList,
+    Image,
+    LayoutAnimation,
     Platform,
     RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     UIManager,
     View
 } from 'react-native';
 
 import Animated, {
+    Extrapolation,
     FadeIn,
-    Layout,
-    SlideOutDown,
+    FadeOut,
+    interpolate,
+    LinearTransition,
     useAnimatedStyle,
     useSharedValue,
     withDelay,
+    withSequence,
     withSpring,
-    withTiming
 } from 'react-native-reanimated';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// — Spring configs idênticos ao MonthSelector —
+const AS_SPRING_ENTRY   = { damping: 16, stiffness: 195, mass: 1.05, overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_SPRING_STRETCH = { damping: 12, stiffness: 165, mass: 1.1,  overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_SPRING_RECOIL  = { damping: 16, stiffness: 150, mass: 1.05, overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_SPRING_SETTLE  = { damping: 22, stiffness: 160, mass: 1,    overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_LABEL_SPRING   = { damping: 18, stiffness: 260, mass: 0.7,  overshootClamping: false } as const;
+const AS_PRESS_SPRING   = { damping: 16, stiffness: 360, mass: 0.5,  overshootClamping: false } as const;
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+interface ArrowSelectorOption { label: string; value: string | null; }
+
+function ArrowSelector({ options, selectedValue, onChange }: {
+    options: ArrowSelectorOption[];
+    selectedValue: string | null;
+    onChange: (value: string | null) => void;
+}) {
+    const currentIndex = Math.max(0, options.findIndex(o => o.value === selectedValue));
+    const directionRef = useRef(0);
+
+    const visibility    = useSharedValue(0);
+    const squash        = useSharedValue(0.84);
+    const contentReveal = useSharedValue(1);
+    const leftPress     = useSharedValue(0);
+    const rightPress    = useSharedValue(0);
+
+    // Entry — idêntico ao MonthSelector
+    useEffect(() => {
+        squash.value    = 0.84;
+        visibility.value = withSpring(1, AS_SPRING_ENTRY);
+        squash.value    = withSequence(
+            withSpring(1.085, AS_SPRING_STRETCH),
+            withSpring(0.976, AS_SPRING_RECOIL),
+            withSpring(1,     AS_SPRING_SETTLE),
+        );
+    }, []);
+
+    // Squash/stretch ao trocar opção
+    useEffect(() => {
+        squash.value = withSequence(
+            withSpring(1.075, AS_SPRING_STRETCH),
+            withSpring(0.978, AS_SPRING_RECOIL),
+            withSpring(1,     AS_SPRING_SETTLE),
+        );
+        contentReveal.value = 0;
+        contentReveal.value = withDelay(75, withSpring(1, AS_LABEL_SPRING));
+    }, [currentIndex]);
+
+    // Container: squash + entry
+    const containerStyle = useAnimatedStyle(() => {
+        const pressAmount = Math.max(leftPress.value, rightPress.value);
+        const stretchX = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [0.92, 0.99, 1, 1.04],  Extrapolation.CLAMP);
+        const stretchY = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [1.08, 1.018, 1, 0.976], Extrapolation.CLAMP);
+        const baseScaleX = interpolate(visibility.value, [0, 0.34, 0.68, 1], [0.18, 1.028, 0.992, 1], Extrapolation.CLAMP);
+        const baseScaleY = interpolate(visibility.value, [0, 0.42, 0.78, 1], [0.18, 0.94,  1.012, 1], Extrapolation.CLAMP);
+        const pressScaleX = interpolate(pressAmount, [0, 1], [1, 0.986], Extrapolation.CLAMP);
+        const pressScaleY = interpolate(pressAmount, [0, 1], [1, 1.035], Extrapolation.CLAMP);
+        const translateY  = interpolate(visibility.value, [0, 0.5, 0.82, 1], [14, -3, 1, 0], Extrapolation.CLAMP);
+        return {
+            opacity: interpolate(visibility.value, [0, 0.22, 1], [0, 0.86, 1], Extrapolation.CLAMP),
+            transform: [
+                { translateY },
+                { scaleX: baseScaleX * stretchX * pressScaleX },
+                { scaleY: baseScaleY * stretchY * pressScaleY },
+            ],
+        };
+    });
+
+    // Counter-squash no conteúdo interno
+    const contentCounterStyle = useAnimatedStyle(() => {
+        const cx = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [1.09, 1.012, 1, 0.962], Extrapolation.CLAMP);
+        const cy = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [0.93, 0.984, 1, 1.024], Extrapolation.CLAMP);
+        return { transform: [{ scaleX: cx }, { scaleY: cy }] };
+    });
+
+    // Label reveal
+    const labelStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(contentReveal.value, [0, 0.45, 1], [0, 0.35, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateY: interpolate(contentReveal.value, [0, 1], [4, 0],  Extrapolation.CLAMP) },
+            { translateX: interpolate(contentReveal.value, [0, 1], [directionRef.current * 5, 0], Extrapolation.CLAMP) },
+            { scale:      interpolate(contentReveal.value, [0, 1], [0.965, 1], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    // Press styles para setas
+    const leftBtnStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(leftPress.value, [0, 1], [0.68, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateX: interpolate(leftPress.value,  [0, 1], [0, -1.4], Extrapolation.CLAMP) },
+            { scale:      interpolate(leftPress.value,  [0, 1], [1, 0.88], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const rightBtnStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(rightPress.value, [0, 1], [0.68, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateX: interpolate(rightPress.value, [0, 1], [0, 1.4],  Extrapolation.CLAMP) },
+            { scale:      interpolate(rightPress.value, [0, 1], [1, 0.88], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const handlePrev = () => {
+        directionRef.current = -1;
+        const prev = currentIndex === 0 ? options.length - 1 : currentIndex - 1;
+        onChange(options[prev].value);
+    };
+
+    const handleNext = () => {
+        directionRef.current = 1;
+        const next = (currentIndex + 1) % options.length;
+        onChange(options[next].value);
+    };
+
+    return (
+        <Animated.View style={[styles.arrowSelector, containerStyle]}>
+            <Animated.View style={[styles.arrowSelectorContent, contentCounterStyle]}>
+                <AnimatedTouchableOpacity
+                    onPress={handlePrev}
+                    onPressIn={() => { leftPress.value = withSpring(1, AS_PRESS_SPRING); }}
+                    onPressOut={() => { leftPress.value = withSpring(0, AS_PRESS_SPRING); }}
+                    onTouchCancel={() => { leftPress.value = withSpring(0, AS_PRESS_SPRING); }}
+                    style={[styles.arrowSelectorBtn, leftBtnStyle]}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <ChevronLeft size={14} color="#F5F5F7" strokeWidth={2.4} />
+                </AnimatedTouchableOpacity>
+
+                <View style={styles.arrowSelectorLabelWrapper}>
+                    <Animated.Text
+                        key={options[currentIndex].label}
+                        style={[styles.arrowSelectorLabel, labelStyle]}
+                        numberOfLines={1}
+                    >
+                        {options[currentIndex].label}
+                    </Animated.Text>
+                </View>
+
+                <AnimatedTouchableOpacity
+                    onPress={handleNext}
+                    onPressIn={() => { rightPress.value = withSpring(1, AS_PRESS_SPRING); }}
+                    onPressOut={() => { rightPress.value = withSpring(0, AS_PRESS_SPRING); }}
+                    onTouchCancel={() => { rightPress.value = withSpring(0, AS_PRESS_SPRING); }}
+                    style={[styles.arrowSelectorBtn, rightBtnStyle]}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <ChevronRight size={14} color="#F5F5F7" strokeWidth={2.4} />
+                </AnimatedTouchableOpacity>
+            </Animated.View>
+        </Animated.View>
+    );
+}
+
+const IOS_CORE_LAYOUT = LinearTransition
+    .springify()
+    .damping(21)
+    .stiffness(245)
+    .mass(0.72)
+    .overshootClamping(0);
+
+const IOS_FADE_IN = FadeIn.duration(220);
+const IOS_FADE_OUT = FadeOut.duration(140);
+const HEADER_CONTROL_HEIGHT = 36;
+
+const triggerIOSCoreMorph = () => {
+    LayoutAnimation.configureNext({
+        duration: 420,
+        create: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+            property: LayoutAnimation.Properties.opacity,
+        },
+        update: {
+            type: LayoutAnimation.Types.spring,
+            springDamping: 0.76,
+        },
+        delete: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+            property: LayoutAnimation.Properties.opacity,
+        },
+    });
+};
 
 // Habilitar LayoutAnimation no Android
 if (Platform.OS === 'android') {
@@ -77,6 +269,7 @@ interface RecurrenceItem {
     isValidated?: boolean; // Se false ou undefined, não soma nos totais
     isDetected?: boolean; // Se true, mostra botões de confirmar/excluir
     detectedData?: DetectedSubscription; // Dados da detecção original
+    sourceCollection?: 'recurrences' | 'subscriptions' | 'reminders';
 }
 
 // Componente Lottie que toca em intervalos
@@ -162,30 +355,203 @@ const formatDate = (dateStr: string) => {
     return new Date(y, m - 1, d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
 };
 
-const RecurrenceGroup = ({ title, children }: { title: string, children: React.ReactNode }) => {
+const RecurrenceGroup = ({
+    title,
+    children,
+    isMenuLayerOpen = false,
+}: {
+    title: string,
+    children: React.ReactNode,
+    isMenuLayerOpen?: boolean,
+}) => {
     const { getCategoryName } = useCategories();
     const displayName = getCategoryName(title);
     const { icon: Icon, color, backgroundColor } = getCategoryConfig(displayName);
 
     return (
-        <View style={styles.groupContainer}>
+        <Animated.View
+            entering={IOS_FADE_IN}
+            layout={IOS_CORE_LAYOUT}
+            style={[
+                styles.groupContainer,
+                isMenuLayerOpen && styles.groupOpenLayer,
+            ]}
+        >
             <View style={styles.groupHeader}>
-                <View style={[styles.groupIcon, { backgroundColor }]}>
-                    <Icon size={14} color={color} />
-                </View>
                 <Text style={styles.groupTitle}>{displayName}</Text>
             </View>
             <View style={styles.groupList}>
                 {children}
             </View>
-        </View>
+        </Animated.View>
     );
 };
+
+interface RecurrenceActionDropdownProps {
+    visible: boolean;
+    item: RecurrenceItem;
+    onPay: () => void;
+    onEdit: () => void;
+    onDelete: () => void;
+}
+
+function RecurrenceActionDropdown({
+    visible,
+    item,
+    onPay,
+    onEdit,
+    onDelete
+}: RecurrenceActionDropdownProps) {
+    const sheetOpacity = useRef(new NativeAnimated.Value(0)).current;
+    const sheetScaleX = useRef(new NativeAnimated.Value(0.955)).current;
+    const sheetScaleY = useRef(new NativeAnimated.Value(0.935)).current;
+    const sheetY = useRef(new NativeAnimated.Value(-10)).current;
+    const contentOpacity = useRef(new NativeAnimated.Value(0)).current;
+
+    useEffect(() => {
+        if (visible) {
+            sheetOpacity.setValue(0);
+            sheetScaleX.setValue(0.955);
+            sheetScaleY.setValue(0.935);
+            sheetY.setValue(-10);
+            contentOpacity.setValue(0);
+
+            NativeAnimated.parallel([
+                NativeAnimated.timing(sheetOpacity, {
+                    toValue: 1,
+                    duration: 170,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.spring(sheetY, {
+                    toValue: 0,
+                    damping: 18,
+                    stiffness: 235,
+                    mass: 0.78,
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.sequence([
+                    NativeAnimated.timing(sheetScaleX, {
+                        toValue: 1.018,
+                        duration: 165,
+                        easing: Easing.out(Easing.cubic),
+                        useNativeDriver: false,
+                    }),
+                    NativeAnimated.spring(sheetScaleX, {
+                        toValue: 1,
+                        damping: 13,
+                        stiffness: 190,
+                        mass: 0.62,
+                        useNativeDriver: false,
+                    }),
+                ]),
+                NativeAnimated.sequence([
+                    NativeAnimated.timing(sheetScaleY, {
+                        toValue: 1.012,
+                        duration: 185,
+                        easing: Easing.out(Easing.cubic),
+                        useNativeDriver: false,
+                    }),
+                    NativeAnimated.spring(sheetScaleY, {
+                        toValue: 1,
+                        damping: 13,
+                        stiffness: 185,
+                        mass: 0.62,
+                        useNativeDriver: false,
+                    }),
+                ]),
+                NativeAnimated.timing(contentOpacity, {
+                    toValue: 1,
+                    duration: 260,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: false,
+                }),
+            ]).start();
+        } else {
+            NativeAnimated.parallel([
+                NativeAnimated.timing(sheetOpacity, {
+                    toValue: 0,
+                    duration: 130,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(contentOpacity, {
+                    toValue: 0,
+                    duration: 110,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(sheetScaleX, {
+                    toValue: 0.955,
+                    duration: 170,
+                    easing: Easing.bezier(0.22, 1, 0.36, 1),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(sheetScaleY, {
+                    toValue: 0.935,
+                    duration: 180,
+                    easing: Easing.bezier(0.22, 1, 0.36, 1),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(sheetY, {
+                    toValue: -10,
+                    duration: 180,
+                    easing: Easing.bezier(0.22, 1, 0.36, 1),
+                    useNativeDriver: false,
+                }),
+            ]).start();
+        }
+    }, [visible, sheetOpacity, sheetScaleX, sheetScaleY, sheetY, contentOpacity]);
+
+    return (
+        <NativeAnimated.View
+            pointerEvents={visible ? 'auto' : 'none'}
+            style={[
+                styles.itemActionDropdown,
+                {
+                    opacity: sheetOpacity,
+                    transform: [
+                        { translateY: sheetY },
+                        { scaleX: sheetScaleX },
+                        { scaleY: sheetScaleY },
+                    ],
+                },
+            ]}
+        >
+            <BlurView
+                intensity={16}
+                tint="dark"
+                experimentalBlurMethod="dimezisBlurView"
+                style={styles.itemActionDropdownBlur}
+            >
+                <View style={styles.itemActionDropdownOverlay} />
+                <NativeAnimated.View style={[styles.itemActionDropdownContent, { opacity: contentOpacity }]}>
+                    <MorphTouchable radius={12} style={styles.itemActionDropdownItem} onPress={onPay}>
+                        <Text style={styles.itemActionDropdownText}>
+                            {item.status === 'paid' ? 'Marcar pendente' : item.type === 'reminder' ? 'Marcar feito' : 'Marcar pago'}
+                        </Text>
+                    </MorphTouchable>
+
+                    <View style={styles.itemActionDropdownDivider} />
+
+                    <MorphTouchable radius={12} style={styles.itemActionDropdownItem} onPress={onEdit}>
+                        <Text style={styles.itemActionDropdownText}>Editar</Text>
+                    </MorphTouchable>
+
+                    <View style={styles.itemActionDropdownDivider} />
+
+                    <MorphTouchable radius={12} style={styles.itemActionDropdownItem} onPress={onDelete}>
+                        <Text style={styles.itemActionDropdownTextDestructive}>Excluir</Text>
+                    </MorphTouchable>
+                </NativeAnimated.View>
+            </BlurView>
+        </NativeAnimated.View>
+    );
+}
 
 // Componente para item da lista (Assinatura ou Lembrete)
 const ListItem = ({
     item,
-    index,
     onPay,
     onEdit,
     onDelete,
@@ -195,10 +561,12 @@ const ListItem = ({
     isSelected,
     onLongPress,
     onToggleSelect,
-    showTutorial
+    showTutorial,
+    isActionMenuOpen,
+    onToggleActionMenu,
+    onCloseActionMenu,
 }: {
     item: RecurrenceItem,
-    index: number,
     onPay: (item: RecurrenceItem) => void,
     onEdit: (item: RecurrenceItem) => void,
     onDelete: (item: RecurrenceItem) => void,
@@ -208,32 +576,33 @@ const ListItem = ({
     isSelected: boolean,
     onLongPress: (item: RecurrenceItem) => void,
     onToggleSelect: (item: RecurrenceItem) => void,
-    showTutorial?: boolean
+    showTutorial?: boolean,
+    isActionMenuOpen: boolean,
+    onToggleActionMenu: (item: RecurrenceItem) => void,
+    onCloseActionMenu: () => void,
 }) => {
-    const [expanded, setExpanded] = useState(false);
-
-    const dueStatus = getDueStatus(item);
     const isDetected = item.isDetected === true;
+    const actionMenuOpen = isActionMenuOpen;
 
-    // Fecha expanded quando entra no modo de seleção
+    // Fecha o menu de ações quando entra no modo de seleção.
     useEffect(() => {
-        if (isSelectionMode && expanded) {
-            setExpanded(false);
+        if (isSelectionMode && actionMenuOpen) {
+            triggerIOSCoreMorph();
+            onCloseActionMenu();
         }
-    }, [isSelectionMode]);
+    }, [isSelectionMode, actionMenuOpen, onCloseActionMenu]);
 
     const handlePress = () => {
+        triggerIOSCoreMorph();
+
         if (isSelectionMode) {
             onToggleSelect(item);
-        } else {
-            // Se é detecção, não expande
-            if (!isDetected) {
-                setExpanded(!expanded);
-            }
         }
     };
 
     const handleLongPress = () => {
+        triggerIOSCoreMorph();
+
         if (isSelectionMode) {
             // Quando já está em modo de seleção, long press também seleciona/deseleciona
             onToggleSelect(item);
@@ -242,60 +611,58 @@ const ListItem = ({
         }
     };
 
+    const handleToggleActionMenu = () => {
+        triggerIOSCoreMorph();
+        onToggleActionMenu(item);
+    };
+
+    const handleMenuAction = (action: (target: RecurrenceItem) => void) => {
+        triggerIOSCoreMorph();
+        onCloseActionMenu();
+        action(item);
+    };
+
     // Layout normal (Actions)
     return (
         <Animated.View
-            entering={FadeIn.delay(index * 50)}
-            layout={Layout.springify()}
+            entering={IOS_FADE_IN}
+            exiting={IOS_FADE_OUT}
+            layout={IOS_CORE_LAYOUT}
             style={[
-                styles.listItem,
-                expanded && !isSelectionMode && { borderColor: '#E67E5E', backgroundColor: '#161616' },
-                isSelected && { borderColor: '#D97757', backgroundColor: '#1A1512' },
-                { marginBottom: 12 }
+                { marginBottom: 10 },
+                actionMenuOpen && styles.listItemOpenLayer,
             ]}
         >
-            <TouchableOpacity
-                activeOpacity={0.7}
+            <MorphTouchable
+                radius={17}
                 onPress={handlePress}
                 onLongPress={handleLongPress}
                 delayLongPress={300}
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}
+                style={[
+                    styles.listItem,
+                    item.status === 'paid' && styles.listItemPaid,
+                    actionMenuOpen && !isSelectionMode && styles.listItemExpanded,
+                    isSelected && styles.listItemSelected,
+                ]}
             >
+                <View style={styles.listItemPressContent}>
                 {/* Checkbox de seleção */}
                 {isSelectionMode && (
                     <View style={[
                         styles.selectionCheckbox,
                         isSelected && styles.selectionCheckboxSelected
                     ]}>
-                        {isSelected && <Check size={14} color="#FFF" />}
+                        {isSelected && <Check size={14} color="#F5F5F7" />}
                     </View>
                 )}
 
                 <View style={[styles.listItemLeft, isSelectionMode && { flex: 1 }]}>
-                    <View style={[styles.listIconContainer, { backgroundColor: item.type === 'subscription' ? 'rgba(10, 132, 255, 0.15)' : 'rgba(255, 159, 10, 0.15)' }]}>
-                        {item.type === 'subscription' ? (
-                            <IntervalLottie
-                                source={require('@/assets/assinatura.json')}
-                                size={28}
-                                interval={6000}
-                            />
-                        ) : (
-                            <IntervalLottie
-                                source={require('@/assets/lembretes.json')}
-                                size={28}
-                                interval={6000}
-                            />
-                        )}
-                    </View>
                     <View style={{ flex: 1, flexShrink: 1 }}>
                         <Text style={styles.listItemTitle} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
                         <Text style={styles.listItemSubtitle} numberOfLines={1} ellipsizeMode="tail">
-                            {item.type === 'subscription' ? (
-                                item.frequency === 'monthly' ? 'Mensal' : 'Anual'
-                            ) : (
-                                `${formatDate(item.dueDate)}${item.frequency ? ` • ${item.frequency === 'monthly' ? 'Mensal' : 'Anual'}` : ''}`
-                            )}
-                            {item.transactionType === 'income' && ` • Receita`}
+                            {item.type === 'subscription'
+                                ? (item.frequency === 'monthly' ? 'Mensal' : 'Anual')
+                                : formatDate(item.dueDate)}
                         </Text>
                     </View>
                 </View>
@@ -306,7 +673,8 @@ const ListItem = ({
                         {isDetected ? (
                             // Botões de confirmar/excluir para detecções
                             <View style={styles.detectionActions}>
-                                <TouchableOpacity
+                                <MorphTouchable
+                                    radius={14}
                                     style={styles.dismissButton}
                                     onPress={() => {
                                         console.log('[ListItem] Dismiss clicked, detectedData:', !!item.detectedData);
@@ -317,13 +685,13 @@ const ListItem = ({
                                             console.error('[ListItem] No detectedData found!');
                                         }
                                     }}
-                                    activeOpacity={0.7}
                                 >
                                     <X size={16} color="#FF453A" />
                                     <Text style={styles.dismissButtonText}>Excluir</Text>
-                                </TouchableOpacity>
+                                </MorphTouchable>
 
-                                <TouchableOpacity
+                                <MorphTouchable
+                                    radius={14}
                                     style={styles.confirmButton}
                                     onPress={() => {
                                         console.log('[ListItem] Confirm clicked, detectedData:', !!item.detectedData);
@@ -334,69 +702,48 @@ const ListItem = ({
                                             console.error('[ListItem] No detectedData found!');
                                         }
                                     }}
-                                    activeOpacity={0.7}
                                 >
-                                    <Check size={16} color="#FFF" />
+                                    <Check size={16} color="#F5F5F7" />
                                     <Text style={styles.confirmButtonText}>Confirmar</Text>
-                                </TouchableOpacity>
+                                </MorphTouchable>
                             </View>
-                        ) : expanded ? (
-                            // Actions when expanded - with gradient background
-                            <Animated.View
-                                entering={FadeIn.duration(150)}
-                                style={styles.actionsOverlay}
-                            >
-                                <LinearGradient
-                                    colors={['transparent', '#161616']}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 0 }}
-                                    style={styles.actionsGradient}
-                                />
-                                <TouchableOpacity style={styles.actionButton} onPress={() => onPay(item)}>
-                                    {item.status === 'paid' ? (
-                                        <RotateCcw size={18} color="#909090" />
-                                    ) : (
-                                        <CheckCircle2 size={18} color="#909090" />
-                                    )}
-                                </TouchableOpacity>
-
-                                <TouchableOpacity style={styles.actionButton} onPress={() => onEdit(item)}>
-                                    <Edit2 size={18} color="#909090" />
-                                </TouchableOpacity>
-
-                                <TouchableOpacity style={styles.actionButton} onPress={() => onDelete(item)}>
-                                    <IntervalLottie source={require('@/assets/lixeira.json')} size={18} interval={4000} />
-                                </TouchableOpacity>
-                            </Animated.View>
                         ) : (
-                            // Value and status when collapsed
-                            <>
-                                <Text style={[styles.listItemAmount, { color: item.transactionType === 'income' ? '#04D361' : '#FF453A' }]}>
-                                    {item.transactionType === 'income' ? '+' : '-'} {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.amount)}
+                            // Value when collapsed
+                            <View style={styles.listItemMetaRow}>
+                                <Text
+                                    style={[
+                                        styles.listItemAmount,
+                                        item.transactionType === 'income'
+                                            ? styles.listItemAmountIncome
+                                            : styles.listItemAmountExpense,
+                                    ]}
+                                >
+                                    {item.transactionType === 'income' ? '+ ' : '- '}
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.amount)}
                                 </Text>
-                                <View style={[styles.statusBadge, {
-                                    backgroundColor: item.status === 'paid'
-                                        ? 'rgba(4, 211, 97, 0.1)'
-                                        : item.type === 'subscription'
-                                            ? 'rgba(234, 179, 8, 0.1)'
-                                            : (dueStatus ? dueStatus.color + '26' : 'rgba(234, 179, 8, 0.1)')
-                                }]}>
-                                    <Text style={[styles.statusText, {
-                                        color: item.status === 'paid'
-                                            ? '#04D361'
-                                            : item.type === 'subscription'
-                                                ? '#EAB308'
-                                                : (dueStatus ? dueStatus.color : '#EAB308')
-                                    }]}>
-                                        {item.status === 'paid' ? (item.type === 'reminder' ? 'FEITO' : 'PAGO') : (item.type === 'subscription' ? 'PENDENTE' : (dueStatus?.label || 'PENDENTE'))}
-                                    </Text>
-                                </View>
-                            </>
+                                <MorphTouchable
+                                    radius={13}
+                                    style={styles.itemMenuButton}
+                                    onPress={handleToggleActionMenu}
+                                >
+                                    <MoreVertical size={16} color="#A1A1A6" strokeWidth={2.4} />
+                                </MorphTouchable>
+                            </View>
                         )}
                     </View>
                 )}
+                </View>
 
-            </TouchableOpacity>
+                {!isSelectionMode && !isDetected && (
+                    <RecurrenceActionDropdown
+                        visible={actionMenuOpen}
+                        item={item}
+                        onPay={() => handleMenuAction(onPay)}
+                        onEdit={() => handleMenuAction(onEdit)}
+                        onDelete={() => handleMenuAction(onDelete)}
+                    />
+                )}
+            </MorphTouchable>
 
             {/* Tutorial Overlay */}
             {showTutorial && (
@@ -423,16 +770,16 @@ const ListItem = ({
 };
 
 // Empty State
-const EmptyState = ({ type, onAdd }: { type: RecurrenceTab; onAdd: () => void }) => {
+const EmptyState = ({ type }: { type: RecurrenceTab }) => {
     const isSubscription = type === 'subscriptions';
 
     return (
         <View style={styles.emptyRemindersContainer}>
             <View style={styles.emptyRemindersIconWrapper}>
                 <IntervalLottie
-                    source={isSubscription ? require('@/assets/assinatura.json') : require('@/assets/lembretes.json')}
-                    size={120}
-                    interval={5000}
+                    source={isSubscription ? require('@/assets/assinaturabranco.json') : require('@/assets/lembretebranco.json')}
+                    size={48}
+                    interval={3000}
                 />
             </View>
 
@@ -445,17 +792,6 @@ const EmptyState = ({ type, onAdd }: { type: RecurrenceTab; onAdd: () => void })
                     ? 'Você ainda não possui assinaturas cadastradas.'
                     : 'Você não tem lembretes pendentes para este mês.'}
             </Text>
-
-            <TouchableOpacity
-                style={styles.emptyRemindersButton}
-                onPress={onAdd}
-                activeOpacity={0.8}
-            >
-                <IntervalLottie source={require('@/assets/adicionar.json')} size={20} interval={4000} />
-                <Text style={styles.emptyRemindersButtonText}>
-                    {isSubscription ? 'Nova Assinatura' : 'Novo Lembrete'}
-                </Text>
-            </TouchableOpacity>
         </View>
     );
 };
@@ -524,19 +860,21 @@ const MiniCalendar = ({
     return (
         <View style={styles.calendarContainer}>
             <View style={styles.calendarHeader}>
-                <TouchableOpacity
+                <MorphTouchable
+                    radius={16}
                     onPress={() => onChangeMonth(new Date(year, month - 1, 1))}
                     style={styles.calendarArrow}
                 >
-                    <ChevronLeft size={20} color="#FFF" />
-                </TouchableOpacity>
+                    <ChevronLeft size={20} color="#F5F5F7" />
+                </MorphTouchable>
                 <Text style={styles.calendarMonthTitle}>{months[month]} {year}</Text>
-                <TouchableOpacity
+                <MorphTouchable
+                    radius={16}
                     onPress={() => onChangeMonth(new Date(year, month + 1, 1))}
                     style={styles.calendarArrow}
                 >
-                    <ChevronRight size={20} color="#FFF" />
-                </TouchableOpacity>
+                    <ChevronRight size={20} color="#F5F5F7" />
+                </MorphTouchable>
             </View>
 
             <View style={styles.weekDaysRow}>
@@ -555,8 +893,9 @@ const MiniCalendar = ({
                     const hasEvent = hasItem(dayObj.date);
 
                     return (
-                        <TouchableOpacity
+                        <MorphTouchable
                             key={index}
+                            radius={12}
                             style={[
                                 styles.dayCell,
                                 isSelected && styles.dayCellSelected,
@@ -567,17 +906,17 @@ const MiniCalendar = ({
                             <Text style={[
                                 styles.dayText,
                                 isSelected && styles.dayTextSelected,
-                                isToday && !isSelected && { color: '#D97757', fontWeight: 'bold' }
+                                isToday && !isSelected && { color: '#D97757', fontWeight: '600' }
                             ]}>
                                 {dayObj.day}
                             </Text>
                             {hasEvent && (
                                 <View style={[
                                     styles.eventDot,
-                                    { backgroundColor: type === 'subscriptions' ? '#0A84FF' : '#FF9F0A' }
+                                    { backgroundColor: '#D97757' }
                                 ]} />
                             )}
-                        </TouchableOpacity>
+                        </MorphTouchable>
                     );
                 })}
             </View>
@@ -585,314 +924,17 @@ const MiniCalendar = ({
     );
 };
 
-// Dynamic Island para seleção múltipla (anima subindo do navbar)
-const SelectionIsland = ({
-    selectedCount,
-    showBulkDeleteConfirm,
-    areAllSelectedPaid,
-    onCancel,
-    onPay,
-    onDelete,
-    onCancelDelete,
-    onConfirmDelete,
-}: {
-    selectedCount: number;
-    showBulkDeleteConfirm: boolean;
-    areAllSelectedPaid: boolean;
-    onCancel: () => void;
-    onPay: () => void;
-    onDelete: () => void;
-    onCancelDelete: () => void;
-    onConfirmDelete: () => void;
-}) => {
-    const [showContent, setShowContent] = useState(false);
-
-    const animatedWidth = useSharedValue(48);
-    const animatedOpacity = useSharedValue(0);
-
-    useEffect(() => {
-        // Reset
-        animatedWidth.value = 48;
-        animatedOpacity.value = 0;
-        setShowContent(false);
-
-        // Expand width
-        animatedWidth.value = withDelay(100, withSpring(SCREEN_WIDTH - 48, { damping: 15, mass: 1, stiffness: 100 }));
-
-        // Fade in content
-        animatedOpacity.value = withDelay(250, withTiming(1, { duration: 250 }));
-
-        const timer = setTimeout(() => {
-            setShowContent(true);
-        }, 150);
-        return () => clearTimeout(timer);
-    }, [showBulkDeleteConfirm]);
-
-    const rStyle = useAnimatedStyle(() => ({
-        width: animatedWidth.value,
-    }));
-
-    const rContentStyle = useAnimatedStyle(() => ({
-        opacity: animatedOpacity.value,
-    }));
-
-    const handleClose = (callback: () => void) => {
-        animatedOpacity.value = withTiming(0, { duration: 100 });
-        setShowContent(false);
-        animatedWidth.value = withDelay(50, withTiming(48, { duration: 250 }));
-        setTimeout(() => {
-            callback();
-        }, 350);
-    };
-
-    const handleIconPress = () => {
-        if (showBulkDeleteConfirm) {
-            animatedOpacity.value = withTiming(0, { duration: 100 });
-            setShowContent(false);
-            setTimeout(() => onCancelDelete(), 120);
-            return;
-        }
-        handleClose(onCancel);
-    };
-
-    return (
-        <View style={islandStyles.overlay} pointerEvents="box-none">
-            <Animated.View
-                entering={(values: any) => {
-                    'worklet';
-                    return {
-                        initialValues: {
-                            transform: [{ translateY: 150 }],
-                        },
-                        animations: {
-                            transform: [{ translateY: withSpring(0, { damping: 15, mass: 1, stiffness: 100 }) }],
-                        },
-                    };
-                }}
-                exiting={SlideOutDown.duration(200)}
-                layout={Layout.springify()}
-                style={[islandStyles.pillWrapper, rStyle]}
-                pointerEvents="auto"
-            >
-                <BlurView intensity={30} tint="dark" style={islandStyles.pillContainer}>
-                    {/* Glass Border */}
-                    <View style={islandStyles.glassBorder} />
-
-                    {/* Icon always visible */}
-                    <TouchableOpacity
-                        style={islandStyles.iconPosition}
-                        onPress={handleIconPress}
-                        activeOpacity={0.8}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                        {showBulkDeleteConfirm ? (
-                            <IntervalLottie source={require('@/assets/perigo.json')} size={22} interval={4000} />
-                        ) : (
-                            <LottieView
-                                source={require('@/assets/check.json')}
-                                autoPlay
-                                loop={false}
-                                style={{ width: 22, height: 22 }}
-                            />
-                        )}
-                    </TouchableOpacity>
-
-                    {/* Content that fades in */}
-                    {showContent && (
-                        <Animated.View style={[islandStyles.contentRow, rContentStyle]}>
-                            <View style={{ width: 16 }} />
-
-                            {showBulkDeleteConfirm ? (
-                                <>
-                                    <Text style={islandStyles.pillText} numberOfLines={1}>
-                                        Excluir {selectedCount} ite{selectedCount > 1 ? 'ns' : 'm'}?
-                                    </Text>
-
-                                    <View style={islandStyles.divider} />
-
-                                    <View style={islandStyles.actionsRow}>
-                                        <TouchableOpacity
-                                            style={islandStyles.cancelBtn}
-                                            onPress={() => {
-                                                animatedOpacity.value = withTiming(0, { duration: 100 });
-                                                setShowContent(false);
-                                                setTimeout(() => onCancelDelete(), 120);
-                                            }}
-                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                        >
-                                            <Text style={islandStyles.cancelBtnText}>Não</Text>
-                                        </TouchableOpacity>
-
-                                        <TouchableOpacity
-                                            style={islandStyles.deleteBtn}
-                                            onPress={() => handleClose(onConfirmDelete)}
-                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                        >
-                                            <Text style={islandStyles.deleteBtnText}>Sim</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </>
-                            ) : (
-                                <>
-                                    <Text style={islandStyles.pillText} numberOfLines={1}>
-                                        {selectedCount} selecionado{selectedCount > 1 ? 's' : ''}
-                                    </Text>
-
-                                    <View style={islandStyles.divider} />
-
-                                    <View style={islandStyles.actionsRow}>
-                                        <TouchableOpacity
-                                            style={islandStyles.actionBtn}
-                                            onPress={onPay}
-                                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                                        >
-                                            {areAllSelectedPaid ? (
-                                                <IntervalLottie source={require('@/assets/relogio.json')} size={16} interval={4000} />
-                                            ) : (
-                                                <IntervalLottie source={require('@/assets/certo.json')} size={16} interval={4000} />
-                                            )}
-                                            <Text style={islandStyles.actionBtnText}>
-                                                {areAllSelectedPaid ? 'Pendente' : 'Pagar'}
-                                            </Text>
-                                        </TouchableOpacity>
-
-                                        <TouchableOpacity
-                                            style={islandStyles.actionBtn}
-                                            onPress={onDelete}
-                                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                                        >
-                                            <IntervalLottie source={require('@/assets/lixeira.json')} size={16} interval={4000} />
-                                            <Text style={islandStyles.actionBtnText}>Excluir</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </>
-                            )}
-                        </Animated.View>
-                    )}
-                </BlurView>
-            </Animated.View>
-        </View>
-    );
-};
-
-const islandStyles = StyleSheet.create({
-    overlay: {
-        ...StyleSheet.absoluteFillObject,
-        zIndex: 9999,
-        justifyContent: 'flex-end',
-        paddingBottom: Platform.OS === 'ios' ? 120 : 100,
-        alignItems: 'center',
-    },
-    pillWrapper: {
-        alignSelf: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-        elevation: 8,
-        height: 46,
-        overflow: 'hidden',
-        borderRadius: 999,
-        backgroundColor: 'transparent',
-    },
-    pillContainer: {
-        flex: 1,
-        width: '100%',
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(20, 20, 20, 0.88)',
-        paddingHorizontal: 14,
-    },
-    glassBorder: {
-        ...StyleSheet.absoluteFillObject,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-    },
-    iconPosition: {
-        position: 'absolute',
-        left: 13,
-        zIndex: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100%',
-    },
-    contentRow: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingLeft: 4,
-        width: '100%',
-        justifyContent: 'space-between',
-        paddingRight: 0,
-    },
-    pillText: {
-        fontSize: 13,
-        fontWeight: '400',
-        color: '#FFFFFF',
-        flex: 1,
-    },
-    divider: {
-        width: 1,
-        height: 16,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        marginHorizontal: 2,
-    },
-    actionsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-    },
-    actionBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 5,
-        paddingHorizontal: 10,
-        borderRadius: 99,
-        gap: 4,
-    },
-    actionBtnText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    cancelBtn: {
-        paddingVertical: 5,
-        paddingHorizontal: 10,
-        borderRadius: 99,
-    },
-    cancelBtnText: {
-        fontSize: 12,
-        fontWeight: '500',
-        color: '#A0A0A0',
-    },
-    deleteBtn: {
-        paddingVertical: 5,
-        paddingHorizontal: 10,
-        borderRadius: 99,
-        backgroundColor: '#D97757',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    deleteBtnText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-});
-
 export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: RecurrenceTab }) {
     const { user, profile } = useAuthContext();
     const { getCategoryName } = useCategories();
     const [selectedTab, setSelectedTab] = useState<RecurrenceTab>(initialTab);
     const [items, setItems] = useState<RecurrenceItem[]>([]);
     const [loading, setLoading] = useState(true);
-    const [loadingDots, setLoadingDots] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [reminderModalVisible, setReminderModalVisible] = useState(false);
     const [editingItem, setEditingItem] = useState<RecurrenceItem | null>(null);
     const [showTutorial, setShowTutorial] = useState(false);
+    const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
 
     // Calendar Mode State
     const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -927,32 +969,42 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     // Estados de detecção de assinaturas
     const [detectedSubscriptions, setDetectedSubscriptions] = useState<DetectedSubscription[]>([]);
 
+    useEffect(() => {
+        if (initialTab === selectedTab) return;
+
+        triggerIOSCoreMorph();
+        setSelectedTab(initialTab);
+    }, [initialTab, selectedTab]);
+
+    const closeActionMenu = () => {
+        setOpenActionMenuId(null);
+    };
+
+    const toggleActionMenu = (item: RecurrenceItem) => {
+        setOpenActionMenuId((current) => (current === item.id ? null : item.id));
+    };
+
     // Limpa seleção ao trocar de aba
     useEffect(() => {
         setSelectedIds(new Set());
         setIsSelectionMode(false);
         setShowBulkDeleteConfirm(false);
+        setOpenActionMenuId(null);
     }, [selectedTab]);
 
     useEffect(() => {
-        if (!loading) return;
-        const interval = setInterval(() => {
-            setLoadingDots(prev => {
-                if (prev === '...') return '';
-                return prev + '.';
-            });
-        }, 500);
-        return () => clearInterval(interval);
-    }, [loading]);
-
+        setOpenActionMenuId(null);
+    }, [viewMode, selectedMonth, calendarDate, filters.search, filters.status, filters.transactionType]);
 
 
     useEffect(() => {
         if (!user) return;
+        triggerIOSCoreMorph();
         setLoading(true);
 
         const unsubscribe = databaseService.onRecurrencesChange(user.uid, (data) => {
             const loadedItems = data as RecurrenceItem[];
+            triggerIOSCoreMorph();
             setItems(loadedItems);
             setLoading(false);
             setRefreshing(false);
@@ -1026,6 +1078,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 });
 
                 console.log('[RecurrenceView] New detections:', newDetections.length);
+                triggerIOSCoreMorph();
                 setDetectedSubscriptions(newDetections);
             } catch (error) {
                 console.error('[RecurrenceView] Error detecting:', error);
@@ -1038,6 +1091,8 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     const handleOptionPay = async (item: RecurrenceItem) => {
         if (!user) return;
 
+        triggerIOSCoreMorph();
+
         if (item.status === 'paid') {
             // Revert to pending (undo payment)
             await databaseService.unpayRecurrence(user.uid, item);
@@ -1048,21 +1103,39 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     };
 
     const handleOptionDelete = (item: RecurrenceItem) => {
+        triggerIOSCoreMorph();
         setItemToDelete(item);
         setDeleteModalVisible(true);
     };
 
-    const handleConfirmDelete = async () => {
-        if (!user || !itemToDelete) return;
-
-        // Close modal immediately for better UX
+    const handleCancelDelete = () => {
+        triggerIOSCoreMorph();
         setDeleteModalVisible(false);
-
-        await databaseService.deleteRecurrence(user.uid, itemToDelete.id, itemToDelete.type);
         setItemToDelete(null);
     };
 
+    const handleConfirmDelete = async () => {
+        const target = itemToDelete;
+        triggerIOSCoreMorph();
+        setDeleteModalVisible(false);
+        setItemToDelete(null);
+
+        if (!user || !target) return;
+
+        const result = await databaseService.deleteRecurrence(
+            user.uid,
+            target.id,
+            target.type,
+            target.sourceCollection
+        );
+
+        if (!result?.success) {
+            console.error('[RecurrenceView] Error deleting recurrence:', result?.error);
+        }
+    };
+
     const handleOptionEdit = (item: RecurrenceItem) => {
+        triggerIOSCoreMorph();
         setEditingItem(item);
         setReminderModalVisible(true);
     };
@@ -1090,6 +1163,8 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
         const type = selectedTab === 'subscriptions' ? 'subscription' : 'reminder';
 
+        triggerIOSCoreMorph();
+
         const recurrenceData = {
             name: data.title,
             amount: data.amount,
@@ -1113,12 +1188,14 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
     // Funções de seleção múltipla
     const handleLongPress = (item: RecurrenceItem) => {
+        triggerIOSCoreMorph();
         setIsSelectionMode(true);
         setSelectedIds(new Set([item.id]));
         setShowBulkDeleteConfirm(false);
     };
 
     const handleToggleSelect = (item: RecurrenceItem) => {
+        triggerIOSCoreMorph();
         setSelectedIds(prev => {
             const newSet = new Set(prev);
             if (newSet.has(item.id)) {
@@ -1136,60 +1213,40 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     };
 
     const handleCancelSelection = () => {
+        triggerIOSCoreMorph();
         setSelectedIds(new Set());
         setIsSelectionMode(false);
         setShowBulkDeleteConfirm(false);
     };
 
     const handleDeleteSelected = () => {
+        triggerIOSCoreMorph();
         setShowBulkDeleteConfirm(true);
     };
 
     const confirmBulkDelete = async () => {
         if (!user || selectedIds.size === 0) return;
 
+        const idsToDelete = Array.from(selectedIds);
+        triggerIOSCoreMorph();
+        setSelectedIds(new Set());
+        setIsSelectionMode(false);
+        setShowBulkDeleteConfirm(false);
+
         // Deleta todos os itens selecionados
-        const promises = Array.from(selectedIds).map(id => {
+        const promises = idsToDelete.map(id => {
             const item = items.find(i => i.id === id);
             if (item) {
-                return databaseService.deleteRecurrence(user.uid, id, item.type);
+                return databaseService.deleteRecurrence(user.uid, id, item.type, item.sourceCollection);
             }
-            return Promise.resolve();
+            return Promise.resolve({ success: true });
         });
 
-        await Promise.all(promises);
-
-        setSelectedIds(new Set());
-        setIsSelectionMode(false);
-        setShowBulkDeleteConfirm(false);
-    };
-
-    const areAllSelectedPaid = useMemo(() => {
-        if (selectedIds.size === 0) return false;
-        const selectedItems = items.filter(i => selectedIds.has(i.id));
-        return selectedItems.length > 0 && selectedItems.every(i => i.status === 'paid');
-    }, [selectedIds, items]);
-
-    const handlePaySelected = async () => {
-        if (!user || selectedIds.size === 0) return;
-
-        const selectedItems = items.filter(i => selectedIds.has(i.id));
-        const newStatus = areAllSelectedPaid ? 'pending' : 'paid';
-
-        const promises = selectedItems.map(item => {
-            if (newStatus === 'paid') {
-                return databaseService.payRecurrence(user.uid, item);
-            } else {
-                return databaseService.unpayRecurrence(user.uid, item);
-            }
-        });
-
-        await Promise.all(promises);
-
-        // Feedback visual poderia ser adicionado aqui, mas por enquanto basta sair do modo de seleção
-        setSelectedIds(new Set());
-        setIsSelectionMode(false);
-        setShowBulkDeleteConfirm(false);
+        const results = await Promise.all(promises);
+        const failed = results.find((result) => !result?.success);
+        if (failed) {
+            console.error('[RecurrenceView] Error deleting selected recurrences:', (failed as any).error);
+        }
     };
 
     // Handlers para assinaturas detectadas
@@ -1202,6 +1259,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
             await databaseService.addRecurrence(user.uid, formattedData);
 
             // Remove da lista de detecções
+            triggerIOSCoreMorph();
             setDetectedSubscriptions(prev => prev.filter(d => d.id !== detection.id));
         } catch (error) {
             console.error('Erro ao confirmar assinatura:', error);
@@ -1213,6 +1271,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
         console.log('[RecurrenceView] Current detections:', detectedSubscriptions.length);
 
         // Remove da lista de detecções
+        triggerIOSCoreMorph();
         setDetectedSubscriptions(prev => {
             const filtered = prev.filter(d => d.id !== detection.id);
             console.log('[RecurrenceView] After dismiss:', filtered.length);
@@ -1221,6 +1280,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     };
 
     const onRefresh = () => {
+        triggerIOSCoreMorph();
         setRefreshing(true);
         // Trigger a re-fetch inside the listener if needed, or just let it be. 
         // For real-time, refresh is usually not needed unless we force a reload.
@@ -1433,18 +1493,35 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     };
 
     const totals = useMemo(() => {
-        const formatMoney = (val: number) => val; // Placeholder for logic consistency
-
         if (selectedTab === 'subscriptions') {
             // Filtra apenas assinaturas validadas (isValidated !== false)
             const validatedItems = filteredItems.filter(item => item.isValidated !== false);
 
-            const monthlyTotal = validatedItems.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
-            const monthlyPaid = validatedItems.filter(i => i.status === 'paid').reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
-            const monthlyRemaining = monthlyTotal - monthlyPaid;
+            let expensePending = 0;
+            let expensePaid = 0;
+            let incomePending = 0;
+            let incomeReceived = 0;
+
+            validatedItems.forEach(item => {
+                const amount = Number(item.amount) || 0;
+                const isIncome = item.transactionType === 'income';
+                const isPaid = item.status === 'paid';
+
+                if (isIncome) {
+                    if (isPaid) incomeReceived += amount;
+                    else incomePending += amount;
+                } else {
+                    if (isPaid) expensePaid += amount;
+                    else expensePending += amount;
+                }
+            });
+
+            const monthlyTotal = expensePending + expensePaid;
+            const monthlyPaid = expensePaid;
+            const monthlyRemaining = expensePending;
 
             const yearlyEstimation = items
-                .filter(i => i.type === 'subscription' && i.isValidated !== false)
+                .filter(i => i.type === 'subscription' && i.isValidated !== false && i.transactionType !== 'income')
                 .reduce((acc, item) => {
                     const amount = Number(item.amount) || 0;
                     if (item.cancellationDate) {
@@ -1459,7 +1536,15 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                     return acc + amount;
                 }, 0);
 
-            return { monthlyTotal, monthlyPaid, monthlyRemaining, yearlyEstimation };
+            return {
+                monthlyTotal,
+                monthlyPaid,
+                monthlyRemaining,
+                yearlyEstimation,
+                incomeTotal: incomePending + incomeReceived,
+                incomeReceived,
+                incomePending,
+            };
         } else {
             let expensePending = 0;
             let expensePaid = 0;
@@ -1499,138 +1584,231 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
     };
 
     const renderSummaryCard = () => (
-        <View style={styles.summaryCard}>
-            <View style={styles.summaryRow}>
-                {selectedTab === 'subscriptions' ? (
-                    <>
-                        <View style={styles.summaryCol}>
-                            <View style={styles.summaryHeaderRow}>
-                                <View style={[styles.summaryIconBox, { backgroundColor: 'rgba(255, 69, 58, 0.1)' }]}>
-                                    <IntervalLottie source={require('@/assets/despesa.json')} size={14} interval={5000} />
-                                </View>
-                                <Text style={styles.summaryLabelSmall}>A Pagar</Text>
+        <Animated.View entering={IOS_FADE_IN} layout={IOS_CORE_LAYOUT} style={styles.summaryCard}>
+            {selectedTab === 'subscriptions' ? (
+                <>
+                    <View style={styles.summaryRow}>
+                        <View style={styles.summaryItem}>
+                            <Text style={styles.summaryItemLabel}>Gasto Total</Text>
+                            <View style={styles.summaryItemValueRow}>
+                                <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).monthlyTotal || 0)}</Text>
                             </View>
-                            <Text style={styles.summaryValueSmall}>
-                                {formatCurrency((totals as any).monthlyRemaining || 0)}
-                            </Text>
-                            <Text style={styles.summarySubLabelSmall}>
-                                Pago: {formatCurrency((totals as any).monthlyPaid || 0)}
-                            </Text>
                         </View>
-                        <View style={styles.summaryDivider} />
-                        <View style={styles.summaryCol}>
-                            <View style={styles.summaryHeaderRow}>
-                                <View style={[styles.summaryIconBox, { backgroundColor: 'rgba(10, 132, 255, 0.1)' }]}>
-                                    <IntervalLottie source={require('@/assets/previsao.json')} size={14} interval={5000} />
-                                </View>
-                                <Text style={styles.summaryLabelSmall}>Anual</Text>
+                        <View style={styles.summaryItemDivider} />
+                        <View style={styles.summaryItem}>
+                            <Text style={styles.summaryItemLabel}>Pago</Text>
+                            <View style={styles.summaryItemValueRow}>
+                                <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).monthlyPaid || 0)}</Text>
                             </View>
-                            <Text style={[styles.summaryValueSmall, { color: '#888' }]}>
-                                {formatCurrency((totals as any).yearlyEstimation || 0)}
-                            </Text>
-                            <Text style={styles.summarySubLabelSmall}>Projeção ativa</Text>
                         </View>
-                    </>
-                ) : (
-                    <>
-                        <View style={styles.summaryCol}>
-                            <View style={styles.summaryHeaderRow}>
-                                <View style={[styles.summaryIconBox, { backgroundColor: 'rgba(255, 69, 58, 0.1)' }]}>
-                                    <IntervalLottie source={require('@/assets/despesa.json')} size={14} interval={5000} />
-                                </View>
-                                <Text style={styles.summaryLabelSmall}>A Pagar</Text>
+                        <View style={styles.summaryItemDivider} />
+                        <View style={styles.summaryItem}>
+                            <Text style={styles.summaryItemLabel}>A pagar</Text>
+                            <View style={styles.summaryItemValueRow}>
+                                <Text style={[styles.summaryItemValue, styles.summaryItemValueAccent]} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).monthlyRemaining || 0)}</Text>
                             </View>
-                            <Text style={[styles.summaryValueSmall, { color: '#FF453A' }]}>
-                                {formatCurrency((totals as any).expensePending || 0)}
-                            </Text>
-                            <Text style={styles.summarySubLabelSmall}>
-                                Pago: {formatCurrency((totals as any).expensePaid || 0)}
-                            </Text>
                         </View>
-                        <View style={styles.summaryDivider} />
-                        <View style={styles.summaryCol}>
-                            <View style={styles.summaryHeaderRow}>
-                                <View style={[styles.summaryIconBox, { backgroundColor: 'rgba(4, 211, 97, 0.1)' }]}>
-                                    <IntervalLottie source={require('@/assets/receita.json')} size={14} interval={5000} />
+                    </View>
+                    {((totals as any).incomeTotal || 0) > 0 && (
+                        <>
+                            <View style={styles.summaryRowDivider} />
+                            <View style={styles.summaryRow}>
+                                <View style={styles.summaryItem}>
+                                    <Text style={styles.summaryItemLabel}>Receber Total</Text>
+                                    <View style={styles.summaryItemValueRow}>
+                                        <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).incomeTotal || 0)}</Text>
+                                    </View>
                                 </View>
-                                <Text style={styles.summaryLabelSmall}>Receber</Text>
+                                <View style={styles.summaryItemDivider} />
+                                <View style={styles.summaryItem}>
+                                    <Text style={styles.summaryItemLabel}>Recebido</Text>
+                                    <View style={styles.summaryItemValueRow}>
+                                        <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).incomeReceived || 0)}</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.summaryItemDivider} />
+                                <View style={styles.summaryItem}>
+                                    <Text style={styles.summaryItemLabel}>A receber</Text>
+                                    <View style={styles.summaryItemValueRow}>
+                                        <Text style={[styles.summaryItemValue, styles.summaryItemValueIncome]} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).incomePending || 0)}</Text>
+                                    </View>
+                                </View>
                             </View>
-                            <Text style={[styles.summaryValueSmall, { color: '#04D361' }]}>
-                                {formatCurrency((totals as any).incomePending || 0)}
-                            </Text>
-                            <Text style={styles.summarySubLabelSmall}>
-                                Recebido: {formatCurrency((totals as any).incomeReceived || 0)}
-                            </Text>
+                        </>
+                    )}
+                </>
+            ) : (
+                <>
+                    <View style={styles.summaryRow}>
+                        <View style={styles.summaryItem}>
+                            <Text style={styles.summaryItemLabel}>Gasto Total</Text>
+                            <View style={styles.summaryItemValueRow}>
+                                <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).expenseTotal || 0)}</Text>
+                            </View>
                         </View>
-                    </>
-                )}
-            </View>
-        </View>
+                        <View style={styles.summaryItemDivider} />
+                        <View style={styles.summaryItem}>
+                            <Text style={styles.summaryItemLabel}>Pago</Text>
+                            <View style={styles.summaryItemValueRow}>
+                                <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).expensePaid || 0)}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.summaryItemDivider} />
+                        <View style={styles.summaryItem}>
+                            <Text style={styles.summaryItemLabel}>A pagar</Text>
+                            <View style={styles.summaryItemValueRow}>
+                                <Text style={[styles.summaryItemValue, styles.summaryItemValueAccent]} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).expensePending || 0)}</Text>
+                            </View>
+                        </View>
+                    </View>
+                    {((totals as any).incomeTotal || 0) > 0 && (
+                        <>
+                            <View style={styles.summaryRowDivider} />
+                            <View style={styles.summaryRow}>
+                                <View style={styles.summaryItem}>
+                                    <Text style={styles.summaryItemLabel}>Receber Total</Text>
+                                    <View style={styles.summaryItemValueRow}>
+                                        <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).incomeTotal || 0)}</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.summaryItemDivider} />
+                                <View style={styles.summaryItem}>
+                                    <Text style={styles.summaryItemLabel}>Recebido</Text>
+                                    <View style={styles.summaryItemValueRow}>
+                                        <Text style={styles.summaryItemValue} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).incomeReceived || 0)}</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.summaryItemDivider} />
+                                <View style={styles.summaryItem}>
+                                    <Text style={styles.summaryItemLabel}>A receber</Text>
+                                    <View style={styles.summaryItemValueRow}>
+                                        <Text style={[styles.summaryItemValue, styles.summaryItemValueIncome]} numberOfLines={1} adjustsFontSizeToFit>{formatCurrency((totals as any).incomePending || 0)}</Text>
+                                    </View>
+                                </View>
+                            </View>
+                        </>
+                    )}
+                </>
+            )}
+        </Animated.View>
     );
+
+    const handleSelectedMonthChange = (month: Date) => {
+        triggerIOSCoreMorph();
+        setSelectedMonth(month);
+    };
+
+    const handleCalendarOptionChange = (enabled: boolean) => {
+        triggerIOSCoreMorph();
+        setViewMode(enabled ? 'calendar' : 'list');
+    };
+
+    const handleDisplayedMonthChange = (month: Date) => {
+        triggerIOSCoreMorph();
+        setDisplayedMonth(month);
+    };
+
+    const handleCalendarDateSelect = (date: Date) => {
+        triggerIOSCoreMorph();
+        setCalendarDate(date);
+    };
+
+    const handleApplyFilters = (nextFilters: RecurrenceFilterState) => {
+        triggerIOSCoreMorph();
+        setFilters(nextFilters);
+    };
+
 
     return (
         <View style={styles.container}>
-            <UniversalBackground
-                backgroundColor="#0C0C0C"
-                glowSize={350}
-                height={280}
-                showParticles={true}
-                particleCount={15}
-            />
+            <View style={StyleSheet.absoluteFill}>
+                <UniversalBackground
+                    backgroundColor="#0A0A0A"
+                    glowSize={350}
+                    showParticles={true}
+                    particleCount={15}
+                />
+            </View>
 
             <View style={styles.content}>
 
 
                 <View style={styles.header}>
-                    <Text style={styles.title}>
-                        {selectedTab === 'subscriptions' ? 'Assinaturas' : 'Lembretes'}
-                    </Text>
+                    <View style={styles.headerTitleRow}>
+                        <Image
+                            source={require('@/assets/images/icon.png')}
+                            style={styles.headerIcon}
+                            resizeMode="contain"
+                        />
+                        <Text style={styles.screenHeader} numberOfLines={1}>
+                            {selectedTab === 'subscriptions' ? 'Assinaturas' : 'Lembretes'}
+                        </Text>
+                    </View>
 
+                </View>
+
+                <View style={styles.subHeader}>
                     <MonthSelector
                         currentMonth={selectedMonth}
-                        onMonthChange={setSelectedMonth}
+                        onMonthChange={handleSelectedMonthChange}
                         minDate={minDate}
                         maxDate={maxDate}
                         allowFuture={true}
                     />
-                </View>
 
-                <View style={styles.subHeader}>
-                    <View style={{ flexDirection: 'row', gap: 8, marginLeft: 'auto' }}>
-                        <TouchableOpacity
-                            style={styles.iconButton}
-                            onPress={() => setViewMode(prev => prev === 'list' ? 'calendar' : 'list')}
+                    <View style={styles.subHeaderActions}>
+                        <MorphTouchable
+                            radius={12}
+                            style={styles.calendarToggleButton}
+                            onPress={() => handleCalendarOptionChange(viewMode !== 'calendar')}
                         >
-                            {viewMode === 'list' ? (
-                                <IntervalLottie source={require('@/assets/calendario.json')} size={22} interval={5000} />
-                            ) : (
-                                <LayoutList size={18} color="#FFF" />
-                            )}
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[
-                                styles.iconButton,
-                                activeFilterCount > 0 && {
-                                    borderColor: '#D97757',
-                                    backgroundColor: 'rgba(217, 119, 87, 0.1)'
-                                }
-                            ]}
-                            onPress={() => setFilterModalVisible(true)}
-                        >
-                            <IntervalLottie source={require('@/assets/previsao.json')} size={22} interval={5000} />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => {
-                                console.log('[RecurrenceView] Novo button clicked, tab:', selectedTab);
-                                setReminderModalVisible(true);
-                            }}
+                            <CalendarDays size={17} color={viewMode === 'calendar' ? '#F5F5F7' : '#A1A1A6'} strokeWidth={2.2} />
+                        </MorphTouchable>
+                        <MorphTouchable
+                            radius={HEADER_CONTROL_HEIGHT / 2}
+                            onPress={() => setReminderModalVisible(true)}
                             style={styles.headerButton}
                         >
-                            <IntervalLottie source={require('@/assets/adicionar.json')} size={18} interval={4000} />
+                            <Plus size={17} color="#FFFFFF" strokeWidth={2.6} />
                             <Text style={styles.headerButtonText}>Novo</Text>
-                        </TouchableOpacity>
+                        </MorphTouchable>
                     </View>
                 </View>
+
+                <View style={styles.filterBarRow}>
+                    <View style={styles.filterSearchBar}>
+                        <Search size={15} color="#555" />
+                        <TextInput
+                            style={styles.filterSearchInput}
+                            value={filters.search}
+                            onChangeText={(t) => setFilters(prev => ({ ...prev, search: t }))}
+                            placeholder="Buscar..."
+                            placeholderTextColor="#555"
+                        />
+                        {filters.search.length > 0 && (
+                            <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, search: '' }))}>
+                                <X size={14} color="#8E8E93" />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                    <ArrowSelector
+                        options={[
+                            { label: 'Status', value: null },
+                            { label: 'Pendente', value: 'pending' },
+                            { label: 'Pago', value: 'paid' },
+                            { label: 'Atrasado', value: 'overdue' },
+                        ]}
+                        selectedValue={filters.status[0] ?? null}
+                        onChange={(value) => {
+                            triggerIOSCoreMorph();
+                            setFilters(prev => ({ ...prev, status: value ? [value] : [] }));
+                        }}
+                    />
+                </View>
+
+                <OpenFinanceSyncBanner />
+
+                {!loading && renderSummaryCard()}
 
                 <View style={styles.listContainer}>
 
@@ -1641,21 +1819,11 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
 
                     {loading ? (
-                        <View style={styles.loadingContainer}>
-                            <LottieView
-                                source={require('@/assets/carregando.json')}
-                                autoPlay
-                                loop
-                                style={{ width: 50, height: 50 }}
-                            />
-                            <Text style={styles.loadingText}>
-                                {selectedTab === 'subscriptions' ? 'Carregando assinaturas' : 'Carregando lembretes'}{loadingDots}
-                            </Text>
-                        </View>
+                        <IosCoreLoader />
                     ) : viewMode === 'calendar' ? (
                         <View style={{ flex: 1 }}>
                             <FlatList
-                                extraData={{ isSelectionMode, selectedIds }}
+                                extraData={{ isSelectionMode, selectedIds, openActionMenuId }}
                                 data={filteredItems.filter(item => {
                                     const parts = item.dueDate.split('-');
                                     if (parts.length < 3) return false;
@@ -1670,10 +1838,20 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                                         return isSameDay && m === calendarDate.getMonth();
                                     }
                                 })}
-                                renderItem={({ item, index }) => (
+                                CellRendererComponent={({ item, children, style, ...rest }: any) => {
+                                    const isOpen = openActionMenuId === item?.id;
+                                    return (
+                                        <View
+                                            {...rest}
+                                            style={[style, isOpen && styles.listCellOpenLayer]}
+                                        >
+                                            {children}
+                                        </View>
+                                    );
+                                }}
+                                renderItem={({ item }) => (
                                     <ListItem
                                         item={item}
-                                        index={index}
                                         onPay={handleOptionPay}
                                         onEdit={handleOptionEdit}
                                         onDelete={handleOptionDelete}
@@ -1684,25 +1862,28 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                                         onLongPress={handleLongPress}
                                         onToggleSelect={handleToggleSelect}
                                         showTutorial={false}
+                                        isActionMenuOpen={openActionMenuId === item.id}
+                                        onToggleActionMenu={toggleActionMenu}
+                                        onCloseActionMenu={closeActionMenu}
                                     />
                                 )}
                                 ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
                                 keyExtractor={item => 'cal_' + item.id}
                                 contentContainerStyle={{ paddingBottom: 100, flexGrow: 1 }}
+                                removeClippedSubviews={false}
                                 showsVerticalScrollIndicator={false}
                                 ListEmptyComponent={
                                     <View style={{ padding: 20, alignItems: 'center' }}>
-                                        <Text style={{ color: '#555', fontSize: 14 }}>Nenhum vencimento neste dia</Text>
+                                        <Text style={{ color: '#6E6E73', fontSize: 14 }}>Nenhum vencimento neste dia</Text>
                                     </View>
                                 }
                                 ListHeaderComponent={
                                     <>
-                                        {filteredItems.length > 0 && renderSummaryCard()}
                                         <MiniCalendar
                                             currentMonth={displayedMonth}
-                                            onChangeMonth={setDisplayedMonth}
+                                            onChangeMonth={handleDisplayedMonthChange}
                                             selectedDate={calendarDate}
-                                            onSelectDate={setCalendarDate}
+                                            onSelectDate={handleCalendarDateSelect}
                                             items={filteredItems}
                                             type={selectedTab}
                                         />
@@ -1715,38 +1896,56 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                         </View>
                     ) : groupedItems.length > 0 ? (
                         <FlatList
-                            extraData={{ isSelectionMode, selectedIds }}
+                            extraData={{ isSelectionMode, selectedIds, openActionMenuId }}
                             data={groupedItems}
-                            renderItem={({ item: group }) => (
-                                <RecurrenceGroup title={group.title}>
-                                    {group.items.map((item, index) => (
-                                        <ListItem
-                                            key={item.id}
-                                            item={item}
-                                            index={index}
-                                            onPay={handleOptionPay}
-                                            onEdit={handleOptionEdit}
-                                            onDelete={handleOptionDelete}
-                                            onConfirmDetection={handleConfirmDetection}
-                                            onDismissDetection={handleDismissDetection}
-                                            isSelectionMode={isSelectionMode}
-                                            isSelected={selectedIds.has(item.id)}
-                                            // Se tem tutorial, intercepta o long press para dispensar
-                                            onLongPress={(item) => {
-                                                if (showTutorial) {
-                                                    dismissTutorial();
-                                                }
-                                                handleLongPress(item);
-                                            }}
-                                            onToggleSelect={handleToggleSelect}
-                                            showTutorial={showTutorial}
-                                        />
-                                    ))}
-                                </RecurrenceGroup>
-                            )}
+                            CellRendererComponent={({ item, children, style, ...rest }: any) => {
+                                const isOpen = item?.items?.some((groupItem: RecurrenceItem) => groupItem.id === openActionMenuId);
+                                return (
+                                    <View
+                                        {...rest}
+                                        style={[style, isOpen && styles.listCellOpenLayer]}
+                                    >
+                                        {children}
+                                    </View>
+                                );
+                            }}
+                            renderItem={({ item: group }) => {
+                                const isGroupMenuOpen = group.items.some((item) => item.id === openActionMenuId);
+
+                                return (
+                                    <RecurrenceGroup title={group.title} isMenuLayerOpen={isGroupMenuOpen}>
+                                        {group.items.map((item) => (
+                                            <ListItem
+                                                key={item.id}
+                                                item={item}
+                                                onPay={handleOptionPay}
+                                                onEdit={handleOptionEdit}
+                                                onDelete={handleOptionDelete}
+                                                onConfirmDetection={handleConfirmDetection}
+                                                onDismissDetection={handleDismissDetection}
+                                                isSelectionMode={isSelectionMode}
+                                                isSelected={selectedIds.has(item.id)}
+                                                // Se tem tutorial, intercepta o long press para dispensar
+                                                onLongPress={(item) => {
+                                                    if (showTutorial) {
+                                                        dismissTutorial();
+                                                    }
+                                                    handleLongPress(item);
+                                                }}
+                                                onToggleSelect={handleToggleSelect}
+                                                showTutorial={showTutorial}
+                                                isActionMenuOpen={openActionMenuId === item.id}
+                                                onToggleActionMenu={toggleActionMenu}
+                                                onCloseActionMenu={closeActionMenu}
+                                            />
+                                        ))}
+                                    </RecurrenceGroup>
+                                );
+                            }}
                             ItemSeparatorComponent={() => <View style={{ height: 20 }} />}
                             keyExtractor={item => item.title}
                             contentContainerStyle={{ paddingBottom: 100 }}
+                            removeClippedSubviews={false}
                             showsVerticalScrollIndicator={false}
                             refreshControl={
                                 <RefreshControl
@@ -1755,44 +1954,46 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                                     tintColor="#D97757"
                                 />
                             }
-                            ListHeaderComponent={renderSummaryCard}
+                            ListHeaderComponent={null}
                         />
                     ) : (
                         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-                            <EmptyState
-                                type={selectedTab}
-                                onAdd={() => {
-                                    setEditingItem(null);
-                                    setReminderModalVisible(true);
-                                }}
-                            />
+                            <EmptyState type={selectedTab} />
                         </ScrollView>
                     )}
                 </View>
             </View>
 
-            {/* Dynamic Island - Barra de seleção múltipla */}
-            {isSelectionMode && (
-                <SelectionIsland
-                    selectedCount={selectedIds.size}
-                    showBulkDeleteConfirm={showBulkDeleteConfirm}
-                    areAllSelectedPaid={areAllSelectedPaid}
-                    onCancel={handleCancelSelection}
-                    onPay={handlePaySelected}
-                    onDelete={handleDeleteSelected}
-                    onCancelDelete={() => setShowBulkDeleteConfirm(false)}
-                    onConfirmDelete={confirmBulkDelete}
-                />
-            )}
-            {/* Delete Confirmation Modal */}
-            <RecurrenceDeleteModal
-                visible={deleteModalVisible}
-                onClose={() => setDeleteModalVisible(false)}
-                onConfirm={handleConfirmDelete}
-                title={`Excluir ${itemToDelete?.type === 'subscription' ? 'Assinatura' : 'Lembrete'}?`}
-                message="Esta ação não pode ser desfeita."
-                confirmText="Excluir"
-                cancelText="Cancelar"
+            {/* Banner inline - seleção múltipla */}
+            <AnimatedInlineBanner
+                show={isSelectionMode}
+                step={showBulkDeleteConfirm ? 'error' : 'success'}
+                statusText={`${selectedIds.size} selecionado${selectedIds.size > 1 ? 's' : ''}`}
+                error={`Excluir ${selectedIds.size} ite${selectedIds.size > 1 ? 'ns' : 'm'}?`}
+                centerActions={showBulkDeleteConfirm}
+                actions={{
+                    cancelLabel: showBulkDeleteConfirm ? 'Não' : 'Cancelar',
+                    confirmLabel: showBulkDeleteConfirm ? 'Excluir' : 'Remover',
+                    onCancel: showBulkDeleteConfirm
+                        ? handleCancelSelection
+                        : handleCancelSelection,
+                    onConfirm: showBulkDeleteConfirm ? confirmBulkDelete : handleDeleteSelected,
+                    disabled: selectedIds.size === 0,
+                }}
+            />
+            {/* Banner inline - exclusão individual */}
+            <AnimatedInlineBanner
+                show={deleteModalVisible && Boolean(itemToDelete) && !isSelectionMode}
+                step="error"
+                actions={{
+                    cancelLabel: 'Não',
+                    confirmLabel: 'Excluir',
+                    onCancel: handleCancelDelete,
+                    onConfirm: handleConfirmDelete,
+                }}
+                error={`Excluir ${itemToDelete?.type === 'subscription' ? 'assinatura' : 'lembrete'}?`}
+                statusText="Esta acao nao pode ser desfeita."
+                centerActions
             />
 
             {/* Modal de Adicionar/Editar */}
@@ -1818,7 +2019,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
             <RecurrenceFilterModal
                 visible={filterModalVisible}
                 onClose={() => setFilterModalVisible(false)}
-                onApply={setFilters}
+                onApply={handleApplyFilters}
                 initialFilters={filters}
             />
         </View >
@@ -1828,7 +2029,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#0C0C0C',
+        backgroundColor: '#0A0A0A',
     },
     content: {
         position: 'absolute',
@@ -1836,28 +2037,50 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        paddingTop: 60, // Space for status bar
+        paddingTop: 58,
         zIndex: 10,
     },
     header: {
-        paddingHorizontal: 20,
-        marginBottom: 20,
+        paddingHorizontal: 22,
+        marginBottom: 12,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
     },
+    headerTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        flex: 1,
+        minWidth: 0,
+    },
     title: {
-        fontSize: 24,
+        fontSize: 28,
         fontWeight: '700',
+        color: '#F5F5F7',
+        letterSpacing: 0,
+        flexShrink: 1,
+        marginRight: 12,
+    },
+    headerIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+    },
+    screenHeader: {
+        fontSize: 18,
+        fontFamily: 'AROneSans_400Regular',
         color: '#FFFFFF',
+        flexShrink: 1,
     },
     headerButton: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         backgroundColor: '#D97757',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 20,
+        height: HEADER_CONTROL_HEIGHT,
+        paddingHorizontal: 14,
+        borderRadius: HEADER_CONTROL_HEIGHT / 2,
         gap: 6,
     },
     headerButtonText: {
@@ -1867,105 +2090,279 @@ const styles = StyleSheet.create({
     },
     subHeader: {
         flexDirection: 'row',
-        justifyContent: 'flex-end',
-        paddingHorizontal: 20,
-        marginBottom: 10,
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 22,
+        marginBottom: 12,
+        gap: 12,
+        minHeight: HEADER_CONTROL_HEIGHT,
+    },
+    subHeaderActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        flexShrink: 0,
+        height: HEADER_CONTROL_HEIGHT,
+    },
+    filterBarRow: {
+        flexDirection: 'row',
+        paddingHorizontal: 22,
+        gap: 10,
+        marginBottom: 12,
+    },
+    filterSearchBar: {
+        flex: 1,
+        height: 36,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#101010',
+        borderWidth: 1,
+        borderColor: '#252525',
+        borderRadius: 24,
+        paddingHorizontal: 12,
+        gap: 8,
+    },
+    filterSearchInput: {
+        flex: 1,
+        color: '#F5F5F7',
+        fontSize: 13,
+        fontWeight: '500',
+        padding: 0,
+    },
+    arrowSelector: {
+        width: 146,
+        height: 36,
+        borderRadius: 24,
+        overflow: 'hidden',
+        backgroundColor: '#101010',
+        borderWidth: 1,
+        borderColor: '#252525',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 16,
+        elevation: 6,
+    },
+    arrowSelectorContent: {
+        ...StyleSheet.absoluteFillObject,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 7,
+        gap: 4,
+        zIndex: 5,
+    },
+    arrowSelectorBtn: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    arrowSelectorLabelWrapper: {
+        overflow: 'hidden',
+        width: 76,
+        height: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    arrowSelectorLabel: {
+        color: '#F5F5F7',
+        fontSize: 12,
+        fontWeight: '700',
+        textAlign: 'center',
+        position: 'absolute',
     },
     listContainer: {
         flex: 1,
-        paddingHorizontal: 20,
-        marginTop: 10,
+        paddingHorizontal: 22,
+        marginTop: 4,
+        overflow: 'visible',
     },
     listHeaderCount: {
         fontSize: 13,
-        color: '#666',
+        color: '#6E6E73',
         fontWeight: '500',
     },
 
     // Group Styles
     groupContainer: {
-        marginBottom: 8,
+        marginBottom: 4,
+        overflow: 'visible',
+    },
+    groupOpenLayer: {
+        position: 'relative',
+        zIndex: 2000,
+        elevation: 20,
     },
     groupHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 10,
         paddingHorizontal: 4,
     },
-    groupIcon: {
-        width: 24,
-        height: 24,
-        borderRadius: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 8,
-    },
     groupTitle: {
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: '600',
-        color: '#BBB',
+        color: '#A1A1A6',
         textTransform: 'capitalize',
     },
     groupList: {
-        gap: 12,
+        gap: 10,
+        overflow: 'visible',
     },
 
     sectionTitle: {
         fontSize: 18,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         marginBottom: 16,
     },
     listItem: {
         flexDirection: 'column',
-        padding: 16,
-        backgroundColor: '#1A1A1A',
-        borderRadius: 20,
-        overflow: 'hidden', // Importante para o tutorial cobrir tudo respeitando as bordas
+        paddingVertical: 13,
+        paddingHorizontal: 14,
+        backgroundColor: '#101010',
+        borderRadius: 17,
+        overflow: 'visible',
         borderWidth: 1,
-        borderColor: '#2A2A2A',
+        borderColor: '#252525',
+        position: 'relative',
+    },
+    listCellOpenLayer: {
+        position: 'relative',
+        zIndex: 2000,
+        elevation: 20,
+        overflow: 'visible',
+    },
+    listItemOpenLayer: {
+        position: 'relative',
+        zIndex: 2000,
+        elevation: 20,
+    },
+    listItemPressContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: '100%',
+    },
+    listItemExpanded: {
+        borderColor: '#D97757',
+        backgroundColor: '#101010',
+    },
+    listItemSelected: {
+        borderColor: '#D97757',
+        backgroundColor: 'rgba(217, 119, 87, 0.14)',
+    },
+    listItemPaid: {
+        borderColor: '#32D74B',
     },
     listItemLeft: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
         flex: 1,
-    },
-    listIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
+        flexShrink: 1,
+        minWidth: 0,
     },
     listItemTitle: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         marginBottom: 2,
     },
     listItemSubtitle: {
         fontSize: 12,
-        color: '#909090',
+        color: '#8E8E93',
     },
     listItemRight: {
         alignItems: 'flex-end',
         gap: 4,
     },
+    listItemMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
     listItemAmount: {
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
+    },
+    listItemAmountIncome: {
+        color: '#32D74B',
+    },
+    listItemAmountExpense: {
+        color: '#FA5C5C',
+    },
+    itemMenuButton: {
+        width: 28,
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    itemActionDropdown: {
+        position: 'absolute',
+        top: 42,
+        right: 8,
+        width: 176,
+        zIndex: 1000,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.07)',
+        overflow: 'hidden',
+        borderRadius: 20,
+        backgroundColor: 'rgba(17, 17, 17, 0.94)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+        elevation: 12,
+    },
+    itemActionDropdownBlur: {
+        width: '100%',
+    },
+    itemActionDropdownOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(17, 17, 17, 0.94)',
+    },
+    itemActionDropdownContent: {
+        paddingVertical: 4,
+    },
+    itemActionDropdownItem: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    itemActionDropdownText: {
+        color: '#E0E0E0',
+        fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    itemActionDropdownTextDestructive: {
+        color: '#FF6B6B',
+        fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    itemActionDropdownDivider: {
+        height: 1,
+        width: '100%',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
     },
     statusBadge: {
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 4,
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: 8,
+        backgroundColor: '#171717',
+        borderWidth: 1,
+        borderColor: '#252525',
     },
     statusText: {
         fontSize: 10,
-        fontWeight: '700',
+        fontWeight: '600',
         textTransform: 'uppercase',
+        letterSpacing: 0,
+        color: '#8E8E93',
     },
     emptyStateContainer: {
         flex: 1,
@@ -1979,7 +2376,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#101010',
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 24,
@@ -1988,14 +2385,14 @@ const styles = StyleSheet.create({
     emptyStateTitle: {
         fontSize: 18,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         marginBottom: 8,
         textAlign: 'center',
         display: 'none',
     },
     emptyStateText: {
         fontSize: 14,
-        color: '#909090',
+        color: '#8E8E93',
         textAlign: 'center',
         lineHeight: 20,
         marginBottom: 32,
@@ -2012,7 +2409,7 @@ const styles = StyleSheet.create({
         display: 'none',
     },
     addButtonText: {
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         fontWeight: '600',
         fontSize: 14,
         display: 'none',
@@ -2021,6 +2418,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         position: 'relative',
+        gap: 10,
     },
     actionsGradient: {
         position: 'absolute',
@@ -2034,13 +2432,17 @@ const styles = StyleSheet.create({
     actionsContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#161616',
+        backgroundColor: '#101010',
         paddingLeft: 8,
         gap: 4,
     },
     actionButton: {
-        padding: 10,
-        borderRadius: 8,
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.06)',
     },
     // Estilos do card de confirmação de exclusão
     deleteConfirmCard: {
@@ -2048,10 +2450,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 16,
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#101010',
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#2A2A2A',
+        borderColor: '#252525',
     },
     deleteConfirmContent: {
         flexDirection: 'row',
@@ -2061,15 +2463,15 @@ const styles = StyleSheet.create({
     deleteConfirmText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
     },
     // Estilos de seleção múltipla
     selectionCheckbox: {
         width: 22,
         height: 22,
         borderRadius: 11,
-        borderWidth: 2,
-        borderColor: '#555',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.32)',
         marginRight: 12,
         justifyContent: 'center',
         alignItems: 'center',
@@ -2092,7 +2494,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'flex-start',
         paddingLeft: 16,
-        backgroundColor: 'rgba(0,0,0,0.85)', // Camada extra de escurecimento
+        backgroundColor: 'rgba(0,0,0,0.78)',
     },
     cardTutorialContent: {
         flexDirection: 'row',
@@ -2101,18 +2503,18 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     cardTutorialText: {
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         fontSize: 14,
         fontWeight: '600',
         textAlign: 'center',
     },
     // Calendar Styles
     calendarContainer: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 20,
-        padding: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+        backgroundColor: '#101010',
+        borderRadius: 18,
+        padding: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#252525',
     },
     calendarHeader: {
         flexDirection: 'row',
@@ -2124,13 +2526,18 @@ const styles = StyleSheet.create({
     calendarMonthTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         textTransform: 'capitalize',
     },
     calendarArrow: {
-        padding: 8,
-        backgroundColor: '#252525',
-        borderRadius: 8,
+        width: 32,
+        height: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#101010',
+        borderWidth: 1,
+        borderColor: '#252525',
+        borderRadius: 16,
     },
     weekDaysRow: {
         flexDirection: 'row',
@@ -2140,7 +2547,7 @@ const styles = StyleSheet.create({
     weekDayText: {
         width: '14.28%',
         textAlign: 'center',
-        color: '#666',
+        color: '#6E6E73',
         fontSize: 12,
         fontWeight: '500',
     },
@@ -2150,20 +2557,20 @@ const styles = StyleSheet.create({
     },
     dayCell: {
         width: '14.28%',
-        height: 48,
+        height: 44,
         justifyContent: 'flex-start',
         alignItems: 'center',
         marginBottom: 4,
         paddingTop: 8,
-        borderRadius: 8,
+        borderRadius: 12,
     },
     dayCellSelected: {
-        backgroundColor: 'rgba(217, 119, 87, 0.2)',
-        borderWidth: 1,
-        borderColor: '#D97757',
+        backgroundColor: 'rgba(217, 119, 87, 0.16)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(217, 119, 87, 0.48)',
     },
     dayText: {
-        color: '#FFF',
+        color: '#F5F5F7',
         fontSize: 14,
         fontWeight: '500',
     },
@@ -2180,105 +2587,193 @@ const styles = StyleSheet.create({
     iconButton: {
         width: 36,
         height: 36,
-        borderRadius: 10,
-        backgroundColor: '#1A1A1A',
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+        borderRadius: 18,
+        backgroundColor: '#101010',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#252525',
         justifyContent: 'center',
         alignItems: 'center'
     },
-    loadingContainer: {
-        flex: 1,
+    calendarToggleButton: {
+        width: HEADER_CONTROL_HEIGHT,
+        height: HEADER_CONTROL_HEIGHT,
+        borderRadius: 12,
+        backgroundColor: '#101010',
+        borderWidth: 1,
+        borderColor: '#252525',
         justifyContent: 'center',
         alignItems: 'center',
-        gap: 12,
-        marginTop: 40,
     },
-    loadingText: {
-        color: '#909090',
+    optionsModalBody: {
+        paddingTop: 20,
+        paddingBottom: 18,
+        gap: 10,
+    },
+    optionsSummaryCard: {
+        backgroundColor: '#101010',
+        borderRadius: 18,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#252525',
+        overflow: 'hidden',
+    },
+    optionsCard: {
+        backgroundColor: '#101010',
+        borderRadius: 18,
+        overflow: 'hidden',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#252525',
+    },
+    optionRow: {
+        minHeight: 64,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 14,
+    },
+    optionTextGroup: {
+        flex: 1,
+        minWidth: 0,
+    },
+    optionTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#F5F5F7',
+        marginBottom: 2,
+    },
+    optionSubtitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#8E8E93',
+    },
+    optionDivider: {
+        height: StyleSheet.hairlineWidth,
+        marginLeft: 64,
+        backgroundColor: '#252525',
+    },
+    summaryStatRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 13,
+    },
+    summaryStatLabel: {
         fontSize: 14,
+        color: '#8E8E93',
+        fontWeight: '400',
+    },
+    summaryStatValue: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#F5F5F7',
     },
     // New Empty State Styles (Reminders)
     emptyRemindersContainer: {
-        paddingHorizontal: 32,
-        // Added paddingBottom to visually center vertically relative to the full screen
-        paddingBottom: 120,
         alignItems: 'center',
         justifyContent: 'center',
+        paddingHorizontal: 28,
+        paddingBottom: 96,
         flex: 1,
     },
     emptyRemindersIconWrapper: {
-        marginBottom: 0,
         alignItems: 'center',
         justifyContent: 'center',
     },
     emptyRemindersTitle: {
-        fontSize: 20,
+        fontSize: 15,
         fontWeight: '600',
-        color: '#FFF',
-        marginBottom: 12,
+        color: '#F5F5F7',
+        marginTop: 8,
+        marginBottom: 4,
         textAlign: 'center',
     },
     emptyRemindersText: {
-        fontSize: 15,
-        color: '#888',
+        fontSize: 13,
+        color: '#8E8E93',
         textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: 32,
-    },
-    emptyRemindersButton: {
-        backgroundColor: '#D97757',
-        paddingHorizontal: 32,
-        paddingVertical: 14,
-        borderRadius: 100,
-        elevation: 0,
-        shadowColor: 'transparent',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    emptyRemindersButtonText: {
-        color: '#FFF',
-        fontSize: 15,
-        fontWeight: '600',
+        maxWidth: 232,
+        lineHeight: 18,
     },
 
 
     // Summary Card Styles
     summaryCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 20,
-        padding: 16,
-        marginBottom: 20,
+        backgroundColor: '#101010',
+        borderRadius: 18,
+        marginHorizontal: 22,
+        marginBottom: 12,
         borderWidth: 1,
-        borderColor: '#2A2A2A',
+        borderColor: '#252525',
+        overflow: 'hidden',
     },
     summaryRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        alignItems: 'stretch',
+    },
+    summaryItem: {
+        flex: 1,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+        minWidth: 0,
+    },
+    summaryItemLabel: {
+        fontSize: 10,
+        color: '#6E6E73',
+        fontWeight: '500',
+        marginBottom: 3,
+    },
+    summaryItemValueRow: {
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        gap: 6,
+        minWidth: 0,
+    },
+    summaryItemValue: {
+        flexShrink: 1,
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#F5F5F7',
+    },
+    summaryItemValueAccent: {
+        color: '#D97757',
+    },
+    summaryItemValueIncome: {
+        color: '#32D74B',
+    },
+    summaryRowDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#252525',
+    },
+    summaryItemSub: {
+        fontSize: 11,
+        color: '#48484A',
+    },
+    summaryItemDivider: {
+        width: StyleSheet.hairlineWidth,
+        alignSelf: 'stretch',
+        backgroundColor: '#252525',
     },
     summaryLabelSmall: {
         fontSize: 12,
         color: '#8E8E93',
-        fontWeight: '600',
+        fontWeight: '500',
     },
     summaryValueSmall: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
     },
     summarySubLabelSmall: {
         fontSize: 10,
-        color: '#666',
+        color: '#6E6E73',
         marginTop: 2,
     },
-    summaryIconBox: {
-        width: 24,
-        height: 24,
-        borderRadius: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
+    summaryDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
     },
     summaryHeaderRow: {
         flexDirection: 'row',
@@ -2291,9 +2786,9 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
     },
     summaryDivider: {
-        width: 1,
+        width: StyleSheet.hairlineWidth,
         height: '100%',
-        backgroundColor: '#2A2A2A',
+        backgroundColor: '#252525',
         marginHorizontal: 12,
     },
     // Detection Actions Styles
@@ -2308,10 +2803,10 @@ const styles = StyleSheet.create({
         gap: 4,
         paddingVertical: 6,
         paddingHorizontal: 10,
-        borderRadius: 8,
-        backgroundColor: 'rgba(255, 69, 58, 0.1)',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 69, 58, 0.3)',
+        borderRadius: 14,
+        backgroundColor: 'rgba(255, 69, 58, 0.11)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255, 69, 58, 0.24)',
     },
     dismissButtonText: {
         fontSize: 12,
@@ -2324,16 +2819,12 @@ const styles = StyleSheet.create({
         gap: 4,
         paddingVertical: 6,
         paddingHorizontal: 10,
-        borderRadius: 8,
+        borderRadius: 14,
         backgroundColor: '#D97757',
     },
     confirmButtonText: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#F5F5F7',
     },
 });
-
-
-
-

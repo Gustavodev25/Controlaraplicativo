@@ -1,12 +1,7 @@
-import BottomSheet from '@/components/templates/bottom-sheet';
-import { BottomSheetMethods } from '@/components/templates/bottom-sheet/types';
+import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { Calendar, Save, Search, Trash2, X } from 'lucide-react-native';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -15,7 +10,6 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export interface FilterState {
     search: string;
@@ -45,50 +39,12 @@ export function CreditCardFilterModal({
     years
 }: CreditCardFilterModalProps) {
     const [filters, setFilters] = useState<FilterState>(initialFilters);
-    const [keyboardHeight, setKeyboardHeight] = useState(0);
-
-    const sheetRef = useRef<BottomSheetMethods>(null);
-    const [isModalMounted, setIsModalMounted] = useState(false);
-
-    // Listener para expandir o BottomSheet quando o teclado abrir
-    useEffect(() => {
-        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-        const keyboardShowListener = Keyboard.addListener(showEvent, (e) => {
-            setKeyboardHeight(e.endCoordinates.height);
-            // Expandir o BottomSheet para o snap point máximo quando o teclado abrir
-            sheetRef.current?.snapToIndex(1);
-        });
-
-        const keyboardHideListener = Keyboard.addListener(hideEvent, () => {
-            setKeyboardHeight(0);
-            // Voltar ao tamanho original quando o teclado fechar
-            sheetRef.current?.snapToIndex(0);
-        });
-
-        return () => {
-            keyboardShowListener.remove();
-            keyboardHideListener.remove();
-        };
-    }, []);
 
     useEffect(() => {
         if (visible) {
             setFilters(initialFilters);
-            setIsModalMounted(true);
-            requestAnimationFrame(() => {
-                sheetRef.current?.snapToIndex(0);
-            });
-        } else if (isModalMounted) {
-            sheetRef.current?.close();
         }
-    }, [visible, initialFilters, isModalMounted]);
-
-    const handleBottomSheetClose = () => {
-        setIsModalMounted(false);
-        onClose();
-    };
+    }, [visible, initialFilters]);
 
     const handleDateChange = (text: string, field: 'startDate' | 'endDate') => {
         let cleaned = text.replace(/\D/g, '');
@@ -114,7 +70,7 @@ export function CreditCardFilterModal({
 
     const handleApply = () => {
         onApply(filters);
-        sheetRef.current?.close();
+        onClose();
     };
 
     const clearFilters = () => {
@@ -140,35 +96,20 @@ export function CreditCardFilterModal({
     };
 
     return (
-        <Modal visible={isModalMounted} transparent animationType="none" statusBarTranslucent hardwareAccelerated>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                    <BottomSheet
-                        ref={sheetRef}
-                        snapPoints={["85%", "95%"]}
-                        backgroundColor="#141414"
-                        backdropOpacity={0.6}
-                        borderRadius={24}
-                        onClose={handleBottomSheetClose}
-                    >
-                        <View style={styles.header}>
-                            <Text style={styles.title}>Pesquisar transação</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                                <TouchableOpacity onPress={handleApply} style={styles.headerSaveButton}>
-                                    <Save size={18} color="#D97757" />
-                                    <Text style={styles.headerSaveText}>Salvar</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => sheetRef.current?.close()}>
-                                    <X size={20} color="#909090" />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-
-                        <ScrollView
-                            contentContainerStyle={[styles.container, keyboardHeight > 0 && { paddingBottom: keyboardHeight }]}
-                            showsVerticalScrollIndicator={false}
-                            keyboardShouldPersistTaps="handled"
-                        >
+        <ModalPadrao
+            visible={visible}
+            onClose={onClose}
+            title="Pesquisar transação"
+            titleAlign="start"
+            maxHeightRatio={0.9}
+            bodyStyle={styles.container}
+            footer={(
+                <TouchableOpacity onPress={handleApply} style={styles.footerButton}>
+                    <Save size={18} color="#FFFFFF" />
+                    <Text style={styles.footerButtonText}>Salvar</Text>
+                </TouchableOpacity>
+            )}
+        >
 
                             {/* Search Bar */}
                             <Text style={styles.sectionHeader}>BUSCAR</Text>
@@ -285,11 +226,7 @@ export function CreditCardFilterModal({
                                 <Text style={styles.clearButtonTextSimple}>Limpar Filtros</Text>
                             </TouchableOpacity>
 
-                        </ScrollView>
-                    </BottomSheet>
-                </GestureHandlerRootView>
-            </KeyboardAvoidingView>
-        </Modal>
+        </ModalPadrao>
     );
 }
 
@@ -394,17 +331,19 @@ const styles = StyleSheet.create({
         backgroundColor: '#333'
     },
 
-    headerSaveButton: {
+    footerButton: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 6,
-        padding: 4,
-        paddingHorizontal: 8,
+        backgroundColor: '#D97757',
+        borderRadius: 14,
+        minHeight: 50,
     },
-    headerSaveText: {
-        color: '#D97757',
-        fontSize: 14,
-        fontWeight: '600'
+    footerButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '700'
     },
     clearButtonSimple: {
         flexDirection: 'row',

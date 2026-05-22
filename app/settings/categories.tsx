@@ -1,15 +1,14 @@
 import { DeleteConfirmCard } from '@/components/DeleteConfirmCard';
 import { UniversalBackground } from '@/components/UniversalBackground';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { CategoryGroup, DEFAULT_CATEGORIES } from '@/constants/defaultCategories';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useCategories } from '@/hooks/use-categories';
 import { CategoryService } from '@/services/categoryService';
-import { animationScheduler } from '@/services/performance';
 import { useRouter } from 'expo-router';
-import LottieView from 'lottie-react-native';
-import { ChevronDown, ChevronLeft, Pencil, Save, Search, Trash2 } from 'lucide-react-native';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -48,8 +47,6 @@ export default function CategoriesScreen() {
     const [newCategoryModalVisible, setNewCategoryModalVisible] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const [newCategoryGroupIndex, setNewCategoryGroupIndex] = useState<number | null>(null);
-    const addLottieRef = React.useRef<LottieView>(null);
-    const addButtonLottieRefs = React.useRef<Record<string, LottieView | null>>({});
     const [pendingDelete, setPendingDelete] = useState<{ groupIndex: number; itemIndex: number } | null>(null);
 
     const newCategoryGroupTitle = newCategoryGroupIndex !== null
@@ -167,40 +164,6 @@ export default function CategoriesScreen() {
         }
     };
 
-    useEffect(() => {
-        if (!newCategoryModalVisible) return;
-
-        const play = () => {
-            addLottieRef.current?.play();
-        };
-
-        const startDisposer = animationScheduler.scheduleOnce('categories:add-modal:start', play, 100);
-        const intervalDisposer = animationScheduler.scheduleInterval('categories:add-modal:loop', play, 3000, { jitterRatio: 0.15 });
-
-        return () => {
-            startDisposer();
-            intervalDisposer();
-        };
-    }, [newCategoryModalVisible]);
-
-    useEffect(() => {
-        if (serverLoading) return;
-
-        const play = () => {
-            Object.values(addButtonLottieRefs.current).forEach((ref) => {
-                ref?.play();
-            });
-        };
-
-        const startDisposer = animationScheduler.scheduleOnce('categories:add-button:start', play, 100);
-        const intervalDisposer = animationScheduler.scheduleInterval('categories:add-button:loop', play, 2000, { jitterRatio: 0.2 });
-
-        return () => {
-            startDisposer();
-            intervalDisposer();
-        };
-    }, [serverLoading, categories, expandedGroups]);
-
     const removeCategory = (groupIndex: number, itemIndex: number) => {
         setPendingDelete({ groupIndex, itemIndex });
     };
@@ -225,6 +188,8 @@ export default function CategoriesScreen() {
         }
     };
 
+    const hasChanges = !serverLoading && JSON.stringify(categories) !== JSON.stringify(serverCategories);
+
     const totalCategories = categories.reduce((acc, group) => acc + group.items.length, 0);
     const customCategories = categories.reduce((acc, group) =>
         acc + group.items.filter((item: any) => item.isCustom).length, 0);
@@ -248,83 +213,50 @@ export default function CategoriesScreen() {
 
     return (
         <View style={styles.mainContainer}>
-            <View style={styles.backgroundLayer} pointerEvents="none">
-                <UniversalBackground
-                    backgroundColor="#0C0C0C"
-                    glowSize={350}
-                    height={280}
-                    showParticles={true}
-                    particleCount={15}
-                />
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }} pointerEvents="none">
+                <UniversalBackground backgroundColor="#0C0C0C" glowSize={350} height={280} />
             </View>
 
-            <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-                <TouchableOpacity
-                    onPress={() => router.back()}
-                    style={styles.backButton}
-                >
-                    <ChevronLeft size={24} color="#E0E0E0" />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Gestão de Categorias</Text>
-                <TouchableOpacity
-                    onPress={handleSave}
-                    style={styles.saveButton}
-                    disabled={saving}
-                >
-                    {saving ? (
-                        <ActivityIndicator color="#FFFFFF" size="small" />
-                    ) : (
-                        <Save size={20} color="#D97757" />
-                    )}
-                </TouchableOpacity>
+            <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+                <View style={styles.header}>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <ChevronLeft size={24} color="#E0E0E0" />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Categorias</Text>
+                    <View style={styles.headerSpacer} />
+                </View>
             </View>
 
-            <View style={styles.summarySection}>
-                <Text style={styles.summarySubtitle}>Aplica em todas as transações</Text>
-                <Text style={styles.summaryDescription}>Personalize os nomes das categorias das suas transações</Text>
-
+            <View style={styles.searchSection}>
                 <View style={styles.statsRow}>
                     <View style={styles.statItem}>
-                        <Text style={styles.statLabel}>TOTAL</Text>
                         <Text style={styles.statValue}>{totalCategories}</Text>
+                        <Text style={styles.statLabel}>total</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statLabel}>CUSTOMIZADAS</Text>
                         <Text style={styles.statValue}>{customCategories}</Text>
+                        <Text style={styles.statLabel}>customizadas</Text>
                     </View>
                 </View>
-
                 <View style={styles.searchContainer}>
-                    <Search size={16} color="#666" style={styles.searchIcon} />
+                    <Search size={15} color="#555" style={styles.searchIcon} />
                     <TextInput
                         style={styles.searchInput}
                         placeholder="Buscar categoria..."
-                        placeholderTextColor="#666"
+                        placeholderTextColor="#555"
                         value={searchQuery}
                         onChangeText={setSearchQuery}
                     />
                 </View>
             </View>
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ flex: 1 }}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-            >
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
                 <ScrollView
-                    contentContainerStyle={styles.scrollContent}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: hasChanges ? 100 : 40 }]}
                     showsVerticalScrollIndicator={false}
                 >
                     {serverLoading ? (
-                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 40 }}>
-                            <LottieView
-                                source={require('@/assets/carregando.json')}
-                                autoPlay
-                                loop
-                                style={{ width: 50, height: 50 }}
-                            />
-                            <Text style={{ color: '#888', fontSize: 14, marginTop: 12 }}>Carregando categorias...</Text>
-                        </View>
+                        <IosCoreLoader style={{ minHeight: 220 }} />
                     ) : (
                         filteredCategories.map((group) => {
                             const isExpanded = expandedGroups.has(group.title);
@@ -332,19 +264,12 @@ export default function CategoriesScreen() {
 
                             return (
                                 <View key={group.title} style={styles.groupCard}>
-                                    <TouchableOpacity
-                                        style={styles.groupHeader}
-                                        onPress={() => toggleGroup(group.title)}
-                                        activeOpacity={0.7}
-                                    >
+                                    <TouchableOpacity style={styles.groupHeader} onPress={() => toggleGroup(group.title)} activeOpacity={0.7}>
                                         <Text style={styles.groupTitle}>{group.title}</Text>
-                                        <ChevronDown
-                                            size={20}
-                                            color="#D97757"
-                                            style={{
-                                                transform: [{ rotate: isExpanded ? '180deg' : '0deg' }]
-                                            }}
-                                        />
+                                        <View style={styles.groupMeta}>
+                                            <Text style={styles.groupCount}>{group.items.length}</Text>
+                                            <ChevronDown size={16} color="#555" style={{ transform: [{ rotate: isExpanded ? '180deg' : '0deg' }] }} />
+                                        </View>
                                     </TouchableOpacity>
 
                                     {isExpanded && (
@@ -352,19 +277,12 @@ export default function CategoriesScreen() {
                                             <View style={styles.groupContent}>
                                                 {group.items.map((item, itemIndex) => {
                                                     const realItemIndex = categories[realGroupIndex].items.findIndex(i => i.key === item.key);
-                                                    const isFirst = itemIndex === 0;
                                                     const isLast = itemIndex === group.items.length - 1;
                                                     const isPendingDelete = pendingDelete?.groupIndex === realGroupIndex && pendingDelete?.itemIndex === realItemIndex;
 
                                                     if (isPendingDelete) {
                                                         return (
-                                                            <View key={item.key} style={[
-                                                                styles.itemContainer,
-                                                                styles.deleteConfirmWrapper,
-                                                                isFirst && styles.itemFirst,
-                                                                isLast && styles.itemLast,
-                                                                !isLast && styles.itemSeparator
-                                                            ]}>
+                                                            <View key={item.key} style={[styles.itemContainer, !isLast && styles.itemSeparator]}>
                                                                 <DeleteConfirmCard
                                                                     title="Remover categoria?"
                                                                     cancelText="Cancelar"
@@ -378,64 +296,30 @@ export default function CategoriesScreen() {
                                                     }
 
                                                     return (
-                                                        <View key={item.key} style={[
-                                                            styles.itemContainer,
-                                                            isFirst && styles.itemFirst,
-                                                            isLast && styles.itemLast,
-                                                            !isLast && styles.itemSeparator
-                                                        ]}>
+                                                        <View key={item.key} style={[styles.itemContainer, !isLast && styles.itemSeparator]}>
                                                             <View style={styles.itemContent}>
-                                                                <Text style={styles.keyLabel}>CHAVE ORIGINAL</Text>
                                                                 <Text style={styles.keyValue}>{item.key}</Text>
-
-                                                                <TouchableOpacity
-                                                                    style={styles.nameHeader}
-                                                                    onPress={() => {
-                                                                        nameInputRefs.current[`${realGroupIndex}-${realItemIndex}`]?.focus();
-                                                                    }}
-                                                                    activeOpacity={0.7}
-                                                                >
-                                                                    <Text style={[styles.keyLabel, styles.nameLabel]}>NOME DE EXIBIÇÃO</Text>
-                                                                    <Pencil size={12} color="#8E8E93" />
-                                                                </TouchableOpacity>
                                                                 <TextInput
-                                                                    ref={(ref) => {
-                                                                        nameInputRefs.current[`${realGroupIndex}-${realItemIndex}`] = ref;
-                                                                    }}
+                                                                    ref={(ref) => { nameInputRefs.current[`${realGroupIndex}-${realItemIndex}`] = ref; }}
                                                                     style={styles.nameInput}
                                                                     value={item.label}
                                                                     onChangeText={(text) => updateCategoryName(realGroupIndex, realItemIndex, text)}
                                                                     placeholder="Nome da categoria"
-                                                                    placeholderTextColor="#555"
+                                                                    placeholderTextColor="#444"
                                                                 />
                                                             </View>
-
                                                             {(item as any).isCustom && (
-                                                                <TouchableOpacity
-                                                                    style={styles.deleteButton}
-                                                                    onPress={() => removeCategory(realGroupIndex, realItemIndex)}
-                                                                >
-                                                                    <Trash2 size={20} color="#FF453A" />
+                                                                <TouchableOpacity style={styles.deleteButton} onPress={() => removeCategory(realGroupIndex, realItemIndex)}>
+                                                                    <Trash2 size={17} color="#555" />
                                                                 </TouchableOpacity>
                                                             )}
                                                         </View>
                                                     );
                                                 })}
 
-                                                <TouchableOpacity
-                                                    style={styles.addCategoryButton}
-                                                    onPress={() => addNewCategory(realGroupIndex)}
-                                                >
-                                                    <LottieView
-                                                        ref={(ref) => {
-                                                            addButtonLottieRefs.current[`${realGroupIndex}`] = ref;
-                                                        }}
-                                                        source={require('@/assets/adicionar.json')}
-                                                        autoPlay={false}
-                                                        loop={false}
-                                                        style={styles.addCategoryLottie}
-                                                    />
-                                                    <Text style={styles.addCategoryText}>Adicionar Categoria</Text>
+                                                <TouchableOpacity style={styles.addCategoryButton} onPress={() => addNewCategory(realGroupIndex)}>
+                                                    <Plus size={14} color="#555" />
+                                                    <Text style={styles.addCategoryText}>Adicionar</Text>
                                                 </TouchableOpacity>
                                             </View>
                                         </Animated.View>
@@ -444,222 +328,126 @@ export default function CategoriesScreen() {
                             );
                         })
                     )}
-                    <View style={{ height: 40 }} />
                 </ScrollView>
+
+                {hasChanges && (
+                    <View style={[styles.saveContainer, { paddingBottom: insets.bottom + 16 }]}>
+                        <TouchableOpacity style={styles.saveBottomButton} onPress={handleSave} disabled={saving} activeOpacity={0.85}>
+                            {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.saveBottomButtonText}>Salvar alterações</Text>}
+                        </TouchableOpacity>
+                    </View>
+                )}
             </KeyboardAvoidingView>
 
             <ModalPadrao
                 visible={newCategoryModalVisible}
                 onClose={() => setNewCategoryModalVisible(false)}
                 title="Nova Categoria"
-                headerRight={
+                footer={
                     <TouchableOpacity
                         onPress={handleCreateCategory}
                         disabled={saving || !newCategoryName.trim()}
-                        style={styles.headerSaveButton}
+                        style={[styles.modalSaveButton, (saving || !newCategoryName.trim()) && styles.modalSaveButtonDisabled]}
                     >
-                        {saving ? (
-                            <ActivityIndicator size="small" color="#D97757" />
-                        ) : (
-                            <>
-                                <Save size={18} color={newCategoryName.trim() ? '#D97757' : '#666'} />
-                                <Text style={[styles.headerSaveText, !newCategoryName.trim() && { color: '#666' }]}>Salvar</Text>
-                            </>
-                        )}
+                        {saving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.modalSaveButtonText}>Adicionar</Text>}
                     </TouchableOpacity>
                 }
             >
-                <ScrollView contentContainerStyle={styles.modalContainer} showsVerticalScrollIndicator={false}>
-                    <View style={styles.modalHeaderRow}>
-                        <Text style={styles.modalHeaderTitle}>NOVA CATEGORIA</Text>
-                        {newCategoryGroupTitle ? (
-                            <View style={styles.modalHeaderGroup}>
-                                <View style={styles.modalHeaderDot} />
-                                <Text style={styles.modalHeaderGroupText}>{newCategoryGroupTitle}</Text>
-                            </View>
-                        ) : null}
+                <View style={styles.sectionCard}>
+                    <View style={styles.modalItemContainer}>
+                        <TextInput
+                            style={styles.modalInput}
+                            value={newCategoryName}
+                            onChangeText={setNewCategoryName}
+                            placeholder={`Nova categoria em ${newCategoryGroupTitle}`}
+                            placeholderTextColor="#555"
+                            returnKeyType="done"
+                            onSubmitEditing={handleCreateCategory}
+                            autoFocus
+                        />
                     </View>
-                    <View style={styles.sectionCard}>
-                        <View style={styles.modalItemContainer}>
-                            <View style={styles.modalItemIconContainer}>
-                                <LottieView
-                                    ref={addLottieRef}
-                                    source={require('@/assets/adicionar.json')}
-                                    autoPlay={false}
-                                    loop={false}
-                                    style={styles.modalIconLottie}
-                                />
-                            </View>
-                            <View style={styles.modalItemRightContainer}>
-                                <View style={styles.modalItemContent}>
-                                    <Text style={styles.modalItemTitle}>Nome da categoria</Text>
-                                    <TextInput
-                                        style={styles.modalInput}
-                                        value={newCategoryName}
-                                        onChangeText={setNewCategoryName}
-                                        placeholder="Ex: Café"
-                                        placeholderTextColor="#666"
-                                        returnKeyType="done"
-                                        onSubmitEditing={handleCreateCategory}
-                                    />
-                                </View>
-                            </View>
-                        </View>
-                    </View>
-                </ScrollView>
+                </View>
             </ModalPadrao>
-        </View >
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    mainContainer: {
-        flex: 1,
-        backgroundColor: '#0C0C0C',
-    },
-    backgroundLayer: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 280,
+    mainContainer: { flex: 1, backgroundColor: '#0C0C0C' },
+
+    // Header
+    headerWrapper: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        height: 52,
         paddingHorizontal: 20,
-        marginBottom: 10,
     },
-    backButton: {
-        width: 40,
-        height: 40,
-        justifyContent: 'center',
-        alignItems: 'flex-start',
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#E0E0E0',
-    },
-    saveButton: {
-        width: 40,
-        height: 40,
-        justifyContent: 'center',
-        alignItems: 'flex-end',
-    },
-    summarySection: {
+    backButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start' },
+    headerTitle: { flex: 1, fontSize: 18, fontWeight: '600', color: '#E8E8EA', textAlign: 'center' },
+    headerSpacer: { width: 40, height: 40 },
+
+    // Stats + Search
+    searchSection: {
         paddingHorizontal: 20,
-        marginBottom: 10,
-    },
-    summarySubtitle: {
-        fontSize: 14,
-        color: '#FFFFFF',
-        fontWeight: '600',
-        marginBottom: 4,
-    },
-    summaryDescription: {
-        fontSize: 13,
-        color: '#FFFFFF',
-        marginBottom: 20,
+        paddingTop: 16,
+        paddingBottom: 12,
     },
     statsRow: {
         flexDirection: 'row',
-        backgroundColor: 'transparent',
-        paddingVertical: 4,
-        paddingHorizontal: 0,
-        marginBottom: 16,
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
+        gap: 24,
+        marginBottom: 14,
     },
-    statItem: {
-        flex: 1,
-        alignItems: 'flex-start',
-    },
-    statLabel: {
-        fontSize: 11,
-        color: '#9AA0A6',
-        marginBottom: 4,
-        fontWeight: '600',
-        letterSpacing: 0.5,
-    },
-    statValue: {
-        fontSize: 26,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        lineHeight: 30,
-    },
+    statItem: { alignItems: 'flex-start' },
+    statValue: { fontSize: 22, fontWeight: '600', color: '#E8E8EA' },
+    statLabel: { fontSize: 11, color: '#555', marginTop: 1 },
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#151515',
-        borderRadius: 12,
+        backgroundColor: '#111111',
+        borderRadius: 10,
         paddingHorizontal: 12,
-        height: 46,
-        borderWidth: 1,
-        borderColor: '#252525',
+        height: 42,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
     },
-    searchIcon: {
-        marginRight: 10,
-    },
-    searchInput: {
-        flex: 1,
-        color: '#FFF',
-        fontSize: 15,
-    },
-    scrollContent: {
-        paddingHorizontal: 20,
-        paddingBottom: 40,
-    },
-    groupCard: {
-        marginBottom: 16,
-    },
+    searchIcon: { marginRight: 8 },
+    searchInput: { flex: 1, color: '#E8E8EA', fontSize: 14 },
+
+    // List
+    scrollContent: { paddingHorizontal: 20 },
+    groupCard: { marginBottom: 8 },
     groupHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingVertical: 12,
     },
-    groupTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
-    },
+    groupTitle: { fontSize: 15, fontWeight: '500', color: '#E8E8EA' },
+    groupMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    groupCount: { fontSize: 13, color: '#555' },
     groupContent: {
-        marginTop: 8,
-        backgroundColor: '#151515',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#252525',
+        backgroundColor: '#111111',
+        borderRadius: 12,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
         overflow: 'hidden',
+        marginBottom: 8,
     },
     itemContainer: {
-        backgroundColor: 'transparent',
-        paddingVertical: 12,
-        paddingHorizontal: 14,
-        marginBottom: 0,
-        borderWidth: 0,
-        borderColor: 'transparent',
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    itemFirst: {
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-    },
-    itemLast: {
-        borderBottomLeftRadius: 16,
-        borderBottomRightRadius: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        minHeight: 52,
     },
     itemSeparator: {
-        borderBottomWidth: 1,
-        borderBottomColor: '#252525',
-    },
-    deleteConfirmWrapper: {
-        paddingVertical: 0,
-        paddingHorizontal: 0,
-        backgroundColor: 'transparent',
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: '#1A1A1A',
     },
     deleteConfirmCard: {
         backgroundColor: '#141414',
@@ -669,168 +457,76 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         width: '100%',
     },
-    itemContent: {
-        flex: 1,
-    },
-    keyLabel: {
-        fontSize: 9,
-        color: '#70757A',
-        textTransform: 'uppercase',
-        fontWeight: '600',
-        marginBottom: 2,
-    },
-    nameHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginTop: 12,
-        marginBottom: 2,
-    },
-    nameLabel: {
-        marginBottom: 0,
-    },
+    itemContent: { flex: 1 },
     keyValue: {
-        fontSize: 12,
-        color: '#8E8E93',
+        fontSize: 11,
+        color: '#444',
         fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-        marginBottom: 6,
+        marginBottom: 3,
     },
     nameInput: {
         fontSize: 15,
-        color: '#FFFFFF',
-        fontWeight: '600',
+        color: '#E8E8EA',
+        fontWeight: '400',
         padding: 0,
-        marginTop: 2,
     },
-    deleteButton: {
-        padding: 6,
-        backgroundColor: 'transparent',
-        borderRadius: 6,
-        marginLeft: 8,
-    },
+    deleteButton: { padding: 6, marginLeft: 8 },
     addCategoryButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 10,
-        backgroundColor: 'transparent',
-        borderRadius: 0,
-        borderWidth: 0,
-        borderColor: 'transparent',
-        marginTop: 2,
-        marginBottom: 6,
-    },
-    addCategoryLottie: {
-        width: 16,
-        height: 16,
-    },
-    addCategoryText: {
-        fontSize: 13,
-        color: '#FFFFFF',
-        fontWeight: '600',
-        marginLeft: 8,
-    },
-    headerSaveButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
         gap: 6,
-        padding: 4,
-        paddingHorizontal: 8,
+        paddingVertical: 11,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#1A1A1A',
     },
-    headerSaveText: {
-        color: '#D97757',
-        fontSize: 14,
-        fontWeight: '600',
+    addCategoryText: { fontSize: 13, color: '#555' },
+
+    // Save bottom button
+    saveContainer: {
+        position: 'absolute',
+        bottom: 0, left: 0, right: 0,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        backgroundColor: 'rgba(12,12,12,0.85)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.08)',
     },
-    modalContainer: {
-        paddingBottom: 0,
-    },
-    modalHeaderRow: {
-        flexDirection: 'row',
+    saveBottomButton: {
+        backgroundColor: '#d97757',
+        borderRadius: 12,
+        height: 50,
         alignItems: 'center',
-        justifyContent: 'space-between',
-        marginTop: 10,
-        marginBottom: 8,
-        marginLeft: 4,
+        justifyContent: 'center',
     },
-    modalHeaderTitle: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#8E8E93',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-    },
-    modalHeaderGroup: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    modalHeaderDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#D97757',
-    },
-    modalHeaderGroupText: {
-        fontSize: 12,
-        color: '#E0E0E0',
-        fontWeight: '600',
-    },
-    sectionHeader: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#8E8E93',
-        marginTop: 10,
-        marginBottom: 8,
-        marginLeft: 4,
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-    },
+    saveBottomButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
+    // Modal
     sectionCard: {
-        backgroundColor: '#151515',
-        borderRadius: 16,
+        backgroundColor: '#111111',
+        borderRadius: 12,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#252525',
-        marginBottom: 10,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
     },
     modalItemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#151515',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
         minHeight: 52,
-        position: 'relative',
-    },
-    modalItemIconContainer: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        backgroundColor: '#252525',
         justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 16,
-        marginLeft: 16,
-    },
-    modalIconLottie: {
-        width: 20,
-        height: 20,
-    },
-    modalItemRightContainer: {
-        flex: 1,
-    },
-    modalItemContent: {
-        flex: 1,
-        flexDirection: 'column',
-    },
-    modalItemTitle: {
-        fontSize: 12,
-        color: '#888',
-        marginBottom: 2,
     },
     modalInput: {
-        color: '#FFF',
+        color: '#E8E8EA',
         fontSize: 16,
         padding: 0,
-        height: 24,
     },
+    modalSaveButton: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#D97757',
+        borderRadius: 12,
+        minHeight: 50,
+    },
+    modalSaveButtonDisabled: { opacity: 0.4 },
+    modalSaveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

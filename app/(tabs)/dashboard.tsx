@@ -1,17 +1,18 @@
-import { AnimatedCurrency } from '@/components/AnimatedCurrency';
 import { BalanceAccountsModal } from '@/components/BalanceAccountsModal';
 import { ExtraIncomeModal } from '@/components/ExtraIncomeModal';
-import { FinancialCalendar } from '@/components/FinancialCalendar';
 import { ProjectionSettings, ProjectionsModal } from '@/components/ProjectionsModal';
-import OverviewSection from '@/components/dashboard/OverviewSection';
-import { RollingCounter } from '@/components/organisms/rolling-counter';
 import Avvvatars from '@/components/ui/Avvvatars';
+import { ProfileDropdown } from '@/components/ui/ProfileDropdown';
 
 import { ConfigIncomeModal } from '@/components/ConfigIncomeModal';
 import { UniversalBackground } from '@/components/UniversalBackground';
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
-import { StackCarousel, useStackCardStyle } from '@/components/ui/StackCarousel';
+import CalendarioFinanceiro from '@/components/visaogeral/CalendarioFinanceiro';
+import DespesasPorCategoria from '@/components/visaogeral/DespesasPorCategoria';
+import MeusCartoes from '@/components/visaogeral/MeusCartoes';
+import MinhasContas from '@/components/visaogeral/MinhasContas';
+import SaldoConta from '@/components/visaogeral/SaldoConta';
+import { INVOICE_PERIOD_VALUES, type CreditCardCarouselItem, type ExpenseSource, type InvoicePeriod } from '@/components/visaogeral/types';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useCategories } from '@/hooks/use-categories';
 import { usePerformanceBudget } from '@/hooks/usePerformanceBudget';
@@ -36,31 +37,29 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { collection, DocumentData, getDocs, limit, orderBy, query, Query, QueryDocumentSnapshot, startAfter, where } from 'firebase/firestore';
-import { Ban, ChevronLeft, ChevronRight, CreditCard, RotateCcw, TrendingUp } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Animated, {
-  interpolate,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring
-} from 'react-native-reanimated';
-import { VictoryLabel, VictoryPie } from 'victory-native';
+import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 
 
 let hasPlayedOverviewGlowIntro = false;
-type InvoicePeriod = 'past' | 'current' | 'next' | 'total_used' | 'none';
-const INVOICE_PERIOD_VALUES: InvoicePeriod[] = ['past', 'current', 'next', 'total_used', 'none'];
+
 const CREDIT_OVERVIEW_WINDOW_MONTHS = 24;
 const CREDIT_OVERVIEW_BATCH_SIZE = 500;
 const CREDIT_OVERVIEW_MAX_ITEMS_PER_CARD = 2000;
+const DEBUG_DASHBOARD_PERF = false;
+const PROFILE_REFRESH_MIN_INTERVAL_MS = 30000;
+
+const debugDashboardPerfLog = (...args: unknown[]) => {
+  if (DEBUG_DASHBOARD_PERF) {
+    console.log(...args);
+  }
+};
 
 const isInvoicePeriod = (value: unknown): value is InvoicePeriod => (
   typeof value === 'string' && INVOICE_PERIOD_VALUES.includes(value as InvoicePeriod)
 );
 
-// Import NumberFlow for animated number transitions
 const getInitials = (name?: string) => {
   if (!name) return 'U';
   const names = name.trim().split(' ');
@@ -287,10 +286,20 @@ export default function DashboardScreen() {
   // Force refresh profile when entering dashboard to ensure financial data is up to date
   useFocusEffect(
     useCallback(() => {
-      if (user) {
-        refreshProfile();
+      if (!user?.uid) {
+        return;
       }
-    }, [user])
+
+      const now = Date.now();
+      if (now - lastProfileRefreshAtRef.current < PROFILE_REFRESH_MIN_INTERVAL_MS) {
+        return;
+      }
+
+      lastProfileRefreshAtRef.current = now;
+      refreshProfile().catch((error) => {
+        console.error('Error refreshing dashboard profile:', error);
+      });
+    }, [user?.uid])
   );
 
   // Load preferences
@@ -345,9 +354,6 @@ export default function DashboardScreen() {
   const [paymentAlertCards, setPaymentAlertCards] = useState<CreditCardAccount[]>([]);
 
   const paymentAlertsEnabled = ((profile?.preferences as any)?.paymentAlertsEnabled ?? true) as boolean;
-
-  // Animated menu state
-  const menuProgress = useSharedValue(0);
 
   const [creditCardData, setCreditCardData] = useState({
     hasCards: false,
@@ -509,8 +515,7 @@ export default function DashboardScreen() {
     }
   }, [selectedBalanceAccountIds, allBankAccounts]);
 
-  // Expense Source State for Pie Chart
-  const [expenseSource, setExpenseSource] = useState<'credit' | 'checking'>('credit');
+  const [expenseSource, setExpenseSource] = useState<ExpenseSource>('credit');
   const [animateOverviewGlowOnMount] = useState(() => {
     if (hasPlayedOverviewGlowIntro) return false;
     hasPlayedOverviewGlowIntro = true;
@@ -518,40 +523,13 @@ export default function DashboardScreen() {
   });
 
   const cycleExpenseSource = (direction: number) => {
-    const sources: ('credit' | 'checking')[] = ['credit', 'checking'];
+    const sources: ExpenseSource[] = ['credit', 'checking'];
     const currentIndex = sources.indexOf(expenseSource);
     let newIndex = currentIndex + direction;
     if (newIndex < 0) newIndex = sources.length - 1;
     if (newIndex >= sources.length) newIndex = 0;
     setExpenseSource(sources[newIndex]);
   };
-
-  const getExpenseSourceLabel = () => {
-    switch (expenseSource) {
-      case 'credit': return 'Cartão';
-      case 'checking': return 'Conta';
-      default: return 'Cartão';
-    }
-  };
-
-  useEffect(() => {
-    menuProgress.value = withSpring(menuVisible ? 1 : 0, {
-      mass: 0.6,
-      damping: 15,
-      stiffness: 200,
-      overshootClamping: false,
-    });
-  }, [menuVisible]);
-
-  // Animated Props for VictoryPie (requires creating an Animated Component if not supported directly,
-  // but usually standard React state causes re-renders.
-  // To fix "laggy" animation, we need to avoid React State updates on every frame.
-  // VictoryNative works best with its own animation prop, but since that failed,
-  // we will try a different approach: Using a simple React State but with fewer steps or optimized.
-
-  // Reverting to Victory's built-in animation but forcing a reset
-  // Removed redundant chartKey effect needed for VictoryPie
-  // The key property on VictoryPie using expenseSource is sufficient
 
   // Fetch recurrences for calendar
   useEffect(() => {
@@ -562,24 +540,86 @@ export default function DashboardScreen() {
     return () => unsubscribe();
   }, [user?.uid]);
 
-  useEffect(() => {
-    if (!user?.uid) return;
+  const lastPaymentAlertScheduleKeyRef = useRef<string | null>(null);
+  const paymentAlertScheduleKey = useMemo(() => {
+    if (!user?.uid) return '';
 
-    notificationService.reschedulePaymentAlerts({
+    const recurrenceKeys = recurrences
+      .map((item: any) => [
+        item.id,
+        item.name,
+        item.dueDate,
+        item.frequency,
+        item.type,
+        item.amount,
+        item.cancellationDate,
+      ].join('|'))
+      .sort();
+
+    const accountKeys = paymentAlertCards
+      .map((card: any) => [
+        card.id,
+        card.name,
+        card.balanceDueDate,
+        card.currentBill?.dueDate,
+        card.currentBill?.totalAmount,
+        card.currentBill?.id,
+      ].join('|'))
+      .sort();
+
+    const subscription = profile?.subscription as any;
+
+    return JSON.stringify({
       userId: user.uid,
       enabled: paymentAlertsEnabled,
-      recurrences,
-      accounts: paymentAlertCards,
-      plan: profile?.subscription || null,
-      invoicePreferences: { daysBeforeDue: 3, showAmount: true },
+      recurrenceKeys,
+      accountKeys,
+      plan: subscription
+        ? [
+          subscription.plan,
+          subscription.status,
+          subscription.expiresAt?.toString?.() ?? subscription.expiresAt ?? '',
+        ].join('|')
+        : '',
     });
-  }, [user?.uid, paymentAlertsEnabled, recurrences, paymentAlertCards, profile?.subscription]);
+  }, [paymentAlertCards, paymentAlertsEnabled, profile?.subscription, recurrences, user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid || !paymentAlertScheduleKey) return;
+    if (lastPaymentAlertScheduleKeyRef.current === paymentAlertScheduleKey) {
+      return;
+    }
+    lastPaymentAlertScheduleKeyRef.current = paymentAlertScheduleKey;
+
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+
+      notificationService.reschedulePaymentAlerts({
+        userId: user.uid,
+        enabled: paymentAlertsEnabled,
+        recurrences,
+        accounts: paymentAlertCards,
+        plan: profile?.subscription || null,
+        invoicePreferences: { daysBeforeDue: 3, showAmount: true },
+      }).catch((error) => {
+        console.error('Error rescheduling payment alerts:', error);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      task.cancel?.();
+    };
+  }, [paymentAlertScheduleKey, user?.uid, paymentAlertsEnabled, recurrences, paymentAlertCards, profile?.subscription]);
 
   const hasInitialLoadRef = useRef(false);
   const lastMonthKeyLoadedRef = useRef<string | null>(null);
   const selectedMonthRef = useRef(selectedMonth);
   const selectedBalanceAccountIdsRef = useRef<string[] | null>(selectedBalanceAccountIds);
   const creditOverviewRunIdRef = useRef(0);
+  const loadedUserIdRef = useRef<string | null>(null);
+  const lastProfileRefreshAtRef = useRef(0);
 
   useEffect(() => {
     selectedMonthRef.current = selectedMonth;
@@ -588,6 +628,18 @@ export default function DashboardScreen() {
   useEffect(() => {
     selectedBalanceAccountIdsRef.current = selectedBalanceAccountIds;
   }, [selectedBalanceAccountIds]);
+
+  useEffect(() => {
+    const nextUserId = user?.uid ?? null;
+    if (loadedUserIdRef.current === nextUserId) {
+      return;
+    }
+
+    loadedUserIdRef.current = nextUserId;
+    hasInitialLoadRef.current = false;
+    lastMonthKeyLoadedRef.current = null;
+    creditOverviewRunIdRef.current += 1;
+  }, [user?.uid]);
 
   const fetchMonthScopedData = useCallback(async (month: Date) => {
     const t0 = Date.now();
@@ -652,10 +704,7 @@ export default function DashboardScreen() {
 
     setCheckingTransactions(mappedTxs);
     setCreditCardTransactions(mappedCreditTxs);
-    // Performance: log duration for month-scoped data fetch
-    if (typeof console !== 'undefined') {
-      console.log('[Perf Dashboard] fetchMonthScopedData duration', Date.now() - t0, 'monthKey', toMonthKey(month));
-    }
+    debugDashboardPerfLog('[Perf Dashboard] fetchMonthScopedData duration', Date.now() - t0, 'monthKey', toMonthKey(month));
   }, [user?.uid]);
 
   const fetchCreditOverviewData = useCallback(async ({ awaitHeavy = false }: { awaitHeavy?: boolean } = {}) => {
@@ -689,7 +738,7 @@ export default function DashboardScreen() {
       const isCreditType = acc.type === 'credit' || acc.type === 'CREDIT' || acc.type === 'CREDIT_CARD' || acc.subtype === 'CREDIT_CARD';
       const isSavingsType = acc.type === 'SAVINGS' || acc.subtype === 'SAVINGS_ACCOUNT' || acc.subtype === 'SAVINGS';
       const isInvestmentType = acc.type === 'INVESTMENT';
-      
+
       const nameLower = (acc.name || '').toLowerCase();
       const isSavingsByName = nameLower.includes('poupança') || nameLower.includes('poupanca') || nameLower.includes('savings');
       const isCaixinhaByName = nameLower.includes('caixinha') || nameLower.includes('invest');
@@ -834,7 +883,7 @@ export default function DashboardScreen() {
       const allCreditTransactions = ((await queryCache.get(
         `dashboard_credit_transactions_${user.uid}_v2`,
         fetchAllCreditTransactions,
-        { ttlMinutes: 10, persist: true }
+        { ttlMinutes: 10, persist: false }
       )) || []) as Transaction[];
 
       if (runId !== creditOverviewRunIdRef.current) {
@@ -926,8 +975,7 @@ export default function DashboardScreen() {
             cards: cardDetails
           });
 
-          // Log duration after heavy aggregation completes
-          console.log('[Perf Dashboard] fetchCreditOverviewData heavyAggregation duration', Date.now() - t0Credit);
+          debugDashboardPerfLog('[Perf Dashboard] fetchCreditOverviewData heavyAggregation duration', Date.now() - t0Credit);
           resolve();
         });
       });
@@ -936,7 +984,9 @@ export default function DashboardScreen() {
     if (awaitHeavy) {
       await runHeavyAggregation();
     } else {
-      void runHeavyAggregation();
+      void runHeavyAggregation().catch((error) => {
+        console.error('Error loading credit overview data:', error);
+      });
     }
   }, [profile, user?.uid]); // Removed unnecessary dependencies
 
@@ -964,24 +1014,16 @@ export default function DashboardScreen() {
         }
 
         setIsLoading(true);
-        if (typeof console !== 'undefined') {
-          console.log('[Perf Dashboard] initial load started', { t0Initial });
-        }
-        // Invalida o cache de contas no carregamento inicial para garantir dados frescos do Firestore
-        await queryCache.invalidate(`accounts_${user.uid}`);
+        debugDashboardPerfLog('[Perf Dashboard] initial load started', { t0Initial });
         const requests: Array<Promise<any>> = [];
         if (plan.fetchMonthScopedData) {
           requests.push(fetchMonthScopedData(initialMonth));
         }
         if (plan.fetchCreditOverviewData) {
-          // Await heavy aggregation on initial load to prevent "flash of zero"
-          // With cache, this is fast enough to not feel laggy
-          requests.push(fetchCreditOverviewData({ awaitHeavy: true }));
+          requests.push(fetchCreditOverviewData({ awaitHeavy: false }));
         }
         await Promise.all(requests);
-        if (typeof console !== 'undefined') {
-          console.log('[Perf Dashboard] initial load completed in', Date.now() - t0Initial, 'ms');
-        }
+        debugDashboardPerfLog('[Perf Dashboard] initial load completed in', Date.now() - t0Initial, 'ms');
 
         if (!active) {
           return;
@@ -1054,27 +1096,6 @@ export default function DashboardScreen() {
       setRefreshing(false);
     }
   }, [fetchCreditOverviewData, fetchMonthScopedData, selectedMonth, selectedMonthKey, user?.uid]);
-  const animatedContainerStyle = useAnimatedStyle(() => {
-    // Pivot from top-right (approximate using translate/scale)
-    // When progress is 0: scale 0.6, translateX 40, translateY -20
-    const scale = interpolate(menuProgress.value, [0, 1], [0.6, 1]);
-    const opacity = interpolate(menuProgress.value, [0, 0.4, 1], [0, 1, 1]);
-
-    const translateX = interpolate(menuProgress.value, [0, 1], [30, 0]);
-    const translateY = interpolate(menuProgress.value, [0, 1], [-20, 0]);
-
-    return {
-      opacity,
-      transform: [
-        { translateX },
-        { translateY },
-        { scale },
-      ],
-    };
-  });
-
-
-
   const displayName = profile?.name || user?.email || undefined;
   const initials = getInitials(displayName);
   const gradientColors = getAvatarGradient(user?.email || displayName);
@@ -1143,13 +1164,18 @@ export default function DashboardScreen() {
   const selectedCardModalPeriod = getCardInvoicePeriod(selectedCardForModalData?.id);
 
   // Compute carousel data for render and dots
-  const carouselData = React.useMemo(() => [
+  const carouselData = React.useMemo<CreditCardCarouselItem[]>(() => [
     ...(creditCardData.hasCards && invoiceData.cards.length > 0 ? invoiceData.cards.map(c => ({
       type: 'credit' as const,
       key: c.id,
       ...c
     })) : [])
   ], [creditCardData.hasCards, invoiceData.cards]);
+
+  const handleCreditCardStackPress = useCallback((card: CreditCardCarouselItem) => {
+    setSelectedCardForModal(card);
+    setInvoiceModalVisible(true);
+  }, []);
 
   return (
     <View style={styles.mainContainer}>
@@ -1180,13 +1206,13 @@ export default function DashboardScreen() {
       >
         {/* Header with avatar and month navigator */}
         <View style={[styles.header, { zIndex: 10 }]}>
-          <View style={{ justifyContent: 'center', alignItems: 'flex-start' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Image
-              source={require('../../assets/images/logo.png')}
+              source={require('../../assets/images/icon.png')}
               style={styles.logo}
               contentFit="contain"
-              contentPosition={{ left: 0 }}
             />
+            <Text style={{ fontSize: 18, fontFamily: 'AROneSans_400Regular', color: '#FFFFFF' }}>Visão Geral</Text>
           </View>
           <View style={{ flex: 1, flexDirection: 'row-reverse', alignItems: 'center', gap: 12 }}>
             {/* Avatar - Moved First for row-reverse anchoring */}
@@ -1200,35 +1226,17 @@ export default function DashboardScreen() {
                 </View>
               </TouchableOpacity>
 
-              <Animated.View
-                pointerEvents={menuVisible ? 'auto' : 'none'}
-                style={[styles.dropdownContainer, animatedContainerStyle]}
-              >
-                <View style={styles.dropdownArrow} />
-                <View style={styles.dropdownBlur}>
-                  <View style={styles.dropdownContent}>
-                    <TouchableOpacity
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setMenuVisible(false);
-                        router.push('/settings');
-                      }}
-                    >
-                      <Text style={styles.dropdownText}>Configuração</Text>
-                    </TouchableOpacity>
-                    <View style={styles.dropdownDivider} />
-                    <TouchableOpacity
-                      style={styles.dropdownItem}
-                      onPress={async () => {
-                        setMenuVisible(false);
-                        await signOut();
-                      }}
-                    >
-                      <Text style={styles.dropdownTextDestructive}>Sair</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </Animated.View>
+              <ProfileDropdown
+                visible={menuVisible}
+                onSettings={() => {
+                  setMenuVisible(false);
+                  router.push('/settings');
+                }}
+                onSignOut={async () => {
+                  setMenuVisible(false);
+                  await signOut();
+                }}
+              />
             </View>
 
 
@@ -1237,7 +1245,7 @@ export default function DashboardScreen() {
 
         {/* Content Section -- Month navigator moved to header */}
         <View style={styles.content}>
-          <OverviewSection
+          <SaldoConta
             isValuesVisible={isValuesVisible}
             setIsValuesVisible={setIsValuesVisible}
             isLoading={isLoading}
@@ -1251,316 +1259,32 @@ export default function DashboardScreen() {
             recurrences={recurrences}
             includeOpenFinance={includeOpenFinance}
             onProjectionsPress={() => setShowProjectionsModal(true)}
-            onNewExtraPress={() => setExtraModalVisible(true)}
+            animateValues={lod < 2}
           />
 
+          <MinhasContas
+            bankAccountData={bankAccountData}
+            isValuesVisible={isValuesVisible}
+            onPress={() => setBalanceModalVisible(true)}
+          />
 
+          <MeusCartoes
+            data={carouselData}
+            currentCardIndex={currentCardIndex}
+            onSnapToItem={setCurrentCardIndex}
+            isValuesVisible={isValuesVisible}
+            getCardInvoicePeriod={getCardInvoicePeriod}
+            onPressCard={handleCreditCardStackPress}
+          />
 
+          <DespesasPorCategoria
+            pieData={pieData}
+            expenseSource={expenseSource}
+            chartAnimationMs={budget.chartAnimationMs}
+            onCycleExpenseSource={cycleExpenseSource}
+          />
 
-          {/* Main Balance Container */}
-          <View style={{ marginBottom: 16 }}>
-            <View style={[styles.sectionHeader, { marginTop: 16, marginBottom: 12, alignItems: 'center' }]}>
-              <Text style={[styles.sectionTitle, { fontSize: 16, color: '#909090' }]}>Minhas Contas</Text>
-            </View>
-
-            <TouchableOpacity
-              activeOpacity={0.95}
-              style={[styles.incomeCard, { marginTop: 0, width: '100%', paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 70 }]}
-              onPress={() => setBalanceModalVisible(true)}
-            >
-              {/* Left side */}
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <DelayedLoopLottie
-                  source={require('../../assets/carteira.json')}
-                  style={{ width: 36, height: 36 }}
-                  delay={1000}
-                  throttleMultiplier={1.15}
-                />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ fontSize: 12, fontFamily: 'AROneSans_500Medium', color: '#909090', letterSpacing: 0.5 }}>
-                      SALDO PRINCIPAL
-                    </Text>
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: bankAccountData.hasAccounts ? '#04D361' : '#505050' }} />
-                    <Text style={{ fontSize: 11, color: '#909090', fontFamily: 'AROneSans_500Medium' }}>
-                      {bankAccountData.hasAccounts
-                        ? `${bankAccountData.count} ${bankAccountData.count === 1 ? 'conta' : 'contas'}`
-                        : 'Nenhuma conta'}
-                    </Text>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#E0E0E0', marginRight: 4, letterSpacing: -0.5 }}>
-                      {bankAccountData.totalBalance < 0 ? '-R$' : 'R$'}
-                    </Text>
-                    {isValuesVisible ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                        <RollingCounter
-                          value={Math.abs(bankAccountData.totalBalance)}
-                          height={28}
-                          width={14}
-                          fontSize={24}
-                          letterSpacing={-0.5}
-                          color="#FFFFFF"
-                        />
-                        <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', letterSpacing: -0.5 }}>
-                          ,{Math.abs(bankAccountData.totalBalance).toFixed(2).slice(-2)}
-                        </Text>
-                      </View>
-                    ) : (
-                      <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', letterSpacing: -0.5, paddingTop: 6 }}>
-                        ••••
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              </View>
-
-              {/* Right side: Chevron */}
-              <View style={{ paddingLeft: 8 }}>
-                <View style={styles.chevronContainer}>
-                  <ChevronRight size={18} color="#505050" />
-                </View>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-
-          {/* Unified Stack Carousel for Credit Cards */}
-          {
-            (carouselData.length > 0) && (
-              <View>
-                {/* Header with Title and Dots */}
-                <View style={[styles.sectionHeader, { marginTop: 16, marginBottom: 12, alignItems: 'center' }]}>
-                  <Text style={[styles.sectionTitle, { fontSize: 16, color: '#909090' }]}>Meus Cartões</Text>
-                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                    {carouselData.map((_, index) => (
-                      <View
-                        key={index}
-                        style={{
-                          width: currentCardIndex === index ? 20 : 6,
-                          height: 6,
-                          borderRadius: 3,
-                          backgroundColor: currentCardIndex === index ? '#D97757' : '#333',
-                        }}
-                      />
-                    ))}
-                  </View>
-                </View>
-
-                <StackCarousel
-                  data={carouselData}
-                  onSnapToItem={setCurrentCardIndex}
-
-                  cardHeight={110}
-                  cardWidth={Dimensions.get('window').width - 32}
-                  renderItem={({ item, index, animatedIndex, translateX, totalCards }) => {
-                    // Hook must be called unconditionally at top level of component
-                    const cardWidth = Dimensions.get('window').width - 32;
-                    const animatedStyle = useStackCardStyle(index, animatedIndex, translateX, totalCards, cardWidth, 12);
-
-                    const cardItem = item as any;
-                    const selectedPeriod = getCardInvoicePeriod(cardItem.id);
-                    const selectedRawValue =
-                      selectedPeriod === 'past' ? cardItem.past :
-                        selectedPeriod === 'next' ? cardItem.next :
-                          selectedPeriod === 'total_used' ? cardItem.used :
-                            selectedPeriod === 'none' ? 0 :
-                              cardItem.current;
-                    const selectedValue = Math.abs(selectedRawValue);
-
-                    const percentage = cardItem.limit > 0
-                      ? Math.min((selectedValue / cardItem.limit) * 100, 100)
-                      : 0;
-
-                    const progressColor = percentage > 90 ? '#FF4C4C' : percentage > 70 ? '#FFB800' : '#4CAF50';
-
-                    return (
-                      <Animated.View style={[styles.stackCardWrapper, animatedStyle, { position: 'absolute', width: '100%', height: '100%' }]}>
-                        <TouchableOpacity
-                          activeOpacity={0.95}
-                          style={[styles.incomeCard, { marginTop: 0, width: '100%', height: '100%', paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'column', alignItems: 'stretch' }]}
-                          onPress={() => {
-                            setSelectedCardForModal(cardItem);
-                            setInvoiceModalVisible(true);
-                          }}
-                        >
-                          {/* Header: Icon + Name ... Status */}
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
-                              <DelayedLoopLottie
-                                source={require('../../assets/cartabranco.json')}
-                                style={{ width: 22, height: 22 }}
-                                delay={1000}
-                                throttleMultiplier={1.15}
-                              />
-                              <Text
-                                style={{ fontSize: 12, fontFamily: 'AROneSans_500Medium', color: '#E0E0E0', letterSpacing: 0.5, flex: 1 }}
-                                numberOfLines={1}
-                              >
-                                {cardItem.name.toUpperCase()}
-                              </Text>
-                            </View>
-                            <Text style={{ fontSize: 10, fontFamily: 'AROneSans_500Medium', color: '#666666', letterSpacing: 0.5 }}>
-                              • {
-                                selectedPeriod === 'past' ? 'FATURA ANTERIOR' :
-                                  selectedPeriod === 'next' ? 'PRÓXIMA FATURA' :
-                                    selectedPeriod === 'total_used' ? 'LIMITE USADO' :
-                                      selectedPeriod === 'none' ? 'OCULTO' : 'FATURA ATUAL'
-                              }
-                            </Text>
-                          </View>
-
-                          {/* Main Value and Due Date - Left Aligned */}
-                          <View style={{ flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginBottom: 8 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginRight: 10 }}>
-                              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#E0E0E0', marginRight: 4, letterSpacing: -0.5 }}>
-                                {selectedValue < 0 ? '-R$' : 'R$'}
-                              </Text>
-                              {isValuesVisible ? (
-                                <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                                  <RollingCounter
-                                    value={Math.abs(selectedValue)}
-                                    height={28}
-                                    width={14}
-                                    fontSize={24}
-                                    letterSpacing={-0.5}
-                                    color="#FFFFFF"
-                                  />
-                                  <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', letterSpacing: -0.5 }}>
-                                    ,{Math.abs(selectedValue).toFixed(2).slice(-2)}
-                                  </Text>
-                                </View>
-                              ) : (
-                                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', letterSpacing: -0.5, paddingTop: 4 }}>
-                                  ••••
-                                </Text>
-                              )}
-                            </View>
-                            {cardItem.dueDate && (
-                              <Text style={{ fontSize: 11, fontFamily: 'AROneSans_400Regular', color: '#909090' }}>
-                                Vence {new Date(cardItem.dueDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                              </Text>
-                            )}
-                          </View>
-
-                          {/* Progress Bar and Limits */}
-                          <View style={{ width: '100%', marginTop: 'auto' }}>
-                            <View style={{ width: '100%', height: 4, backgroundColor: '#2A2A2A', borderRadius: 2, marginBottom: 6 }}>
-                              <View style={{ height: '100%', width: `${percentage}%`, backgroundColor: progressColor, borderRadius: 2 }} />
-                            </View>
-
-                            {/* Footer: Limits - Space Between */}
-                            <View
-                              style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-                            >
-                              <AnimatedCurrency
-                                value={cardItem.limit - selectedValue}
-                                isVisible={isValuesVisible}
-                                style={{ fontSize: 10, color: '#909090', fontFamily: 'AROneSans_400Regular' }}
-                                prefix="Disp: R$ "
-                              />
-                              <AnimatedCurrency
-                                value={cardItem.limit}
-                                isVisible={isValuesVisible}
-                                style={{ fontSize: 10, color: '#04D361', fontFamily: 'AROneSans_600SemiBold' }}
-                                prefix="Limite: R$ "
-                                prefixStyle={{ fontSize: 10, color: '#04D361', fontFamily: 'AROneSans_500Medium' }}
-                              />
-                            </View>
-                          </View>
-                        </TouchableOpacity>
-                      </Animated.View>
-                    );
-                  }}
-                />
-              </View>
-            )
-          }
-
-          {/* Cálculos removed */}
-
-          {/* Expenses Pie Chart */}
-          <View style={{ marginTop: 24, paddingHorizontal: 0 }}>
-            <View style={[styles.sectionHeader, { marginBottom: 12, alignItems: 'center', justifyContent: 'space-between' }]}>
-              <Text style={[styles.sectionTitle, { fontSize: 16, color: '#909090' }]}>Despesas por Categoria</Text>
-
-              {/* Source Selector */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A1A', borderRadius: 20, paddingHorizontal: 4, paddingVertical: 4, borderWidth: 1, borderColor: '#2A2A2A', gap: 2 }}>
-                <TouchableOpacity onPress={() => cycleExpenseSource(-1)} style={{ padding: 4 }}>
-                  <ChevronLeft size={16} color="#909090" />
-                </TouchableOpacity>
-                <Text style={{ color: '#E0E0E0', fontSize: 12, fontFamily: 'AROneSans_500Medium', minWidth: 50, textAlign: 'center' }}>
-                  {getExpenseSourceLabel()}
-                </Text>
-                <TouchableOpacity onPress={() => cycleExpenseSource(1)} style={{ padding: 4 }}>
-                  <ChevronRight size={16} color="#909090" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {pieData.length > 0 ? (
-              <View style={[styles.summaryCard, { flexDirection: 'row', paddingVertical: 16, paddingHorizontal: 16, alignItems: 'center' }]}>
-                {/* Chart Section - Left */}
-                <View style={{ width: '55%', alignItems: 'center', justifyContent: 'center' }}>
-                  <VictoryPie
-                    key={expenseSource} // Depend only on source for remounting
-                    animate={{
-                      duration: budget.chartAnimationMs,
-                      easing: "exp"
-                    }}
-                    data={pieData}
-                    // Remove endAngle prop as we are using built-in animation now
-                    width={Dimensions.get('window').width * 0.45}
-                    height={180}
-                    padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    colorScale={pieData.map(d => d.color)}
-                    innerRadius={30}
-                    cornerRadius={6}
-                    padAngle={3}
-                    style={{
-                      data: { fillOpacity: 0.9, stroke: 'none' },
-                      labels: { fill: "#1A1A1A", fontSize: 10, fontWeight: "bold" }
-                    }}
-                    labelRadius={({ innerRadius }) => (typeof innerRadius === 'number' ? innerRadius + 18 : 50)}
-                    labelComponent={
-                      <VictoryLabel
-                        angle={0}
-                        textAnchor="middle"
-                        verticalAnchor="middle"
-                        backgroundPadding={[{ top: 3, bottom: 3, left: 5, right: 5 }]}
-                        backgroundStyle={[{ fill: "#FFFFFF", opacity: 0.95, rx: 6 }]}
-                      />
-                    }
-                    labels={({ datum }) => `${Math.round(datum.percent)}%`}
-                  />
-                </View>
-
-                {/* Legend Section - Right */}
-                <View style={{ flex: 1, flexDirection: 'column', justifyContent: 'center', gap: 10, paddingLeft: 12 }}>
-                  {pieData.map((item, index) => (
-                    <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.color }} />
-                      <Text
-                        style={{ color: '#E0E0E0', fontSize: 13, fontFamily: 'AROneSans_500Medium', flex: 1 }}
-                        numberOfLines={1}
-                      >
-                        {item.x}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : (
-              <View style={[styles.summaryCard, { justifyContent: 'center', padding: 32, alignItems: 'center' }]}>
-                <Text style={{ color: '#909090', fontFamily: 'AROneSans_400Regular' }}>Nenhuma despesa encontrada</Text>
-              </View>
-            )}
-          </View>
-
-
-          {/* Financial Calendar */}
-          <FinancialCalendar
+          <CalendarioFinanceiro
             checkingTransactions={checkingTransactions}
             creditCardTransactions={creditCardTransactions}
             recurrences={recurrences}
@@ -1569,7 +1293,6 @@ export default function DashboardScreen() {
             maxMonth={maxMonth}
             onMonthChange={(date) => setSelectedMonth(clampMonth(date, minMonth, maxMonth))}
           />
-
           {/* Projections Modal */}
           <ProjectionsModal
             visible={showProjectionsModal}
@@ -1595,84 +1318,76 @@ export default function DashboardScreen() {
 
             {/* Fatura Anterior */}
             <TouchableOpacity
-              style={modalOptionStyles.itemContainer}
+              style={[
+                modalOptionStyles.itemContainer,
+                selectedCardModalPeriod === 'past' && modalOptionStyles.itemContainerSelected,
+              ]}
               onPress={() => handleInvoicePeriodChange('past')}
             >
-              <View style={modalOptionStyles.itemIconContainer}>
-                <RotateCcw size={20} color={selectedCardModalPeriod === 'past' ? '#D97757' : '#E0E0E0'} />
-              </View>
-              <View style={modalOptionStyles.itemRightContainer}>
-                <View style={modalOptionStyles.itemContent}>
-                  <View>
-                    <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'past' && { color: '#D97757' }]}>Anterior</Text>
-                    <Text style={modalOptionStyles.itemSubtitle}>Visualizar fatura passada</Text>
-                  </View>
-                  <Text style={modalOptionStyles.itemValue}>
-                    R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.past : invoiceData.pastTotal))}
-                  </Text>
+              <View style={modalOptionStyles.itemContent}>
+                <View style={modalOptionStyles.itemTextBlock}>
+                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'past' && modalOptionStyles.itemTitleSelected]}>Anterior</Text>
+                  <Text style={modalOptionStyles.itemSubtitle}>Visualizar fatura passada</Text>
                 </View>
+                <Text style={modalOptionStyles.itemValue}>
+                  R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.past : invoiceData.pastTotal))}
+                </Text>
               </View>
               <View style={modalOptionStyles.itemSeparator} />
             </TouchableOpacity>
 
             {/* Fatura Atual */}
             <TouchableOpacity
-              style={modalOptionStyles.itemContainer}
+              style={[
+                modalOptionStyles.itemContainer,
+                selectedCardModalPeriod === 'current' && modalOptionStyles.itemContainerSelected,
+              ]}
               onPress={() => handleInvoicePeriodChange('current')}
             >
-              <View style={modalOptionStyles.itemIconContainer}>
-                <CreditCard size={20} color={selectedCardModalPeriod === 'current' ? '#D97757' : '#E0E0E0'} />
-              </View>
-              <View style={modalOptionStyles.itemRightContainer}>
-                <View style={modalOptionStyles.itemContent}>
-                  <View>
-                    <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'current' && { color: '#D97757' }]}>Atual</Text>
-                    <Text style={modalOptionStyles.itemSubtitle}>Visualizar mês vigente</Text>
-                  </View>
-                  <Text style={modalOptionStyles.itemValue}>
-                    R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.current : invoiceData.currentTotal))}
-                  </Text>
+              <View style={modalOptionStyles.itemContent}>
+                <View style={modalOptionStyles.itemTextBlock}>
+                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'current' && modalOptionStyles.itemTitleSelected]}>Atual</Text>
+                  <Text style={modalOptionStyles.itemSubtitle}>Visualizar mês vigente</Text>
                 </View>
+                <Text style={modalOptionStyles.itemValue}>
+                  R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.current : invoiceData.currentTotal))}
+                </Text>
               </View>
               <View style={modalOptionStyles.itemSeparator} />
             </TouchableOpacity>
 
             {/* Limite Utilizado */}
             <TouchableOpacity
-              style={modalOptionStyles.itemContainer}
+              style={[
+                modalOptionStyles.itemContainer,
+                selectedCardModalPeriod === 'total_used' && modalOptionStyles.itemContainerSelected,
+              ]}
               onPress={() => handleInvoicePeriodChange('total_used')}
             >
-              <View style={modalOptionStyles.itemIconContainer}>
-                <TrendingUp size={20} color={selectedCardModalPeriod === 'total_used' ? '#D97757' : '#E0E0E0'} />
-              </View>
-              <View style={modalOptionStyles.itemRightContainer}>
-                <View style={modalOptionStyles.itemContent}>
-                  <View>
-                    <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'total_used' && { color: '#D97757' }]}>Total Usado</Text>
-                    <Text style={modalOptionStyles.itemSubtitle}>Soma de todas as open invoices</Text>
-                  </View>
-                  <Text style={modalOptionStyles.itemValue}>
-                    R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.used : creditCardData.totalUsed))}
-                  </Text>
+              <View style={modalOptionStyles.itemContent}>
+                <View style={modalOptionStyles.itemTextBlock}>
+                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'total_used' && modalOptionStyles.itemTitleSelected]}>Total Usado</Text>
+                  <Text style={modalOptionStyles.itemSubtitle}>Soma de todas as faturas abertas</Text>
                 </View>
+                <Text style={modalOptionStyles.itemValue}>
+                  R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.used : creditCardData.totalUsed))}
+                </Text>
               </View>
               <View style={modalOptionStyles.itemSeparator} />
             </TouchableOpacity>
 
             {/* Nenhuma Fatura */}
             <TouchableOpacity
-              style={modalOptionStyles.itemContainer}
+              style={[
+                modalOptionStyles.itemContainer,
+                selectedCardModalPeriod === 'none' && modalOptionStyles.itemContainerSelectedDanger,
+              ]}
               onPress={() => handleInvoicePeriodChange('none')}
             >
-              <View style={modalOptionStyles.itemIconContainer}>
-                <Ban size={20} color={selectedCardModalPeriod === 'none' ? '#FF4C4C' : '#E0E0E0'} />
-              </View>
-              <View style={modalOptionStyles.itemRightContainer}>
-                <View style={modalOptionStyles.itemContent}>
-                  <View>
-                    <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'none' && { color: '#FF4C4C' }]}>Não considerar</Text>
-                    <Text style={modalOptionStyles.itemSubtitle}>Ocultar faturas do resumo</Text>
-                  </View>
+              <View style={modalOptionStyles.itemContent}>
+                <View style={modalOptionStyles.itemTextBlock}>
+                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'none' && modalOptionStyles.itemTitleDanger]}>Não considerar</Text>
+                  <Text style={modalOptionStyles.itemSubtitle}>Ocultar faturas do resumo</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -1720,51 +1435,56 @@ export default function DashboardScreen() {
 
 const modalOptionStyles = StyleSheet.create({
   sectionCard: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
+    backgroundColor: '#111111',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: '#161616',
     overflow: 'hidden',
   },
   itemContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 13,
     paddingHorizontal: 16,
     position: 'relative',
-    backgroundColor: '#1A1A1A',
+    backgroundColor: 'transparent',
   },
-  itemIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  itemContainerSelected: {
+    backgroundColor: 'transparent',
   },
-  itemRightContainer: {
-    flex: 1,
+  itemContainerSelectedDanger: {
+    backgroundColor: 'transparent',
   },
   itemContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 16,
+  },
+  itemTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   itemTitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#FFFFFF',
-    fontWeight: '500',
+    fontFamily: 'AROneSans_400Regular',
+  },
+  itemTitleSelected: {
+    color: '#D97757',
+  },
+  itemTitleDanger: {
+    color: '#FF6B6B',
   },
   itemSubtitle: {
     fontSize: 12,
-    color: '#909090',
-    marginTop: 2,
+    color: '#606060',
+    marginTop: 1,
   },
   itemValue: {
-    color: '#FFFFFF',
+    color: '#AAAAAA',
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: 'AROneSans_400Regular',
+    textAlign: 'right',
+    minWidth: 104,
   },
   itemSeparator: {
     position: 'absolute',
@@ -1772,7 +1492,7 @@ const modalOptionStyles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#161616',
   },
 });
 
@@ -1799,8 +1519,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logo: {
-    width: 140,
-    height: 45,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
   },
   avatar: {
     width: 32,
@@ -1812,7 +1533,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'AROneSans_400Regular',
   },
   // Month Navigator Styles
   monthNavigator: {
@@ -1841,7 +1562,7 @@ const styles = StyleSheet.create({
   },
   monthLabel: {
     fontSize: 16,
-    fontFamily: 'AROneSans_600SemiBold',
+    fontFamily: 'AROneSans_400Regular',
     color: '#FFFFFF',
     textTransform: 'capitalize',
   },
@@ -1849,7 +1570,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#D97757',
     marginTop: 4,
-    fontFamily: 'AROneSans_500Medium',
+    fontFamily: 'AROneSans_400Regular',
   },
   // Compact Month Navigator Styles (next to avatar)
   monthNavigatorCompact: {
@@ -1871,7 +1592,7 @@ const styles = StyleSheet.create({
   },
   monthLabelCompact: {
     fontSize: 14,
-    fontFamily: 'AROneSans_600SemiBold',
+    fontFamily: 'AROneSans_400Regular',
     color: '#FFFFFF',
     textTransform: 'capitalize',
   },
@@ -1879,7 +1600,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#D97757',
     marginTop: 2,
-    fontFamily: 'AROneSans_500Medium',
+    fontFamily: 'AROneSans_400Regular',
   },
   content: {
     flex: 1,
@@ -1893,7 +1614,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontFamily: 'AROneSans_400Regular',
     color: '#FFFFFF',
     marginBottom: 4,
   },
@@ -1913,7 +1634,7 @@ const styles = StyleSheet.create({
   },
   cardLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: 'AROneSans_400Regular',
     color: '#909090',
     letterSpacing: 0.5,
     marginRight: 8,
@@ -1925,13 +1646,13 @@ const styles = StyleSheet.create({
   },
   currencySymbol: {
     fontSize: 24,
-    fontWeight: '600',
+    fontFamily: 'AROneSans_400Regular',
     color: '#FFFFFF',
     marginRight: 4,
   },
   amountText: {
     fontSize: 40,
-    fontWeight: '700',
+    fontFamily: 'AROneSans_400Regular',
     color: '#FFFFFF',
     marginRight: 4,
   },
@@ -1952,7 +1673,7 @@ const styles = StyleSheet.create({
   dateBadgeText: {
     color: '#909090',
     fontSize: 12,
-    fontWeight: '500',
+    fontFamily: 'AROneSans_400Regular',
   },
 
   // Income Card Styles
@@ -1976,69 +1697,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // Dropdown Styles
-  dropdownContainer: {
-    position: 'absolute',
-    top: 55,
-    right: -10,
-    minWidth: 160,
-    zIndex: 1000,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-  },
-  dropdownArrow: {
-    width: 16,
-    height: 16,
-    backgroundColor: '#141414',
-    borderLeftWidth: 1,
-    borderTopWidth: 1,
-    borderColor: '#30302E',
-    transform: [{ rotate: '45deg' }],
-    position: 'absolute',
-    top: -8,
-    right: 22, // Aligned with avatar center (adjusted for rounded corner)
-    zIndex: 2,
-  },
-  dropdownBlur: {
-    backgroundColor: '#141414',
-    width: '100%',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#30302E',
-    overflow: 'hidden',
-  },
-  dropdownContent: {
-    paddingVertical: 4,
-  },
-  dropdownItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dropdownText: {
-    color: '#E0E0E0',
-    fontSize: 14,
-    fontWeight: '500',
-    fontFamily: 'AROneSans_500Medium',
-  },
-  dropdownTextDestructive: {
-    color: '#FF6B6B',
-    fontSize: 14,
-    fontWeight: '500',
-    fontFamily: 'AROneSans_500Medium',
-  },
-  dropdownDivider: {
-    height: 1,
-    width: '100%',
-    backgroundColor: '#30302E',
-  },
   // Progress Bar Styles
   progressBarContainer: {
     height: 6,
@@ -2061,7 +1719,7 @@ const styles = StyleSheet.create({
   limitText: {
     fontSize: 12,
     color: '#00BFA5', // Teal color for "Limite" label
-    fontWeight: '500',
+    fontFamily: 'AROneSans_400Regular',
   },
   limitValue: {
     color: '#00BFA5',
@@ -2077,7 +1735,7 @@ const styles = StyleSheet.create({
   countBadgeText: {
     color: '#909090',
     fontSize: 10,
-    fontWeight: '500',
+    fontFamily: 'AROneSans_400Regular',
   },
   stackCardWrapper: {
     justifyContent: 'center',
@@ -2109,7 +1767,7 @@ const styles = StyleSheet.create({
   shortcutLabel: {
     fontSize: 12,
     color: '#909090',
-    fontFamily: 'AROneSans_500Medium',
+    fontFamily: 'AROneSans_400Regular',
     textAlign: 'center',
   },
   // Summary Cards Styles
@@ -2147,7 +1805,7 @@ const styles = StyleSheet.create({
   configItemTitle: {
     fontSize: 16,
     color: '#FFF',
-    fontWeight: '600',
+    fontFamily: 'AROneSans_400Regular',
     marginBottom: 4,
   },
   configItemSubtitle: {
@@ -2166,13 +1824,13 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontSize: 14,
     color: '#909090',
-    fontFamily: 'AROneSans_500Medium',
+    fontFamily: 'AROneSans_400Regular',
     marginBottom: 2,
   },
   summaryValue: {
     fontSize: 20,
     color: '#FFFFFF',
-    fontFamily: 'AROneSans_700Bold',
+    fontFamily: 'AROneSans_400Regular',
     letterSpacing: -0.5,
   },
 });

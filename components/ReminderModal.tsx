@@ -1,7 +1,8 @@
+import { AuthButton } from '@/components/ui/AuthButton';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { ModernSwitch } from '@/components/ui/ModernSwitch';
 import { useCategories } from '@/hooks/use-categories';
-import { ArrowDownCircle, ArrowUpCircle, Calendar, DollarSign, FileText, Repeat, Search, Tag } from 'lucide-react-native';
+import { Search } from 'lucide-react-native';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -44,16 +45,13 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
         );
     }, [allCategories, categorySearch]);
 
-    // Reset or Populate form when modal opens
     useEffect(() => {
         if (visible) {
             if (initialData) {
                 setTitle(initialData.title);
-                // Format amount to BRL string
                 const formattedAmount = initialData.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
                 setAmountStr(formattedAmount);
 
-                // Format date YYYY-MM-DD to DD/MM/YYYY
                 let formattedDate = initialData.date;
                 if (initialData.date.includes('-')) {
                     const parts = initialData.date.split('-');
@@ -65,10 +63,7 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
                     }
                 }
                 setDateStr(formattedDate);
-
-
                 setIsYearly(initialData.frequency === 'yearly');
-                // Assume default expense if not provided in initialData
                 setType(initialData.transactionType || 'expense');
                 setCategory(initialData.category || '');
             } else {
@@ -80,7 +75,6 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
                 setCategory('');
             }
 
-            // Set default date for new subscriptions if the field will be hidden
             if (mode === 'subscriptions' && !initialData) {
                 const today = new Date();
                 const d = String(today.getDate()).padStart(2, '0');
@@ -94,12 +88,6 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
         }
     }, [visible, initialData, mode]);
 
-    useEffect(() => {
-        if (visible) {
-            console.log('[ReminderModal] Modal showing up, mode:', mode);
-        }
-    }, [visible, mode]);
-
     const handleSave = () => {
         const rawAmount = parseFloat(amountStr.replace(/\./g, '').replace(',', '.') || '0');
         if (!titleInput || rawAmount <= 0 || !dateStr) return;
@@ -107,9 +95,9 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
         onSave({
             title: titleInput,
             amount: rawAmount,
-            date: dateStr, // In a real app, parsing this to a Date object or ISO string would be better
+            date: dateStr,
             frequency: isYearly ? 'yearly' : 'monthly',
-            type: mode === 'subscriptions' ? 'expense' : type,
+            type,
             category: category
         });
         onClose();
@@ -126,15 +114,12 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
         setAmountStr(formatInputCurrency(text));
     };
 
-    // Simple date formatter (DD/MM/YYYY)
     const handleChangeDate = (text: string) => {
-        // Se o usuário estiver apagando, permitimos que ele apague livremente
         if (text.length < dateStr.length) {
             setDateStr(text);
             return;
         }
 
-        // Remove non-numeric characters
         const cleaned = text.replace(/\D/g, '');
         let formatted = cleaned;
 
@@ -145,348 +130,261 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
             formatted = `${formatted}/${cleaned.slice(4, 8)}`;
         }
 
-        // Limit length
         if (formatted.length > 10) formatted = formatted.slice(0, 10);
-
         setDateStr(formatted);
     };
 
+    const isSaveDisabled = !titleInput || !amountStr || dateStr.length < 10;
 
+    const Footer = () => (
+        <AuthButton
+            title="Salvar"
+            onPress={handleSave}
+            isLoading={false}
+            disabled={isSaveDisabled}
+        />
+    );
 
     return (
         <ModalPadrao
             visible={visible}
             onClose={onClose}
             title={title || (initialData ? `Editar ${mode === 'subscriptions' ? 'Assinatura' : 'Lembrete'}` : `Nova ${mode === 'subscriptions' ? 'Assinatura' : 'Lembrete'}`)}
-            headerRight={null}
+            titleAlign="start"
+            presentation="center"
+            showHandle={false}
+            enableDragToClose={false}
+            maxHeightRatio={0.86}
+            footer={<Footer />}
         >
-            <ScrollView contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
-                <View style={styles.container}>
-                    <Text style={styles.reminderModalSubtitle}>
-                        Defina os detalhes do seu {mode === 'subscriptions' ? 'assinatura' : 'lembrete'} abaixo.
-                    </Text>
-
-                    <View style={styles.sectionCard}>
-                        {/* Natureza (Income/Expense) - Hidden for subscriptions */}
-                        {mode === 'reminders' && (
-                            <>
-                                <View style={styles.itemContainer}>
-                                    <View style={styles.itemIconContainer}>
-                                        {type === 'expense' ? (
-                                            <ArrowDownCircle size={20} color="#FF453A" />
-                                        ) : (
-                                            <ArrowUpCircle size={20} color="#04D361" />
-                                        )}
-                                    </View>
-                                    <View style={styles.itemRightContainer}>
-                                        <View style={styles.itemContent}>
-                                            <Text style={styles.itemTitle}>Natureza</Text>
-                                            <View style={styles.typeToggleContainer}>
-                                                <TouchableOpacity
-                                                    onPress={() => setType('expense')}
-                                                    style={[
-                                                        styles.typeButton,
-                                                        type === 'expense' && styles.typeButtonActiveExpense
-                                                    ]}
-                                                >
-                                                    <Text style={[
-                                                        styles.typeButtonText,
-                                                        type === 'expense' && styles.typeButtonTextActive
-                                                    ]}>Despesa</Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    onPress={() => setType('income')}
-                                                    style={[
-                                                        styles.typeButton,
-                                                        type === 'income' && styles.typeButtonActiveIncome
-                                                    ]}
-                                                >
-                                                    <Text style={[
-                                                        styles.typeButtonText,
-                                                        type === 'income' && styles.typeButtonTextActive
-                                                    ]}>Receita</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                    </View>
-                                </View>
-                                <View style={styles.itemSeparator} />
-                            </>
-                        )}
-
-                        {/* Título */}
-                        <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                <FileText size={20} color="#E0E0E0" />
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>Título</Text>
-                                    <TextInput
-                                        style={styles.inputRight}
-                                        value={titleInput}
-                                        onChangeText={setTitle}
-                                        placeholder="Ex: Aluguel"
-                                        placeholderTextColor="#555"
-                                        textAlign="right"
-                                    />
-                                </View>
-                            </View>
+            <View style={styles.container}>
+                <Text style={styles.sectionTitle}>INFORMAÇÕES</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Natureza</Text>
                         </View>
-                        <View style={styles.itemSeparator} />
-
-                        {/* Valor */}
-                        <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                <DollarSign size={20} color="#E0E0E0" />
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>Valor</Text>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                        <Text style={{ color: amountStr ? '#FFFFFF' : '#555', fontSize: 16, marginRight: 4 }}>R$</Text>
-                                        <TextInput
-                                            style={styles.inputRight}
-                                            value={amountStr}
-                                            onChangeText={handleChangeAmount}
-                                            placeholder="0,00"
-                                            placeholderTextColor="#555"
-                                            keyboardType="numeric"
-                                            textAlign="right"
-                                        />
-                                    </View>
-                                </View>
-                            </View>
+                        <View style={styles.typeToggleContainer}>
+                            <TouchableOpacity
+                                onPress={() => setType('expense')}
+                                style={[styles.typeButton, type === 'expense' && styles.typeButtonActiveExpense]}
+                            >
+                                <Text style={[styles.typeButtonText, type === 'expense' && styles.typeButtonTextActiveExpense]}>Despesa</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => setType('income')}
+                                style={[styles.typeButton, type === 'income' && styles.typeButtonActiveIncome]}
+                            >
+                                <Text style={[styles.typeButtonText, type === 'income' && styles.typeButtonTextActiveIncome]}>Receita</Text>
+                            </TouchableOpacity>
                         </View>
-                        <View style={styles.itemSeparator} />
+                    </View>
+                    <View style={styles.separator} />
 
-                        {/* Data - Hidden for subscriptions based on user feedback */}
-                        {mode !== 'subscriptions' && (
-                            <>
-                                <View style={styles.itemContainer}>
-                                    <View style={styles.itemIconContainer}>
-                                        <Calendar size={20} color="#E0E0E0" />
-                                    </View>
-                                    <View style={styles.itemRightContainer}>
-                                        <View style={styles.itemContent}>
-                                            <Text style={styles.itemTitle}>Vencimento</Text>
-                                            <TextInput
-                                                style={styles.inputRight}
-                                                value={dateStr}
-                                                onChangeText={handleChangeDate}
-                                                placeholder="DD/MM/AAAA"
-                                                placeholderTextColor="#555"
-                                                keyboardType="numeric"
-                                                textAlign="right"
-                                                maxLength={10}
-                                            />
-                                        </View>
-                                    </View>
-                                </View>
-                                <View style={styles.itemSeparator} />
-                            </>
-                        )}
-
-                        {/* Categoria */}
-                        <View style={styles.itemContainer}>
-                            <View style={styles.itemIconContainer}>
-                                <Tag size={20} color="#E0E0E0" />
-                            </View>
-                            <View style={styles.itemRightContainer}>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>Categoria</Text>
-                                    <TouchableOpacity onPress={() => setShowCategoryPicker(!showCategoryPicker)}>
-                                        <Text style={[styles.inputRight, { color: '#D97757', fontWeight: '600' }]}>
-                                            {getCategoryName(category)}
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
+                    {/* Título */}
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Título</Text>
                         </View>
-                        {(mode === 'subscriptions' || showCategoryPicker) && <View style={styles.itemSeparator} />}
+                        <TextInput
+                            style={styles.inputRight}
+                            value={titleInput}
+                            onChangeText={setTitle}
+                            placeholder="Ex: Aluguel"
+                            placeholderTextColor="#6E6E73"
+                            textAlign="right"
+                        />
+                    </View>
+                    <View style={styles.separator} />
 
-                        {/* Category Picker (Inline) */}
-                        {showCategoryPicker && (
-                            <View style={{ backgroundColor: '#1A1A1A', paddingBottom: 16 }}>
-                                {/* Search Input */}
-                                <View style={styles.categorySearchContainer}>
-                                    <Search size={16} color="#666" style={{ marginRight: 8 }} />
-                                    <TextInput
-                                        style={styles.categorySearchInput}
-                                        placeholder="Buscar categoria..."
-                                        placeholderTextColor="#666"
-                                        value={categorySearch}
-                                        onChangeText={setCategorySearch}
-                                    />
-                                </View>
-
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-                                >
-                                    {filteredCategories.map((cat) => (
-                                        <TouchableOpacity
-                                            key={cat.key}
-                                            style={[
-                                                styles.categoryChip,
-                                                category === cat.key && styles.categoryChipSelected
-                                            ]}
-                                            onPress={() => {
-                                                setCategory(cat.key);
-                                                setShowCategoryPicker(false);
-                                            }}
-                                        >
-                                            <Text style={[
-                                                styles.categoryChipText,
-                                                category === cat.key && styles.categoryChipTextSelected
-                                            ]}>
-                                                {cat.label}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                                {mode === 'subscriptions' && showCategoryPicker && <View style={styles.itemSeparator} />}
-                            </View>
-                        )}
-
-
-                        {/* Frequência - Only for subscriptions */}
-                        {mode === 'subscriptions' && (
-                            <View style={styles.itemContainer}>
-                                <View style={styles.itemIconContainer}>
-                                    <Repeat size={20} color="#E0E0E0" />
-                                </View>
-                                <View style={styles.itemRightContainer}>
-                                    <View style={styles.itemContent}>
-                                        <View>
-                                            <Text style={styles.itemTitle}>Frequência</Text>
-                                            <Text style={styles.itemSubtitle}>{isYearly ? 'Anual' : 'Mensal'}</Text>
-                                        </View>
-                                        <ModernSwitch
-                                            value={isYearly}
-                                            onValueChange={setIsYearly}
-                                            activeColor="#d97757"
-                                            width={46}
-                                            height={26}
-                                        />
-                                    </View>
-                                </View>
-                            </View>
-                        )}
+                    {/* Valor */}
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Valor</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: amountStr ? '#F5F5F7' : '#6E6E73', fontSize: 16, marginRight: 4 }}>R$</Text>
+                            <TextInput
+                                style={styles.inputRight}
+                                value={amountStr}
+                                onChangeText={handleChangeAmount}
+                                placeholder="0,00"
+                                placeholderTextColor="#6E6E73"
+                                keyboardType="numeric"
+                                textAlign="right"
+                            />
+                        </View>
                     </View>
 
-                    <TouchableOpacity
-                        style={[
-                            styles.saveButton,
-                            (!titleInput || !amountStr || dateStr.length < 10) && { opacity: 0.5 }
-                        ]}
-                        onPress={handleSave}
-                        disabled={!titleInput || !amountStr || dateStr.length < 10}
-                        activeOpacity={0.85}
-                    >
-                        <Text style={styles.saveButtonText}>Salvar</Text>
-                    </TouchableOpacity>
+                    {/* Vencimento - Hidden for subscriptions */}
+                    {mode !== 'subscriptions' && (
+                        <>
+                            <View style={styles.separator} />
+                            <View style={styles.itemContent}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.itemTitle}>Vencimento</Text>
+                                </View>
+                                <TextInput
+                                    style={styles.inputRight}
+                                    value={dateStr}
+                                    onChangeText={handleChangeDate}
+                                    placeholder="DD/MM/AAAA"
+                                    placeholderTextColor="#6E6E73"
+                                    keyboardType="numeric"
+                                    textAlign="right"
+                                    maxLength={10}
+                                />
+                            </View>
+                        </>
+                    )}
+
+                    {/* Categoria */}
+                    <View style={styles.separator} />
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Categoria</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setShowCategoryPicker(!showCategoryPicker)}>
+                            <Text style={styles.categoryValue}>
+                                {getCategoryName(category)}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Category Picker */}
+                    {showCategoryPicker && (
+                        <View style={{ backgroundColor: 'rgba(28,28,30,0.78)', paddingBottom: 16 }}>
+                            <View style={styles.separator} />
+                            <View style={styles.categorySearchContainer}>
+                                <Search size={16} color="#8E8E93" style={{ marginRight: 8 }} />
+                                <TextInput
+                                    style={styles.categorySearchInput}
+                                    placeholder="Buscar categoria..."
+                                    placeholderTextColor="#6E6E73"
+                                    value={categorySearch}
+                                    onChangeText={setCategorySearch}
+                                />
+                            </View>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+                            >
+                                {filteredCategories.map((cat) => (
+                                    <TouchableOpacity
+                                        key={cat.key}
+                                        style={[
+                                            styles.categoryChip,
+                                            category === cat.key && styles.categoryChipSelected
+                                        ]}
+                                        onPress={() => {
+                                            setCategory(cat.key);
+                                            setShowCategoryPicker(false);
+                                        }}
+                                    >
+                                        <Text style={[
+                                            styles.categoryChipText,
+                                            category === cat.key && styles.categoryChipTextSelected
+                                        ]}>
+                                            {cat.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    )}
+
+                    {/* Frequência - Only for subscriptions */}
+                    {mode === 'subscriptions' && (
+                        <>
+                            <View style={styles.separator} />
+                            <View style={styles.itemContent}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.itemTitle}>Frequência</Text>
+                                    <Text style={styles.itemSubtitle}>{isYearly ? 'Anual' : 'Mensal'}</Text>
+                                </View>
+                                <ModernSwitch
+                                    value={isYearly}
+                                    onValueChange={setIsYearly}
+                                    width={46}
+                                    height={26}
+                                />
+                            </View>
+                        </>
+                    )}
                 </View>
-            </ScrollView>
+            </View>
         </ModalPadrao>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
-        gap: 16,
+        paddingTop: 4,
+        paddingBottom: 0,
     },
-    reminderModalSubtitle: {
-        fontSize: 14,
-        color: '#8E8E93',
-        textAlign: 'left',
-        lineHeight: 20,
-        marginBottom: 4,
+    sectionTitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#6E6E73',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0,
     },
-    saveButton: {
-        backgroundColor: '#D97757',
-        paddingVertical: 14,
-        borderRadius: 12,
-        alignItems: 'center',
-        marginTop: 8
-    },
-    saveButtonText: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '700',
-    },
-    sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+    groupCard: {
+        backgroundColor: 'rgba(28, 28, 30, 0.82)',
+        borderRadius: 18,
+        marginBottom: 24,
         overflow: 'hidden',
-    },
-    itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        position: 'relative',
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    itemRightContainer: {
-        flex: 1,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(84, 84, 88, 0.34)',
     },
     itemContent: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        minHeight: 48,
     },
     itemTitle: {
         fontSize: 16,
-        color: '#FFFFFF',
-        fontWeight: '500',
+        color: '#F5F5F7',
+        fontWeight: '400',
     },
     itemSubtitle: {
         fontSize: 12,
-        color: '#909090',
-        marginTop: 2,
+        color: '#8E8E93',
+        marginTop: 1,
     },
-    itemSeparator: {
-        height: 1,
-        backgroundColor: '#2A2A2A',
+    separator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: 'rgba(84, 84, 88, 0.34)',
     },
     inputRight: {
-        color: '#FFFFFF',
+        color: '#F5F5F7',
         fontSize: 16,
         minWidth: 100,
         padding: 0,
     },
-    headerSaveText: {
+    categoryValue: {
         color: '#d97757',
+        fontSize: 16,
         fontWeight: '600',
-        fontSize: 16
     },
     categoryChip: {
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
-        backgroundColor: '#252525',
-        borderWidth: 1,
-        borderColor: '#333',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(84,84,88,0.34)',
     },
     categoryChipSelected: {
-        backgroundColor: 'rgba(217, 119, 87, 0.2)',
+        backgroundColor: 'rgba(217, 119, 87, 0.16)',
         borderColor: '#d97757',
     },
     categoryChipText: {
-        color: '#909090',
+        color: '#A1A1A6',
         fontSize: 13,
         fontWeight: '500',
     },
@@ -497,43 +395,48 @@ const styles = StyleSheet.create({
     categorySearchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#252525',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         marginHorizontal: 16,
+        marginTop: 12,
         marginBottom: 12,
         paddingHorizontal: 12,
         height: 36,
-        borderRadius: 8,
+        borderRadius: 12,
     },
     categorySearchInput: {
         flex: 1,
-        color: '#FFF',
+        color: '#F5F5F7',
         fontSize: 14,
         padding: 0,
     },
     typeToggleContainer: {
         flexDirection: 'row',
-        backgroundColor: '#252525',
-        borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderRadius: 10,
         padding: 2,
     },
     typeButton: {
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderRadius: 6,
+        borderRadius: 8,
     },
     typeButtonActiveExpense: {
         backgroundColor: 'rgba(255, 69, 58, 0.2)',
     },
     typeButtonActiveIncome: {
-        backgroundColor: 'rgba(4, 211, 97, 0.2)',
+        backgroundColor: 'rgba(48, 209, 88, 0.18)',
     },
     typeButtonText: {
         fontSize: 13,
-        color: '#888',
+        color: '#8E8E93',
         fontWeight: '500',
     },
-    typeButtonTextActive: {
-        color: '#FFF',
+    typeButtonTextActiveExpense: {
+        color: '#FF453A',
+        fontWeight: '700',
+    },
+    typeButtonTextActiveIncome: {
+        color: '#30D158',
         fontWeight: '700',
     },
 });

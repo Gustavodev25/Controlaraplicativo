@@ -1,16 +1,9 @@
 ﻿import { useCategories } from '@/hooks/use-categories';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { InvoiceItem } from '@/services/invoiceBuilder';
 import { BlurView } from 'expo-blur';
-import {
-    ArrowLeft,
-    ArrowRight,
-    RotateCcw,
-    Tag,
-    Trash2
-} from 'lucide-react-native';
 import React from 'react';
 import {
-    ActivityIndicator,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -63,6 +56,8 @@ export function TransactionOptionsModal({
                 onClose();
             }}
             title="Opções da Transação"
+            titleAlign="start"
+            maxHeightRatio={0.78}
         >
             <View style={styles.container}>
                 <View style={styles.headerInfo}>
@@ -75,28 +70,24 @@ export function TransactionOptionsModal({
                 </View>
 
                 {showMoveSection && (
-                    <View style={styles.sectionWrapper}>
+                    <View>
+                        <Text style={styles.sectionTitle}>FATURA</Text>
                         <View style={styles.sectionCard}>
-                            <Text style={styles.cardTitle}>MOVER FATURA</Text>
                             {/* Renderiza até 2 opções de movimento relativo (prev/next) com labels customizados */}
                             {moveOptions?.map((opt, index) => (
                                 <React.Fragment key={opt.target}>
                                     <TouchableOpacity
-                                        style={styles.itemContainer}
+                                        style={[styles.itemContainer, !canMoveInvoice && styles.itemDisabled]}
                                         disabled={!canMoveInvoice}
                                         onPress={() => {
                                             if (!canMoveInvoice) return;
                                             onMoveInvoice(opt.target);
                                         }}
+                                        activeOpacity={0.72}
                                     >
-                                        <View style={[styles.itemIconContainer, { backgroundColor: '#252525' }]}>
-                                            {opt.icon === 'prev' ? <ArrowLeft size={20} color="#E0E0E0" /> : <ArrowRight size={20} color="#E0E0E0" />}
-                                        </View>
                                         <View style={styles.itemContent}>
-                                            <View>
-                                                <Text style={styles.itemTitle}>{opt.label}</Text>
-                                                {!!opt.date && <Text style={styles.itemSubtitle}>{opt.date}</Text>}
-                                            </View>
+                                            <Text style={styles.itemTitle}>{opt.label}</Text>
+                                            {!!opt.date && <Text style={styles.itemSubtitle}>{opt.date}</Text>}
                                         </View>
                                     </TouchableOpacity>
                                     {index < (moveOptions?.length || 0) - 1 && <View style={styles.separator} />}
@@ -112,19 +103,17 @@ export function TransactionOptionsModal({
                     </View>
                 )}
 
+                <Text style={styles.sectionTitle}>AÇÕES</Text>
                 <View style={styles.sectionCard}>
-                    <Text style={styles.cardTitle}>AÇÕES</Text>
                     {isRefund ? (
                         <TouchableOpacity
                             style={styles.itemContainer}
+                            activeOpacity={0.72}
                             onPress={() => {
                                 onDelete(transaction);
                                 onClose();
                             }}
                         >
-                            <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(255, 69, 58, 0.15)' }]}>
-                                <Trash2 size={20} color="#FF453A" />
-                            </View>
                             <View style={styles.itemContent}>
                                 <Text style={[styles.itemTitle, { color: '#FF453A' }]}>Excluir transação</Text>
                             </View>
@@ -135,15 +124,13 @@ export function TransactionOptionsModal({
                                 <>
                                     <TouchableOpacity
                                         style={styles.itemContainer}
+                                        activeOpacity={0.72}
                                         onPress={() => {
                                             if (onRefund) onRefund(transaction);
                                         }}
                                     >
-                                        <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(74, 222, 128, 0.15)' }]}>
-                                            <RotateCcw size={20} color="#4ADE80" />
-                                        </View>
                                         <View style={styles.itemContent}>
-                                            <Text style={[styles.itemTitle, { color: '#4ADE80' }]}>Estornar transação</Text>
+                                            <Text style={styles.itemTitle}>Estornar transação</Text>
                                         </View>
                                     </TouchableOpacity>
                                     <View style={styles.separator} />
@@ -152,29 +139,25 @@ export function TransactionOptionsModal({
 
                             <TouchableOpacity
                                 style={styles.itemContainer}
+                                activeOpacity={0.72}
                                 onPress={() => {
                                     if (onChangeCategory) onChangeCategory(transaction);
                                 }}
                             >
-                                <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(217, 119, 87, 0.15)' }]}>
-                                    <Tag size={20} color="#D97757" />
-                                </View>
                                 <View style={styles.itemContent}>
-                                    <Text style={[styles.itemTitle, { color: '#D97757' }]}>Mudar categoria</Text>
+                                    <Text style={styles.itemTitle}>Mudar categoria</Text>
                                 </View>
                             </TouchableOpacity>
                             <View style={styles.separator} />
 
                             <TouchableOpacity
                                 style={styles.itemContainer}
+                                activeOpacity={0.72}
                                 onPress={() => {
                                     onDelete(transaction);
                                     onClose();
                                 }}
                             >
-                                <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(255, 69, 58, 0.15)' }]}>
-                                    <Trash2 size={20} color="#FF453A" />
-                                </View>
                                 <View style={styles.itemContent}>
                                     <Text style={[styles.itemTitle, { color: '#FF453A' }]}>Excluir transação</Text>
                                 </View>
@@ -191,10 +174,7 @@ export function TransactionOptionsModal({
                         tint="dark"
                         style={StyleSheet.absoluteFill}
                     />
-                    <View style={styles.loaderContainer}>
-                        <ActivityIndicator size="large" color="#D97757" />
-                        <Text style={styles.loadingText}>Processando...</Text>
-                    </View>
+                    <IosCoreLoader fill={false} style={styles.loaderContainer} />
                 </View>
             )}
         </ModalPadrao>
@@ -203,8 +183,8 @@ export function TransactionOptionsModal({
 
 const styles = StyleSheet.create({
     container: {
-        paddingBottom: 20,
-        gap: 20
+        paddingTop: 12,
+        paddingBottom: 0,
     },
     loadingOverlay: {
         ...StyleSheet.absoluteFillObject,
@@ -216,91 +196,73 @@ const styles = StyleSheet.create({
     },
     loaderContainer: {
         alignItems: 'center',
-        gap: 12,
         backgroundColor: 'rgba(26, 26, 26, 0.8)',
         padding: 24,
         borderRadius: 20,
         borderWidth: 1,
         borderColor: '#2A2A2A',
     },
-    loadingText: {
-        color: '#FFFFFF',
-        fontSize: 14,
-        fontWeight: '600',
-    },
     headerInfo: {
         alignItems: 'flex-start',
-        marginBottom: 4,
-        paddingHorizontal: 4
+        marginBottom: 24,
     },
     transactionTitle: {
-        fontSize: 18,
-        fontWeight: '700',
+        fontSize: 17,
+        fontWeight: '400',
         color: '#FFFFFF',
         marginBottom: 4,
         textAlign: 'left'
     },
     transactionSubtitle: {
-        fontSize: 14,
+        fontSize: 13,
         color: '#8E8E93',
         textAlign: 'left'
     },
-    sectionWrapper: {
-        gap: 8
-    },
-    cardTitle: {
+    sectionTitle: {
         fontSize: 12,
-        fontWeight: '700',
-        color: '#909090',
+        fontWeight: '500',
+        color: '#8E8E93',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-        padding: 16,
-        paddingBottom: 8
+        marginBottom: 8,
     },
     sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
+        backgroundColor: '#1C1C1E',
+        borderRadius: 12,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+        marginBottom: 24,
     },
     itemContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 16,
+        paddingVertical: 12,
         paddingHorizontal: 16,
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
+        minHeight: 48,
     },
     itemContent: {
         flex: 1,
         justifyContent: 'center',
     },
     itemTitle: {
-        fontSize: 16,
+        fontSize: 17,
         color: '#FFFFFF',
-        fontWeight: '500',
+        fontWeight: '400',
     },
     itemSubtitle: {
         fontSize: 12,
-        color: '#909090',
-        marginTop: 2,
+        color: '#8E8E93',
+        marginTop: 1,
     },
     separator: {
-        height: 1,
-        backgroundColor: '#2A2A2A',
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#38383A',
         width: '100%'
     },
+    itemDisabled: {
+        opacity: 0.45,
+    },
     projectedHint: {
-        marginTop: -8,
-        marginHorizontal: 4,
+        marginTop: 8,
         color: '#8E8E93',
         fontSize: 12
     }

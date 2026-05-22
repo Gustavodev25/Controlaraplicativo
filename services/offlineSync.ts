@@ -31,15 +31,19 @@ class OfflineSyncService {
      * Start monitoring for sync opportunities
      */
     start() {
+        if (this.appStateSubscription || this.syncInterval) {
+            return;
+        }
+
         // Monitor app state to sync when app comes to foreground
         this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
 
-        // Try to sync every 30 seconds
+        // Try to sync periodically without competing with active UI work.
         this.syncInterval = setInterval(() => {
             if (this._isOnline && !this.isSyncing) {
                 this.processPendingOperations();
             }
-        }, 30000);
+        }, 60000);
 
         // Initial sync attempt
         this.processPendingOperations();

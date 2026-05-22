@@ -3,9 +3,9 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { databaseService } from '@/services/firebase';
 import { Stack, useRouter } from 'expo-router';
-import { Calendar, ChevronRight, Crown, Mail, Phone, Trash2, User } from 'lucide-react-native';
+import { ChevronRight } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // --- Components mimicking financial.tsx ---
@@ -15,7 +15,6 @@ const SectionHeader = ({ title }: { title: string }) => (
 );
 
 const InputRow = ({
-    icon: Icon,
     title,
     value,
     onChangeText,
@@ -24,7 +23,6 @@ const InputRow = ({
     editable = true,
     isLast = false
 }: {
-    icon: React.ElementType,
     title: string,
     value: string,
     onChangeText?: (text: string) => void,
@@ -34,9 +32,6 @@ const InputRow = ({
     isLast?: boolean
 }) => (
     <View style={styles.itemContainer}>
-        <View style={styles.itemIconContainer}>
-            <Icon size={20} color="#E0E0E0" />
-        </View>
         <View style={styles.itemRightContainer}>
             <View style={styles.itemContent}>
                 <Text style={styles.itemTitle}>{title}</Text>
@@ -57,20 +52,16 @@ const InputRow = ({
 );
 
 const ListRow = ({
-    icon: Icon,
     title,
     value,
     onPress,
-    color = '#E0E0E0',
-    showChevron = false,
+    danger = false,
     isLast = false
 }: {
-    icon: React.ElementType,
     title: string,
     value?: string,
     onPress?: () => void,
-    color?: string,
-    showChevron?: boolean,
+    danger?: boolean,
     isLast?: boolean
 }) => (
     <TouchableOpacity
@@ -79,17 +70,9 @@ const ListRow = ({
         disabled={!onPress}
         activeOpacity={0.7}
     >
-        <View style={styles.itemIconContainer}>
-            <Icon size={20} color={color} />
-        </View>
-        <View style={styles.itemRightContainer}>
-            <View style={styles.itemContent}>
-                <Text style={styles.itemTitle}>{title}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {value && <Text style={styles.valueText}>{value}</Text>}
-                    {showChevron && <ChevronRight size={20} color="#666" />}
-                </View>
-            </View>
+        <View style={styles.itemContent}>
+            <Text style={[styles.itemTitle, danger && styles.dangerText]}>{title}</Text>
+            {value && <Text style={styles.valueText}>{value}</Text>}
         </View>
         {!isLast && <View style={styles.itemSeparator} />}
     </TouchableOpacity>
@@ -103,14 +86,21 @@ export default function PersonalDataScreen() {
 
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
+    const [originalName, setOriginalName] = useState('');
+    const [originalPhone, setOriginalPhone] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const hasChanges = name !== originalName || phone !== originalPhone;
 
     useEffect(() => {
         if (profile) {
             setName(profile.name || '');
             setPhone(profile.phone || '');
+            setOriginalName(profile.name || '');
+            setOriginalPhone(profile.phone || '');
         } else if (user?.displayName) {
             setName(user.displayName);
+            setOriginalName(user.displayName);
         }
     }, [profile, user]);
 
@@ -180,14 +170,11 @@ export default function PersonalDataScreen() {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
             <View style={styles.mainContainer}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <UniversalBackground
-                    backgroundColor="#0C0C0C"
-                    glowSize={350}
-                    height={280}
-                    showParticles={true}
-                    particleCount={15}
-                />
-                <View style={[styles.container, { paddingTop: insets.top + 20 }]}>
+                <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }} pointerEvents="none">
+                    <UniversalBackground backgroundColor="#0C0C0C" glowSize={350} height={280} />
+                </View>
+
+                <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
                     <View style={styles.header}>
                         <TouchableOpacity
                             onPress={() => router.back()}
@@ -197,91 +184,66 @@ export default function PersonalDataScreen() {
                             <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>Dados Pessoais</Text>
+                        <View style={styles.headerSpacer} />
+                    </View>
+                </View>
 
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: hasChanges ? 100 : 40 }]}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
+                    <SectionHeader title="PERFIL" />
+                    <View style={styles.sectionCard}>
+                        <InputRow
+                            title="Nome"
+                            value={name}
+                            onChangeText={setName}
+                            placeholder="Seu nome"
+                        />
+                        <InputRow
+                            title="E-mail"
+                            value={user?.email || ''}
+                            editable={false}
+                        />
+                        <InputRow
+                            title="Telefone"
+                            value={phone}
+                            onChangeText={setPhone}
+                            placeholder="(00) 00000-0000"
+                            keyboardType="phone-pad"
+                            isLast
+                        />
+                    </View>
+
+                    <SectionHeader title="ZONA DE PERIGO" />
+                    <View style={styles.sectionCard}>
+                        <ListRow
+                            title="Excluir minha conta"
+                            isLast
+                            danger
+                            onPress={handleDeleteAccount}
+                        />
+                    </View>
+                </ScrollView>
+
+                {hasChanges && (
+                    <View style={[styles.saveContainer, { paddingBottom: insets.bottom + 16 }]}>
                         <TouchableOpacity
+                            style={styles.saveButton}
                             onPress={handleSave}
                             disabled={loading}
-                            style={styles.headerSaveButton}
+                            activeOpacity={0.85}
                         >
                             {loading ? (
-                                <ActivityIndicator size="small" color="#d97757" />
+                                <ActivityIndicator size="small" color="#fff" />
                             ) : (
-                                <Text style={styles.headerSaveText}>Salvar</Text>
+                                <Text style={styles.saveButtonText}>Salvar alterações</Text>
                             )}
                         </TouchableOpacity>
                     </View>
-
-                    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                        <View style={styles.infoBlock}>
-                            <Text style={styles.cardTitle}>Suas Informações</Text>
-                            <Text style={styles.cardSubtitle}>Mantenha seus dados atualizados para facilitar o contato.</Text>
-                        </View>
-
-                        <SectionHeader title="DADOS GERAIS" />
-                        <View style={styles.sectionCard}>
-                            <InputRow
-                                icon={User}
-                                title="Nome Completo"
-                                value={name}
-                                onChangeText={setName}
-                                placeholder="Seu nome"
-                            />
-
-                            <InputRow
-                                icon={Mail}
-                                title="E-mail"
-                                value={user?.email || ''}
-                                placeholder="Seu e-mail"
-                                editable={false}
-                            />
-
-                            <InputRow
-                                icon={Phone}
-                                title="Telefone"
-                                value={phone}
-                                onChangeText={setPhone}
-                                placeholder="(00) 00000-0000"
-                                keyboardType="phone-pad"
-                                isLast={true}
-                            />
-                        </View>
-
-                        {Platform.OS !== 'ios' && (
-                            <>
-                                <SectionHeader title="MEU PLANO" />
-                                <View style={styles.sectionCard}>
-                                    <ListRow
-                                        icon={Crown}
-                                        title="Plano Atual"
-                                        value={profile?.subscription?.plan === 'pro' ? 'Pro' : 'Starter'}
-                                        color="#d97757"
-                                    />
-                                    <ListRow
-                                        icon={Calendar}
-                                        title="Ciclo"
-                                        value={profile?.subscription?.billingCycle === 'yearly' ? 'Anual' : 'Mensal'}
-                                        isLast={true}
-                                    />
-                                </View>
-
-                                <Text style={styles.sectionFooterText}>
-                                    Para alterar seu plano, acesse Configurações {'>'} Meu Plano.
-                                </Text>
-                            </>
-                        )}
-
-                        <SectionHeader title="ZONA DE PERIGO" />
-                        <View style={styles.sectionCard}>
-                            <ListRow
-                                icon={Trash2}
-                                title="Excluir minha conta"
-                                color="#FF453A"
-                                isLast={true}
-                                onPress={handleDeleteAccount}
-                            />
-                        </View>
-                    </ScrollView>
-                </View>
+                )}
             </View>
         </TouchableWithoutFeedback>
     );
@@ -292,20 +254,16 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#0C0C0C',
     },
-    container: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 100,
+    headerWrapper: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        height: 52,
         paddingHorizontal: 20,
-        marginBottom: 10,
     },
     backButton: {
         width: 40,
@@ -314,71 +272,67 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
     },
     headerTitle: {
-        fontSize: 20,
+        flex: 1,
+        fontSize: 18,
         fontWeight: '600',
-        color: '#E0E0E0',
+        color: '#E8E8EA',
+        textAlign: 'center',
     },
-    headerSaveButton: {
-        padding: 8,
+    headerSpacer: {
+        width: 40,
+        height: 40,
     },
-    headerSaveText: {
-        color: '#d97757',
-        fontWeight: '600',
+    saveContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        backgroundColor: 'rgba(12,12,12,0.85)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.08)',
+    },
+    saveButton: {
+        backgroundColor: '#d97757',
+        borderRadius: 12,
+        height: 50,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    saveButtonText: {
+        color: '#fff',
         fontSize: 16,
+        fontWeight: '600',
+    },
+    scroll: {
+        flex: 1,
     },
     scrollContent: {
         paddingHorizontal: 20,
         paddingBottom: 40,
     },
-    infoBlock: {
-        marginBottom: 10,
-        marginTop: 10,
-    },
-    cardTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        marginBottom: 8,
-    },
-    cardSubtitle: {
-        fontSize: 14,
-        color: '#A0A0A0',
-        lineHeight: 20,
-    },
-    // Styles from financial.tsx
     sectionHeader: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#8E8E93',
-        marginTop: 24,
+        fontSize: 11,
+        fontWeight: '500',
+        color: '#555',
+        marginTop: 28,
         marginBottom: 8,
-        marginLeft: 4,
-        letterSpacing: 0.5,
+        marginLeft: 2,
+        letterSpacing: 0.6,
         textTransform: 'uppercase',
     },
     sectionCard: {
-        backgroundColor: '#151515',
-        borderRadius: 16,
+        backgroundColor: '#111111',
+        borderRadius: 12,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#252525',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
     },
     itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#151515',
-        minHeight: 56,
+        backgroundColor: '#111111',
+        minHeight: 54,
         position: 'relative',
-    },
-    itemIconContainer: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        backgroundColor: '#252525',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 16,
-        marginLeft: 16,
     },
     itemRightContainer: {
         flex: 1,
@@ -388,39 +342,37 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingRight: 16,
-        paddingVertical: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        minHeight: 54,
     },
     itemTitle: {
         fontSize: 16,
-        color: '#FFFFFF',
-        fontWeight: '500',
+        color: '#E8E8EA',
+        fontWeight: '400',
+    },
+    dangerText: {
+        color: '#E05C5C',
     },
     itemSeparator: {
         position: 'absolute',
         bottom: 0,
-        left: 0,
+        left: 16,
         right: 0,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#1A1A1A',
     },
     inputRight: {
         fontSize: 16,
-        color: '#FFF',
-        fontWeight: '500',
-        minWidth: 100,
-        padding: 0, // Reset padding for TextInput
+        color: '#8E8E93',
+        fontWeight: '400',
+        minWidth: 80,
+        maxWidth: 200,
+        textAlign: 'right',
+        padding: 0,
     },
     valueText: {
         fontSize: 16,
         color: '#8E8E93',
-        marginRight: 8,
-    },
-    sectionFooterText: {
-        fontSize: 12,
-        color: '#666',
-        marginTop: 8,
-        marginLeft: 16,
-        lineHeight: 16,
     },
 });

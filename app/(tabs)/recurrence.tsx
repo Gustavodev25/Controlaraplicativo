@@ -9,7 +9,7 @@ export default function RecurrenceScreen() {
 
     return (
         <View style={styles.container}>
-            <RecurrenceView initialTab={initialTab} key={initialTab} />
+            <RecurrenceView initialTab={initialTab} />
         </View>
     );
 }
@@ -17,6 +17,6 @@ export default function RecurrenceScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#0C0C0C',
+        backgroundColor: '#0A0A0A',
     },
 });

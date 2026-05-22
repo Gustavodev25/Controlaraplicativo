@@ -1,11 +1,12 @@
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
+import { ModernSwitch } from '@/components/ui/ModernSwitch';
+import { AuthButton } from '@/components/ui/AuthButton';
 import { databaseService } from '@/services/firebase';
 import { Wallet } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import LottieView from 'lottie-react-native';
 import {
-    ActivityIndicator,
     Dimensions,
-    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -47,7 +48,8 @@ export function BalanceAccountsModal({
     onSave,
 }: BalanceAccountsModalProps) {
     const [selected, setSelected] = useState<string[]>(selectedAccountIds);
-    const [loading, setLoading] = useState(false);
+    const lottieRef = useRef<LottieView>(null);
+
 
     // Sync with props when modal opens
     useEffect(() => {
@@ -56,7 +58,7 @@ export function BalanceAccountsModal({
         }
     }, [visible, selectedAccountIds]);
 
-    const displayedAccounts = accounts.filter(account => {
+    const displayedAccounts = (accounts || []).filter(account => {
         const isCheckingType = account.type === 'BANK' || account.type === 'checking' || account.subtype === 'CHECKING_ACCOUNT';
         const isCreditType = account.type === 'credit' || account.type === 'CREDIT' || account.type === 'CREDIT_CARD' || account.subtype === 'CREDIT_CARD';
         const isSavingsType = account.type === 'SAVINGS' || account.subtype === 'SAVINGS_ACCOUNT' || account.subtype === 'SAVINGS';
@@ -69,8 +71,26 @@ export function BalanceAccountsModal({
         return isCheckingType && !isCreditType && !isSavingsType && !isInvestmentType && !isSavingsByName && !isCaixinhaByName;
     });
 
+    // Play lottie animation periodically when empty state is visible
+    useEffect(() => {
+        if (visible && (displayedAccounts?.length || 0) === 0) {
+            const initialTimeout = setTimeout(() => {
+                lottieRef.current?.play();
+            }, 500);
+
+            const interval = setInterval(() => {
+                lottieRef.current?.play();
+            }, 5000);
+
+            return () => {
+                clearTimeout(initialTimeout);
+                clearInterval(interval);
+            };
+        }
+    }, [visible, displayedAccounts?.length]);
+
     // Count occurrences of each name to add indexes if necessary
-    const nameTotals = displayedAccounts.reduce((acc, account) => {
+    const nameTotals = (displayedAccounts || []).reduce((acc, account) => {
         const name = account.name || account.connector?.name || 'Conta';
         acc[name] = (acc[name] || 0) + 1;
         return acc;
@@ -87,20 +107,15 @@ export function BalanceAccountsModal({
         });
     };
 
-    const handleSave = async () => {
-        setLoading(true);
-        try {
-            await databaseService.updatePreference(userId, {
-                balanceAccountIds: selected
-            });
+    const handleSave = () => {
+        onSave(selected);
+        onClose();
 
-            onSave(selected);
-            onClose();
-        } catch (error) {
+        databaseService.updatePreference(userId, {
+            balanceAccountIds: selected
+        }).catch((error) => {
             console.error('Error saving balance preferences:', error);
-        } finally {
-            setLoading(false);
-        }
+        });
     };
 
     const formatCurrency = (value: number) => {
@@ -110,102 +125,110 @@ export function BalanceAccountsModal({
         }).format(value);
     };
 
+    const Footer = () => (
+        <AuthButton
+            title="Salvar Alterações"
+            onPress={handleSave}
+        />
+    );
+
     return (
         <ModalPadrao
             visible={visible}
             onClose={onClose}
-            title="Minhas Contas"
-            headerRight={
-                <TouchableOpacity onPress={handleSave} disabled={loading} style={styles.headerSaveButton}>
-                    {loading ? (
-                        <ActivityIndicator size="small" color="#D97757" />
-                    ) : (
-                        <Text style={styles.headerSaveText}>Salvar</Text>
-                    )}
-                </TouchableOpacity>
-            }
+            title="Contas Bancárias"
+            titleAlign="start"
+            footer={<Footer />}
         >
-            <ScrollView
-                contentContainerStyle={styles.container}
-                showsVerticalScrollIndicator={false}
-                style={{ maxHeight: windowHeight * 0.7 }}
-            >
+            <View style={styles.container}>
                 {/* Accounts List */}
-                <Text style={styles.sectionHeader}>CONTAS DISPONÍVEIS</Text>
-                <View style={styles.sectionCard}>
-                    {displayedAccounts.map((account, index) => {
-                        const isSelected = selected.includes(account.id);
-                        const isLast = index === displayedAccounts.length - 1;
+                {(displayedAccounts?.length || 0) === 0 ? (
+                    <View style={styles.emptyStateContainer}>
+                        <LottieView
+                            ref={lottieRef}
+                            source={require('@/assets/banco.json')}
+                            autoPlay={false}
+                            loop={false}
+                            style={styles.emptyStateLottie}
+                        />
+                        <Text style={styles.emptyStateTitle}>Nenhuma conta</Text>
+                        <Text style={styles.emptyStateDescription}>
+                            Conecte uma conta para ver seu saldo.
+                        </Text>
+                    </View>
+                ) : (
+                    <>
+                        <Text style={styles.sectionHeader}>CONTAS DISPONÍVEIS</Text>
+                        <View style={styles.sectionCard}>
+                            {displayedAccounts.map((account, index) => {
+                                const isSelected = selected.includes(account.id);
+                                const isLast = index === displayedAccounts.length - 1;
 
-                        const baseName = account.name || account.connector?.name || 'Conta';
-                        nameCurrentCounts[baseName] = (nameCurrentCounts[baseName] || 0) + 1;
-                        
-                        const hasDuplicates = nameTotals[baseName] > 1;
-                        const accountNumberSuffix = account.number ? account.number.replace(/\D/g, '').slice(-4) : null;
-                        
-                        let displayName = baseName;
-                        if (hasDuplicates) {
-                            if (accountNumberSuffix) {
-                                displayName = `${baseName} • ${accountNumberSuffix}`;
-                            } else {
-                                displayName = `${baseName} #${nameCurrentCounts[baseName]}`;
-                            }
-                        }
+                                const baseName = account.name || account.connector?.name || 'Conta';
+                                nameCurrentCounts[baseName] = (nameCurrentCounts[baseName] || 0) + 1;
+                                
+                                const hasDuplicates = nameTotals[baseName] > 1;
+                                const accountNumberSuffix = account.number ? account.number.replace(/\D/g, '').slice(-4) : null;
+                                
+                                let displayName = baseName;
+                                if (hasDuplicates) {
+                                    if (accountNumberSuffix) {
+                                        displayName = `${baseName} • ${accountNumberSuffix}`;
+                                    } else {
+                                        displayName = `${baseName} #${nameCurrentCounts[baseName]}`;
+                                    }
+                                }
 
-                        let subtitle = 'Conta Corrente';
-                        if (!hasDuplicates && accountNumberSuffix) {
-                            subtitle = `Conta Corrente • Final ${accountNumberSuffix}`;
-                        }
+                                let subtitle = 'Conta Corrente';
+                                if (!hasDuplicates && accountNumberSuffix) {
+                                    subtitle = `Conta Corrente • Final ${accountNumberSuffix}`;
+                                }
 
-                        return (
-                            <TouchableOpacity
-                                key={account.id}
-                                activeOpacity={0.7}
-                                onPress={() => toggleAccount(account.id)}
-                                style={[
-                                    styles.itemContainer,
-                                    !isLast && styles.itemBorder,
-                                    !isSelected && { opacity: 0.35 }
-                                ]}
-                            >
-                                <View style={[
-                                    styles.itemIconContainer,
-                                    { backgroundColor: account.connector?.primaryColor || '#252525' }
-                                ]}>
-                                    <Wallet size={18} color="#FFFFFF" />
-                                </View>
+                                return (
+                                    <View key={account.id} style={!isLast && styles.itemBorder}>
+                                        <TouchableOpacity
+                                            activeOpacity={0.7}
+                                            onPress={() => toggleAccount(account.id)}
+                                            style={[
+                                                styles.itemContainer,
+                                                !isSelected && { opacity: 0.35 }
+                                            ]}
+                                        >
+                                            <View style={styles.itemContent}>
+                                                <View style={styles.itemInfo}>
+                                                    <Text style={styles.itemTitle} numberOfLines={1}>
+                                                        {displayName}
+                                                    </Text>
+                                                    <Text style={styles.itemSubtitle}>
+                                                        {subtitle}
+                                                    </Text>
+                                                </View>
 
-                                <View style={styles.itemContent}>
-                                    <View style={styles.itemInfo}>
-                                        <Text style={styles.itemTitle} numberOfLines={1}>
-                                            {displayName}
-                                        </Text>
-                                        <Text style={styles.itemSubtitle}>
-                                            {subtitle}
-                                        </Text>
+                                                <View style={styles.itemRight}>
+                                                    <Text style={[
+                                                        styles.itemBalance,
+                                                        account.balance >= 0 ? styles.positiveValue : styles.negativeValue
+                                                    ]}>
+                                                        {formatCurrency(account.balance || 0)}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </TouchableOpacity>
                                     </View>
-
-                                    <View style={styles.itemRight}>
-                                        <Text style={[
-                                            styles.itemBalance,
-                                            account.balance >= 0 ? styles.positiveValue : styles.negativeValue
-                                        ]}>
-                                            {formatCurrency(account.balance || 0)}
-                                        </Text>
-                                    </View>
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-            </ScrollView>
+                                );
+                            })}
+                        </View>
+                    </>
+                )}
+            </View>
         </ModalPadrao>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
-        paddingBottom: 20
+        paddingTop: 8,
+        paddingBottom: 0,
     },
     positiveValue: {
         color: '#04D361'
@@ -214,36 +237,33 @@ const styles = StyleSheet.create({
         color: '#FF4C4C'
     },
     sectionHeader: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#8E8E93',
+        fontSize: 11,
+        color: '#606060',
         marginBottom: 8,
-        marginLeft: 4,
+        marginLeft: 0,
         letterSpacing: 0.5,
         textTransform: 'uppercase',
+        fontFamily: 'AROneSans_400Regular',
     },
     sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
+        backgroundColor: '#111111',
+        borderRadius: 14,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#2A2A2A'
     },
     itemContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1A1A1A',
-        minHeight: 64,
-        paddingHorizontal: 16,
-        paddingVertical: 12
+        paddingHorizontal: 20,
+        paddingVertical: 14,
     },
     itemBorder: {
-        borderBottomWidth: 1,
-        borderBottomColor: '#2A2A2A'
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+        marginLeft: 0,
     },
     itemIconContainer: {
-        width: 36,
-        height: 36,
+        width: 34,
+        height: 34,
         borderRadius: 10,
         justifyContent: 'center',
         alignItems: 'center',
@@ -261,13 +281,14 @@ const styles = StyleSheet.create({
     },
     itemTitle: {
         fontSize: 15,
-        color: '#FFFFFF',
-        fontWeight: '500',
+        color: '#E5E5E5',
+        fontFamily: 'AROneSans_400Regular',
         marginBottom: 2
     },
     itemSubtitle: {
-        fontSize: 13,
-        color: '#666'
+        fontSize: 12,
+        color: '#606060',
+        fontFamily: 'AROneSans_400Regular',
     },
     itemRight: {
         flexDirection: 'row',
@@ -275,8 +296,16 @@ const styles = StyleSheet.create({
         gap: 12
     },
     itemBalance: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 15,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    itemDot: {
+        color: '#444',
+        fontSize: 13,
+    },
+    itemBalancePreview: {
+        fontSize: 13,
+        fontFamily: 'AROneSans_400Regular',
     },
     headerSaveButton: {
         flexDirection: 'row',
@@ -288,6 +317,32 @@ const styles = StyleSheet.create({
     headerSaveText: {
         color: '#D97757',
         fontSize: 16,
-        fontWeight: 'bold'
-    }
+        fontFamily: 'AROneSans_400Regular',
+    },
+    emptyStateContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 48,
+        paddingHorizontal: 32,
+    },
+    emptyStateLottie: {
+        width: 70,
+        height: 70,
+        marginBottom: 12,
+    },
+    emptyStateTitle: {
+        fontSize: 17,
+        fontFamily: 'AROneSans_400Regular',
+        color: '#E5E5E5',
+        marginBottom: 6,
+        textAlign: 'center',
+    },
+    emptyStateDescription: {
+        fontSize: 13,
+        color: '#606060',
+        textAlign: 'center',
+        lineHeight: 18,
+        paddingHorizontal: 20,
+        fontFamily: 'AROneSans_400Regular',
+    },
 });

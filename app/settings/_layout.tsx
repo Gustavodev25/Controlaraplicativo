@@ -8,6 +8,7 @@ export default function SettingsLayout() {
             <Stack.Screen name="subscription" />
             <Stack.Screen name="financial" />
             <Stack.Screen name="plans" />
+            <Stack.Screen name="legal" />
         </Stack>
     );
 }

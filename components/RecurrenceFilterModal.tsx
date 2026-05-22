@@ -1,9 +1,9 @@
+import { AuthButton } from '@/components/ui/AuthButton';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
-import { Save, Search, Trash2, X } from 'lucide-react-native';
+import { Search, X } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -44,11 +44,7 @@ export function RecurrenceFilterModal({
     };
 
     const clearFilters = () => {
-        setFilters({
-            search: '',
-            status: [],
-            transactionType: []
-        });
+        setFilters({ search: '', status: [], transactionType: [] });
     };
 
     const toggleStatus = (status: string) => {
@@ -56,9 +52,7 @@ export function RecurrenceFilterModal({
             const exists = prev.status.includes(status);
             return {
                 ...prev,
-                status: exists
-                    ? prev.status.filter(s => s !== status)
-                    : [...prev.status, status]
+                status: exists ? prev.status.filter(s => s !== status) : [...prev.status, status]
             };
         });
     };
@@ -68,9 +62,7 @@ export function RecurrenceFilterModal({
             const exists = prev.transactionType.includes(type);
             return {
                 ...prev,
-                transactionType: exists
-                    ? prev.transactionType.filter(t => t !== type)
-                    : [...prev.transactionType, type]
+                transactionType: exists ? prev.transactionType.filter(t => t !== type) : [...prev.transactionType, type]
             };
         });
     };
@@ -86,43 +78,47 @@ export function RecurrenceFilterModal({
         { label: 'A receber', value: 'income' }
     ];
 
+    const Footer = () => (
+        <AuthButton
+            title="Aplicar Filtros"
+            onPress={handleApply}
+            isLoading={false}
+        />
+    );
+
     return (
         <ModalPadrao
             visible={visible}
             onClose={onClose}
             title="Filtrar"
-            headerRight={
-                <TouchableOpacity onPress={handleApply} style={styles.headerSaveButton}>
-                    <Save size={18} color="#D97757" />
-                    <Text style={styles.headerSaveText}>Salvar</Text>
-                </TouchableOpacity>
-            }
+            titleAlign="start"
+            footer={<Footer />}
         >
             <View style={styles.container}>
-                {/* Search Bar */}
-                <Text style={styles.sectionHeader}>BUSCAR</Text>
-                <View style={styles.sectionCard}>
+                {/* Search */}
+                <Text style={styles.sectionTitle}>BUSCAR</Text>
+                <View style={styles.groupCard}>
                     <View style={styles.inputRow}>
-                        <Search size={20} color="#666" style={styles.inputIcon} />
+                        <Search size={18} color="#8E8E93" style={{ marginRight: 10 }} />
                         <TextInput
                             style={styles.input}
                             value={filters.search}
                             onChangeText={(t) => setFilters(prev => ({ ...prev, search: t }))}
                             placeholder="Nome..."
-                            placeholderTextColor="#666"
+                            placeholderTextColor="#6E6E73"
                         />
                         {filters.search.length > 0 && (
                             <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, search: '' }))}>
-                                <X size={16} color="#666" />
+                                <X size={16} color="#8E8E93" />
                             </TouchableOpacity>
                         )}
                     </View>
                 </View>
 
                 {/* Status */}
-                <Text style={styles.sectionHeader}>STATUS</Text>
-                <View style={styles.sectionCard}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContainer}>
+                <Text style={styles.sectionTitle}>STATUS</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.chipsRow}>
                         {statusOptions.map((opt) => {
                             const isSelected = filters.status.includes(opt.value);
                             return (
@@ -137,13 +133,13 @@ export function RecurrenceFilterModal({
                                 </Pressable>
                             );
                         })}
-                    </ScrollView>
+                    </View>
                 </View>
 
                 {/* Transaction Type */}
-                <Text style={styles.sectionHeader}>TIPO</Text>
-                <View style={styles.sectionCard}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContainer}>
+                <Text style={styles.sectionTitle}>TIPO</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.chipsRow}>
                         {transactionTypeOptions.map((opt) => {
                             const isSelected = filters.transactionType.includes(opt.value);
                             return (
@@ -158,16 +154,12 @@ export function RecurrenceFilterModal({
                                 </Pressable>
                             );
                         })}
-                    </ScrollView>
+                    </View>
                 </View>
 
-                {/* Clear Action */}
-                <TouchableOpacity
-                    style={styles.clearButtonSimple}
-                    onPress={clearFilters}
-                >
-                    <Trash2 size={16} color="#666" />
-                    <Text style={styles.clearButtonTextSimple}>Limpar Filtros</Text>
+                {/* Clear */}
+                <TouchableOpacity style={styles.clearButton} onPress={clearFilters}>
+                    <Text style={styles.clearButtonText}>Limpar filtros</Text>
                 </TouchableOpacity>
             </View>
         </ModalPadrao>
@@ -175,87 +167,75 @@ export function RecurrenceFilterModal({
 }
 
 const styles = StyleSheet.create({
-    container: { paddingBottom: 20 },
-    sectionHeader: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#8E8E93',
-        marginTop: 10,
-        marginBottom: 8,
-        marginLeft: 4,
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
+    container: {
+        paddingTop: 4,
+        paddingBottom: 0,
     },
-    sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
+    sectionTitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#6E6E73',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0,
+    },
+    groupCard: {
+        backgroundColor: 'rgba(28, 28, 30, 0.82)',
+        borderRadius: 18,
+        marginBottom: 22,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
-        marginBottom: 10
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(84, 84, 88, 0.34)',
     },
     inputRow: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        height: 56
+        paddingVertical: 12,
+        minHeight: 48,
     },
-    inputIcon: { marginRight: 10 },
     input: {
         flex: 1,
-        color: '#FFF',
+        color: '#F5F5F7',
         fontSize: 16,
-        fontWeight: '500',
-        height: '100%'
+        fontWeight: '400',
+        padding: 0,
     },
-    scrollContainer: { gap: 8, padding: 16 },
-    chip: {
+    chipsRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 14,
+        flexWrap: 'wrap',
+        gap: 8,
+        padding: 16,
+    },
+    chip: {
+        paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
-        backgroundColor: '#222',
-        borderWidth: 1,
-        borderColor: '#333'
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(84,84,88,0.34)',
     },
     chipSelected: {
-        backgroundColor: '#D97757',
-        borderColor: '#D97757'
+        backgroundColor: 'rgba(217, 119, 87, 0.16)',
+        borderColor: '#d97757',
     },
     chipText: {
-        color: '#888',
-        fontSize: 13,
-        fontWeight: '500'
+        color: '#8E8E93',
+        fontSize: 14,
+        fontWeight: '500',
     },
     chipTextSelected: {
-        color: '#FFF',
-        fontWeight: '700'
+        color: '#d97757',
+        fontWeight: '600',
     },
-    headerSaveButton: {
-        flexDirection: 'row',
+    clearButton: {
         alignItems: 'center',
-        gap: 6,
-        padding: 4,
-        paddingHorizontal: 8,
-    },
-    headerSaveText: {
-        color: '#D97757',
-        fontSize: 14,
-        fontWeight: '600'
-    },
-    clearButtonSimple: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        marginTop: 10,
         paddingVertical: 12,
-        opacity: 0.8
+        opacity: 0.6,
     },
-    clearButtonTextSimple: {
-        color: '#666',
+    clearButtonText: {
+        color: '#8E8E93',
         fontSize: 14,
-        fontWeight: '500'
-    }
+        fontWeight: '500',
+    },
 });

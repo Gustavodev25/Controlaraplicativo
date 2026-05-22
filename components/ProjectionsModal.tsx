@@ -1,8 +1,8 @@
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { ModernSwitch } from '@/components/ui/ModernSwitch';
-import { Banknote, Bell, Calendar, DollarSign, Wallet } from 'lucide-react-native';
+import { AuthButton } from '@/components/ui/AuthButton';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -17,11 +17,11 @@ interface ProjectionsModalProps {
     visible: boolean;
     onClose: () => void;
     currentSettings: ProjectionSettings;
-    onSave: (settings: ProjectionSettings) => void;
+    onSave: (settings: ProjectionSettings) => Promise<void> | void;
     salaryPreview: number;
     valePreview: number;
     includeOpenFinance: boolean;
-    onToggleOpenFinance: (value: boolean) => void;
+    onToggleOpenFinance: (value: boolean) => Promise<void> | void;
 }
 
 export function ProjectionsModal({
@@ -34,14 +34,12 @@ export function ProjectionsModal({
     includeOpenFinance,
     onToggleOpenFinance
 }: ProjectionsModalProps) {
-    // Local state for form
     const [includeSalary, setIncludeSalary] = useState(false);
     const [includeVale, setIncludeVale] = useState(false);
     const [includeReminders, setIncludeReminders] = useState(false);
     const [includeSubscriptions, setIncludeSubscriptions] = useState(false);
     const [localOpenFinance, setLocalOpenFinance] = useState(false);
 
-    // Initialize state from props when modal opens
     useEffect(() => {
         if (visible) {
             setIncludeSalary(currentSettings.includeSalary);
@@ -53,265 +51,176 @@ export function ProjectionsModal({
     }, [visible, currentSettings, includeOpenFinance]);
 
     const handleSave = () => {
-        onSave({
+        onClose();
+
+        Promise.resolve(onSave({
             includeSalary,
             includeVale,
             includeReminders,
             includeSubscriptions
+        })).catch((error) => {
+            console.error('Error saving projections:', error);
         });
+
         if (localOpenFinance !== includeOpenFinance) {
-            onToggleOpenFinance(localOpenFinance);
+            Promise.resolve(onToggleOpenFinance(localOpenFinance)).catch((error) => {
+                console.error('Error saving open finance toggle:', error);
+            });
         }
-        onClose();
     };
+
+    const Footer = () => (
+        <AuthButton
+            title="Salvar Alterações"
+            onPress={handleSave}
+        />
+    );
 
     return (
         <ModalPadrao
             visible={visible}
             onClose={onClose}
-            title="Configurar Previsões"
+            title="Previsões"
+            titleAlign="start"
+            footer={<Footer />}
         >
-            <ScrollView 
-                style={{ maxHeight: SCREEN_HEIGHT * 0.65 }} 
-                contentContainerStyle={styles.container} 
-                showsVerticalScrollIndicator={false}
-                nestedScrollEnabled
-                keyboardShouldPersistTaps="handled"
-                scrollEventThrottle={16}
-                bounces={true}
-            >
+            <View style={styles.container}>
                 <Text style={styles.description}>
-                    Simule seu saldo futuro incluindo previsões de renda e gastos recorrentes.
+                    Ajuste quais dados devem compor sua projeção de saldo futuro.
                 </Text>
 
-                {/* Section: Integração */}
-                <View style={styles.sectionCard}>
-                    <Text style={styles.cardTitle}>Integração</Text>
-                    <View style={styles.itemContainer}>
-                        <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(4, 211, 97, 0.15)' }]}>
-                            <Wallet size={20} color="#04D361" />
+                <Text style={styles.sectionTitle}>INTEGRAÇÃO</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Contas Bancárias</Text>
+                            <Text style={styles.itemSubtitle}>Transações automáticas</Text>
                         </View>
-                        <View style={styles.itemContent}>
-                            <View style={{ flex: 1, paddingRight: 16 }}>
-                                <Text style={styles.itemTitle}>Contas Bancárias</Text>
-                                <Text style={styles.itemSubtitle}>
-                                    Incluir transações de contas conectadas
-                                </Text>
-                            </View>
-                            <ModernSwitch
-                                value={localOpenFinance}
-                                onValueChange={setLocalOpenFinance}
-                                activeColor="#d97757"
-                            />
-                        </View>
+                        <ModernSwitch
+                            value={localOpenFinance}
+                            onValueChange={setLocalOpenFinance}
+                        />
                     </View>
                 </View>
 
-                {/* Section: Renda Estimada */}
-                <View style={styles.sectionCard}>
-                    <Text style={styles.cardTitle}>Renda Estimada</Text>
-
-                    {/* Salário */}
-                    <View style={styles.itemContainer}>
-                        <View style={styles.itemIconContainer}>
-                            <DollarSign size={20} color="#E0E0E0" />
+                <Text style={styles.sectionTitle}>RENDA ESTIMADA</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Salário Mensal</Text>
+                            <Text style={[styles.itemPreview, salaryPreview <= 0 && styles.itemPreviewMuted]}>
+                                {salaryPreview > 0
+                                    ? `R$ ${salaryPreview.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                                    : 'Não configurado'}
+                            </Text>
                         </View>
-                        <View style={styles.itemContent}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.itemTitle}>Salário Mensal</Text>
-                                <Text style={styles.itemPreview}>
-                                    {salaryPreview > 0 ? `R$ ${salaryPreview.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'Não configurado'}
-                                </Text>
-                            </View>
-                            <ModernSwitch
-                                value={includeSalary}
-                                onValueChange={setIncludeSalary}
-                                activeColor="#d97757"
-                            />
-                        </View>
+                        <ModernSwitch
+                            value={includeSalary}
+                            onValueChange={setIncludeSalary}
+                            disabled={salaryPreview <= 0}
+                        />
                     </View>
-                    <View style={styles.itemSeparator} />
-
-                    {/* Vale */}
-                    <View style={styles.itemContainer}>
-                        <View style={styles.itemIconContainer}>
-                            <Banknote size={20} color="#E0E0E0" />
+                    <View style={styles.separator} />
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Vale / Adiantamento</Text>
+                            <Text style={[styles.itemPreview, valePreview <= 0 && styles.itemPreviewMuted]}>
+                                {valePreview > 0
+                                    ? `R$ ${valePreview.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                                    : 'Não configurado'}
+                            </Text>
                         </View>
-                        <View style={styles.itemContent}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.itemTitle}>Vale / Adiantamento</Text>
-                                <Text style={styles.itemPreview}>
-                                    {valePreview > 0 ? `R$ ${valePreview.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'Não configurado'}
-                                </Text>
-                            </View>
-                            <ModernSwitch
-                                value={includeVale}
-                                onValueChange={setIncludeVale}
-                                activeColor="#d97757"
-                            />
-                        </View>
+                        <ModernSwitch
+                            value={includeVale}
+                            onValueChange={setIncludeVale}
+                            disabled={valePreview <= 0}
+                        />
                     </View>
                 </View>
 
-                {/* Section: Gastos Recorrentes */}
-                <View style={styles.sectionCard}>
-                    <Text style={styles.cardTitle}>Gastos Recorrentes</Text>
-
-                    {/* Lembretes */}
-                    <View style={styles.itemContainer}>
-                        <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(255, 159, 10, 0.15)' }]}>
-                            <Bell size={20} color="#FF9F0A" />
+                <Text style={styles.sectionTitle}>GASTOS RECORRENTES</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Lembretes Pendentes</Text>
                         </View>
-                        <View style={styles.itemContent}>
-                            <View>
-                                <Text style={styles.itemTitle}>Lembretes Pendentes</Text>
-                                <Text style={styles.itemSubtitle}>Incluir contas a pagar do mês</Text>
-                            </View>
-                            <ModernSwitch
-                                value={includeReminders}
-                                onValueChange={setIncludeReminders}
-                                activeColor="#d97757"
-                            />
-                        </View>
+                        <ModernSwitch
+                            value={includeReminders}
+                            onValueChange={setIncludeReminders}
+                        />
                     </View>
-                    <View style={styles.itemSeparator} />
-
-                    {/* Assinaturas */}
-                    <View style={styles.itemContainer}>
-                        <View style={[styles.itemIconContainer, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
-                            <Calendar size={20} color="#0A84FF" />
+                    <View style={styles.separator} />
+                    <View style={styles.itemContent}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.itemTitle}>Assinaturas</Text>
                         </View>
-                        <View style={styles.itemContent}>
-                            <View>
-                                <Text style={styles.itemTitle}>Assinaturas</Text>
-                                <Text style={styles.itemSubtitle}>Incluir serviços mensais</Text>
-                            </View>
-                            <ModernSwitch
-                                value={includeSubscriptions}
-                                onValueChange={setIncludeSubscriptions}
-                                activeColor="#d97757"
-                            />
-                        </View>
+                        <ModernSwitch
+                            value={includeSubscriptions}
+                            onValueChange={setIncludeSubscriptions}
+                        />
                     </View>
                 </View>
-
-                <TouchableOpacity
-                    style={styles.saveButton}
-                    onPress={handleSave}
-                    activeOpacity={0.85}
-                >
-                    <Text style={styles.saveButtonText}>Salvar</Text>
-                </TouchableOpacity>
-
-            </ScrollView>
+            </View>
         </ModalPadrao>
     );
 }
 
 const styles = StyleSheet.create({
-    header: {
-        width: '100%',
-    },
-    title: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
     container: {
-        gap: 16,
-        paddingBottom: 20,
+        paddingTop: 12,
+        paddingBottom: 0,
     },
     description: {
         fontSize: 14,
         color: '#8E8E93',
-        textAlign: 'left',
-        lineHeight: 20,
-        marginBottom: 4,
+        marginBottom: 24,
+        lineHeight: 18,
     },
-    sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
-        overflow: 'hidden',
-    },
-    cardTitle: {
+    sectionTitle: {
         fontSize: 12,
-        fontWeight: '700',
-        color: '#909090',
+        fontWeight: '500',
+        color: '#8E8E93',
+        marginLeft: 0,
+        marginBottom: 8,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-        padding: 16,
-        paddingBottom: 8
     },
-    itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        position: 'relative',
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
+    groupCard: {
+        backgroundColor: '#1C1C1E',
+        borderRadius: 12,
+        marginBottom: 24,
+        overflow: 'hidden',
     },
     itemContent: {
-        flex: 1,
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        minHeight: 48,
     },
     itemTitle: {
-        fontSize: 16,
+        fontSize: 17,
         color: '#FFFFFF',
-        fontWeight: '500',
+        fontWeight: '400',
     },
     itemSubtitle: {
         fontSize: 12,
         color: '#8E8E93',
-        marginTop: 2,
-    },
-    itemSeparator: {
-        height: 1,
-        backgroundColor: '#2A2A2A',
-    },
-    input: {
-        color: '#FFFFFF',
-        fontSize: 18,
-        fontWeight: '600',
-        minWidth: 100,
-        padding: 0,
-    },
-    inputSmall: {
-        color: '#FFFFFF',
-        fontSize: 18,
-        fontWeight: '600',
-        minWidth: 30,
-        padding: 0,
-        textAlign: 'center'
+        marginTop: 1,
     },
     itemPreview: {
-        fontSize: 14,
-        color: '#909090',
-        marginTop: 4,
-        fontWeight: '500'
+        fontSize: 13,
+        color: '#8E8E93',
+        marginTop: 1,
     },
-    saveButton: {
-        backgroundColor: '#D97757',
-        paddingVertical: 14,
-        borderRadius: 12,
-        alignItems: 'center',
-        marginTop: 8
+    itemPreviewMuted: {
+        color: '#5A5A5E',
+        fontStyle: 'italic',
     },
-    saveButtonText: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '700',
+    separator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#38383A',
+        marginLeft: 0,
     },
 });
+

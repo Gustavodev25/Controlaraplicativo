@@ -1,23 +1,26 @@
 import { UniversalBackground } from '@/components/UniversalBackground';
+import { APP_LEGAL, PRO_SUBSCRIPTION_DISCLOSURE } from '@/constants/legal';
 import { useAuthContext } from '@/contexts/AuthContext';
 import {
-    checkProStatus,
     finishTransaction,
     getProOffering,
     initializePurchases,
+    openSubscriptionManagement,
     PRO_PRODUCT_ID,
     PRO_PRICE_STRING,
     purchaseErrorListener,
     purchaseProSubscription,
     purchaseUpdatedListener,
     restorePurchases,
-    validateReceiptWithBackend,
+    syncAppleSubscriptionStatus,
+    validatePurchaseWithBackend,
     type PurchaseError,
     type SubscriptionPurchase,
 } from '@/services/iapService';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { Check, LogOut, RefreshCw, Shield, X } from 'lucide-react-native';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -39,6 +42,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const isUserCancelledError = (error: any) => {
+    const code = String(error?.code || '').toLowerCase();
+    return code === 'e_user_cancelled' || code === 'user-cancelled';
+};
+
 export default function PlansScreen() {
     const router = useRouter();
     const { forced } = useLocalSearchParams();
@@ -56,34 +64,53 @@ export default function PlansScreen() {
     const [priceString, setPriceString] = useState(PRO_PRICE_STRING);
     const [iapReady, setIapReady] = useState(false);
     const [alreadyPro, setAlreadyPro] = useState(false);
+    const refreshProfileRef = useRef(refreshProfile);
 
     const isIOS = Platform.OS === 'ios';
-    const currentPlan = profile?.subscription?.plan ?? 'free';
-    const currentStatus = profile?.subscription?.status ?? '';
+    const currentPlan = String(profile?.subscription?.plan ?? 'free').trim().toLowerCase();
+    const currentStatus = String(profile?.subscription?.status ?? '').trim().toLowerCase();
     const isPro =
         (currentPlan === 'pro' || currentPlan === 'premium') &&
-        (currentStatus === 'active' || currentStatus === 'trialing');
+        (currentStatus === 'active' || currentStatus === 'trial' || currentStatus === 'trialing');
+    const hasActivePro = alreadyPro || (!iapReady && isPro);
+    const profileProRef = useRef(isPro);
 
-    // Verifica status e inicializa StoreKit ao abrir
     useEffect(() => {
-        if (!user?.uid) return;
+        refreshProfileRef.current = refreshProfile;
+    }, [refreshProfile]);
+
+    useEffect(() => {
+        profileProRef.current = isPro;
+    }, [isPro]);
+
+    // Verifica status e inicializa StoreKit sempre que a tela entra em foco
+    useFocusEffect(useCallback(() => {
+        if (!user?.uid) return undefined;
         let cancelled = false;
 
         const setup = async () => {
-            await initializePurchases(user.uid);
-            const proActive = await checkProStatus(user.uid);
-            if (cancelled) return;
-            setAlreadyPro(proActive);
+            setIapReady(false);
 
-            const { priceString: price } = await getProOffering();
+            await initializePurchases(user.uid);
+            const [statusResult, offeringResult] = await Promise.all([
+                syncAppleSubscriptionStatus(user.uid),
+                getProOffering(),
+            ]);
+
             if (cancelled) return;
-            setPriceString(price);
+
+            setAlreadyPro(statusResult.success ? statusResult.hasPro : profileProRef.current);
+            setPriceString(offeringResult.priceString);
             setIapReady(true);
+
+            if (statusResult.success) {
+                await refreshProfileRef.current();
+            }
         };
 
         setup();
         return () => { cancelled = true; };
-    }, [user?.uid]);
+    }, [user?.uid]));
 
     // Listeners nativos do StoreKit
     useEffect(() => {
@@ -91,16 +118,17 @@ export default function PlansScreen() {
 
         const purchaseSub = purchaseUpdatedListener(async (purchase: SubscriptionPurchase) => {
             if (purchase.productId !== PRO_PRODUCT_ID) return;
-            const receiptData = purchase.transactionReceipt;
-            if (!receiptData || !user?.uid) return;
+            if (!user?.uid) return;
 
             setIapLoading(true);
             try {
-                const result = await validateReceiptWithBackend(user.uid, receiptData);
-                await finishTransaction({ purchase, isConsumable: false });
+                const result = await validatePurchaseWithBackend(user.uid, purchase);
 
                 if (result.success) {
-                    await refreshProfile();
+                    await finishTransaction({ purchase, isConsumable: false });
+                    const statusResult = await syncAppleSubscriptionStatus(user.uid);
+                    setAlreadyPro(statusResult.hasPro || result.success);
+                    await refreshProfileRef.current();
                     Alert.alert(
                         'Bem-vindo ao Pro!',
                         'Sua assinatura foi ativada com sucesso. Aproveite todos os recursos ilimitados.',
@@ -113,13 +141,19 @@ export default function PlansScreen() {
                         [{ text: 'OK' }]
                     );
                 }
+            } catch (error: any) {
+                Alert.alert(
+                    'Falha na ativacao',
+                    error?.message ?? 'Nao foi possivel ativar a assinatura. Tente novamente.',
+                    [{ text: 'OK' }]
+                );
             } finally {
                 setIapLoading(false);
             }
         });
 
         const errorSub = purchaseErrorListener((error: PurchaseError) => {
-            if ((error as any).code === 'E_USER_CANCELLED') {
+            if (isUserCancelledError(error)) {
                 setIapLoading(false);
                 return;
             }
@@ -131,7 +165,7 @@ export default function PlansScreen() {
             purchaseSub.remove();
             errorSub.remove();
         };
-    }, [user?.uid, isForced]);
+    }, [user?.uid, isForced, isIOS, router]);
 
     // Bloqueia botão voltar no Android se forçado
     useEffect(() => {
@@ -155,7 +189,7 @@ export default function PlansScreen() {
             await purchaseProSubscription();
             // Resultado chega via purchaseUpdatedListener acima
         } catch (e: any) {
-            if (e?.code === 'E_USER_CANCELLED') {
+            if (isUserCancelledError(e)) {
                 setIapLoading(false);
                 return;
             }
@@ -170,8 +204,10 @@ export default function PlansScreen() {
         setRestoring(true);
         try {
             const result = await restorePurchases(user.uid);
+            const statusResult = await syncAppleSubscriptionStatus(user.uid);
+            setAlreadyPro(statusResult.hasPro || result.hasPro);
 
-            if (result.hasPro) {
+            if (result.hasPro || statusResult.hasPro) {
                 await refreshProfile();
                 Alert.alert(
                     'Compra restaurada!',
@@ -185,8 +221,31 @@ export default function PlansScreen() {
                     [{ text: 'OK' }]
                 );
             }
+        } catch (error: any) {
+            Alert.alert(
+                'Erro ao restaurar',
+                error?.message || 'Nao foi possivel restaurar as compras agora.',
+                [{ text: 'OK' }]
+            );
         } finally {
             setRestoring(false);
+        }
+    };
+
+    const handleManageSubscription = async () => {
+        try {
+            await openSubscriptionManagement();
+            if (user?.uid) {
+                const statusResult = await syncAppleSubscriptionStatus(user.uid);
+                setAlreadyPro(statusResult.hasPro);
+                if (statusResult.success) await refreshProfile();
+            }
+        } catch (error: any) {
+            Alert.alert(
+                'Assinaturas da App Store',
+                error?.message || 'Nao foi possivel abrir o gerenciamento de assinaturas.',
+                [{ text: 'OK' }]
+            );
         }
     };
 
@@ -246,7 +305,7 @@ export default function PlansScreen() {
                     glowSize={350}
                     height={280}
                     showParticles={true}
-                    particleCount={15}
+                    particleCount={12}
                 />
             </View>
 
@@ -306,11 +365,33 @@ export default function PlansScreen() {
                     </View>
                 </Animated.View>
 
+                <Animated.View style={[styles.disclosureCard, featuresCardStyle]}>
+                    <View style={styles.disclosureRow}>
+                        <Text style={styles.disclosureLabel}>Assinatura</Text>
+                        <Text style={styles.disclosureValue}>{PRO_SUBSCRIPTION_DISCLOSURE.title}</Text>
+                    </View>
+                    <View style={styles.disclosureDivider} />
+                    <View style={styles.disclosureRow}>
+                        <Text style={styles.disclosureLabel}>Duracao</Text>
+                        <Text style={styles.disclosureValue}>{PRO_SUBSCRIPTION_DISCLOSURE.duration}</Text>
+                    </View>
+                    <View style={styles.disclosureDivider} />
+                    <View style={styles.disclosureRow}>
+                        <Text style={styles.disclosureLabel}>Preco</Text>
+                        <Text style={styles.disclosureValue}>{priceString} por mes</Text>
+                    </View>
+                    <View style={styles.disclosureDivider} />
+                    <View style={styles.disclosureRow}>
+                        <Text style={styles.disclosureLabel}>Renovacao</Text>
+                        <Text style={styles.disclosureValue}>{PRO_SUBSCRIPTION_DISCLOSURE.renewal}</Text>
+                    </View>
+                </Animated.View>
+
                 <Animated.View style={[styles.guaranteeCard, guaranteeCardStyle]}>
                     <View style={styles.guaranteeRow}>
                         <Shield size={16} color="#8E8E93" />
                         <Text style={styles.guaranteeText}>
-                            7 dias de garantia incondicional
+                            Compra segura e gerenciada pela App Store
                         </Text>
                     </View>
                 </Animated.View>
@@ -318,12 +399,21 @@ export default function PlansScreen() {
                 {/* Botão de Compra */}
                 {isIOS && (
                     <Animated.View style={[styles.purchaseSection, buttonStyle]}>
-                        {isPro || alreadyPro ? (
-                            <View style={styles.alreadyProBadge}>
-                                <Check size={18} color="#4CAF50" />
-                                <Text style={styles.alreadyProText}>
-                                    Você já tem o Plano Pro ativo
-                                </Text>
+                        {hasActivePro ? (
+                            <View>
+                                <View style={styles.alreadyProBadge}>
+                                    <Check size={18} color="#4CAF50" />
+                                    <Text style={styles.alreadyProText}>
+                                        Você já tem o Plano Pro ativo
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    style={styles.restoreButton}
+                                    onPress={handleManageSubscription}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.restoreText}>Gerenciar assinatura na App Store</Text>
+                                </TouchableOpacity>
                             </View>
                         ) : (
                             <>
@@ -362,13 +452,38 @@ export default function PlansScreen() {
                                 </TouchableOpacity>
 
                                 <Text style={styles.legalText}>
-                                    A assinatura é renovada automaticamente pela App Store. Cancele a qualquer momento
-                                    nas configurações do iPhone em Ajustes → Apple ID → Assinaturas.
+                                    Plano Pro mensal. A assinatura e renovada automaticamente pela App Store, salvo
+                                    cancelamento ate 24 horas antes do fim do periodo atual. Cancele a qualquer momento
+                                    em Ajustes, Apple ID, Assinaturas.
                                 </Text>
                             </>
                         )}
+
                     </Animated.View>
                 )}
+
+                <View style={styles.legalLinksContainer}>
+                    <Text style={styles.legalIntro}>
+                        Consulte os documentos legais da assinatura.
+                    </Text>
+                    <View style={styles.legalLinksRow}>
+                        <TouchableOpacity
+                            onPress={() => router.push('/settings/legal/privacy' as Href)}
+                            accessibilityRole="link"
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <Text style={styles.legalLinkText}>{APP_LEGAL.privacyTitle}</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.legalSeparator}>|</Text>
+                        <TouchableOpacity
+                            onPress={() => router.push('/settings/legal/terms' as Href)}
+                            accessibilityRole="link"
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <Text style={styles.legalLinkText}>{APP_LEGAL.termsTitle}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
 
                 <View style={{ height: 40 }} />
             </ScrollView>
@@ -442,7 +557,7 @@ const styles = StyleSheet.create({
         fontSize: 42,
         fontWeight: '800',
         color: '#FFFFFF',
-        letterSpacing: -1,
+        letterSpacing: 0,
     },
     planSubtitle: {
         fontSize: 14,
@@ -456,13 +571,48 @@ const styles = StyleSheet.create({
         fontSize: 22,
         fontWeight: '700',
         color: '#E0E0E0',
-        letterSpacing: -0.5,
+        letterSpacing: 0,
     },
     pricePeriod: {
         fontSize: 14,
         fontWeight: '500',
         color: '#666',
         marginTop: 2,
+    },
+    disclosureCard: {
+        backgroundColor: 'rgba(255, 255, 255, 0.035)',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+        marginBottom: 16,
+    },
+    disclosureRow: {
+        minHeight: 42,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 14,
+    },
+    disclosureLabel: {
+        color: '#8E8E93',
+        fontSize: 12,
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0,
+    },
+    disclosureValue: {
+        flex: 1,
+        color: '#F5F5F7',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'right',
+        lineHeight: 18,
+    },
+    disclosureDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     guaranteeCard: {
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
@@ -504,7 +654,7 @@ const styles = StyleSheet.create({
         fontSize: 17,
         fontWeight: '700',
         color: '#000',
-        letterSpacing: -0.3,
+        letterSpacing: 0,
     },
     restoreButton: {
         alignItems: 'center',
@@ -525,6 +675,35 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: 16,
         paddingHorizontal: 8,
+    },
+    legalLinksContainer: {
+        alignItems: 'center',
+        marginTop: 10,
+        paddingHorizontal: 8,
+    },
+    legalIntro: {
+        color: '#6E6E73',
+        fontSize: 11,
+        lineHeight: 16,
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    legalLinksRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    legalLinkText: {
+        color: '#d97757',
+        fontSize: 12,
+        fontWeight: '700',
+        textDecorationLine: 'underline',
+    },
+    legalSeparator: {
+        color: '#4A4A4A',
+        fontSize: 12,
     },
     alreadyProBadge: {
         flexDirection: 'row',

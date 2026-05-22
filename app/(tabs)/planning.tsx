@@ -4,18 +4,20 @@ import { InvestmentStatementModal } from '@/components/InvestmentStatementModal'
 
 import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { DeleteConfirmationModal } from '@/components/ui/DeleteConfirmationModal';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { UniversalBackground } from '@/components/UniversalBackground';
+import { MorphTouchable } from '@/components/ui/MorphTouchable';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
-import { LinearGradient } from 'expo-linear-gradient';
-import LottieView from 'lottie-react-native';
-import { ArrowRight } from 'lucide-react-native';
+import { MoreVertical, Plus } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated as NativeAnimated, Easing as RNEasing, FlatList, Image, StyleSheet, Text, View } from 'react-native';
 import { TextInput } from 'react-native-gesture-handler'; // Ensure TextInput is available or use standard RN
 import Animated, { Easing, FadeInUp, runOnJS, useAnimatedProps, useAnimatedReaction, useAnimatedStyle, useDerivedValue, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
 
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+const HEADER_CONTROL_HEIGHT = 36;
 
 
 const IntervalLottie = ({ source, size, interval = 5000 }: { source: any, size: number, interval?: number }) => {
@@ -130,13 +132,115 @@ const HoldDeletePill = ({ visible, onComplete }: { visible: boolean; onComplete:
     );
 };
 
-const InvestmentCard = React.memo(({ item, index, onPress, onHoldStart, onHoldEnd }: {
+const InvestmentActionDropdown = ({
+    visible,
+    onExtract,
+    onMove,
+    onEdit,
+    onDelete,
+}: {
+    visible: boolean;
+    onExtract: () => void;
+    onMove: () => void;
+    onEdit: () => void;
+    onDelete: () => void;
+}) => {
+    const sheetOpacity = useRef(new NativeAnimated.Value(0)).current;
+    const sheetScaleX = useRef(new NativeAnimated.Value(0.955)).current;
+    const sheetScaleY = useRef(new NativeAnimated.Value(0.935)).current;
+    const sheetY = useRef(new NativeAnimated.Value(-10)).current;
+    const contentOpacity = useRef(new NativeAnimated.Value(0)).current;
+
+    useEffect(() => {
+        if (visible) {
+            sheetOpacity.setValue(0);
+            sheetScaleX.setValue(0.955);
+            sheetScaleY.setValue(0.935);
+            sheetY.setValue(-10);
+            contentOpacity.setValue(0);
+
+            NativeAnimated.parallel([
+                NativeAnimated.timing(sheetOpacity, { toValue: 1, duration: 170, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
+                NativeAnimated.spring(sheetY, { toValue: 0, damping: 18, stiffness: 235, mass: 0.78, useNativeDriver: false }),
+                NativeAnimated.sequence([
+                    NativeAnimated.timing(sheetScaleX, { toValue: 1.018, duration: 165, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }),
+                    NativeAnimated.spring(sheetScaleX, { toValue: 1, damping: 13, stiffness: 190, mass: 0.62, useNativeDriver: false }),
+                ]),
+                NativeAnimated.sequence([
+                    NativeAnimated.timing(sheetScaleY, { toValue: 1.012, duration: 185, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }),
+                    NativeAnimated.spring(sheetScaleY, { toValue: 1, damping: 13, stiffness: 185, mass: 0.62, useNativeDriver: false }),
+                ]),
+                NativeAnimated.timing(contentOpacity, { toValue: 1, duration: 260, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }),
+            ]).start();
+        } else {
+            NativeAnimated.parallel([
+                NativeAnimated.timing(sheetOpacity, { toValue: 0, duration: 130, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
+                NativeAnimated.timing(contentOpacity, { toValue: 0, duration: 110, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
+                NativeAnimated.timing(sheetScaleX, { toValue: 0.955, duration: 170, easing: RNEasing.bezier(0.22, 1, 0.36, 1), useNativeDriver: false }),
+                NativeAnimated.timing(sheetScaleY, { toValue: 0.935, duration: 180, easing: RNEasing.bezier(0.22, 1, 0.36, 1), useNativeDriver: false }),
+                NativeAnimated.timing(sheetY, { toValue: -10, duration: 180, easing: RNEasing.bezier(0.22, 1, 0.36, 1), useNativeDriver: false }),
+            ]).start();
+        }
+    }, [visible]);
+
+    return (
+        <NativeAnimated.View
+            pointerEvents={visible ? 'auto' : 'none'}
+            style={[
+                styles.investmentDropdown,
+                {
+                    opacity: sheetOpacity,
+                    transform: [
+                        { translateY: sheetY },
+                        { scaleX: sheetScaleX },
+                        { scaleY: sheetScaleY },
+                    ],
+                },
+            ]}
+        >
+            <BlurView
+                intensity={16}
+                tint="dark"
+                experimentalBlurMethod="dimezisBlurView"
+                style={{ width: '100%' }}
+            >
+                <View style={styles.investmentDropdownOverlay} />
+                <NativeAnimated.View style={[styles.investmentDropdownContent, { opacity: contentOpacity }]}>
+                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onExtract}>
+                        <Text style={styles.investmentDropdownText}>Extrato</Text>
+                    </MorphTouchable>
+                    <View style={styles.investmentDropdownDivider} />
+                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onMove}>
+                        <Text style={styles.investmentDropdownText}>Movimentar</Text>
+                    </MorphTouchable>
+                    <View style={styles.investmentDropdownDivider} />
+                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onEdit}>
+                        <Text style={styles.investmentDropdownText}>Editar</Text>
+                    </MorphTouchable>
+                    <View style={styles.investmentDropdownDivider} />
+                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onDelete}>
+                        <Text style={styles.investmentDropdownTextDestructive}>Excluir</Text>
+                    </MorphTouchable>
+                </NativeAnimated.View>
+            </BlurView>
+        </NativeAnimated.View>
+    );
+};
+
+const InvestmentCard = React.memo(({ item, index, isMenuOpen, onToggleMenu, onCloseMenu, onExtract, onMove, onEdit, onDelete, onHoldStart, onHoldEnd }: {
     item: Investment,
     index: number,
-    onPress: () => void,
+    isMenuOpen: boolean,
+    onToggleMenu: () => void,
+    onCloseMenu: () => void,
+    onExtract: () => void,
+    onMove: () => void,
+    onEdit: () => void,
+    onDelete: () => void,
     onHoldStart: () => void,
     onHoldEnd: () => void
 }) => {
+
     const percentage = item.targetAmount > 0
         ? Math.min((item.currentAmount / item.targetAmount) * 100, 100)
         : 0;
@@ -175,35 +279,20 @@ const InvestmentCard = React.memo(({ item, index, onPress, onHoldStart, onHoldEn
     return (
         <Animated.View
             entering={FadeInUp.delay(index * 100).springify()}
-            style={[styles.cardContainer, animatedCardStyle]}
+            style={[animatedCardStyle, { marginBottom: 10 }]}
         >
-            <Pressable
-                onPress={onPress}
+            <MorphTouchable
+                radius={16}
+                onPress={onCloseMenu}
                 onPressIn={handlePressIn}
                 onPressOut={handlePressOut}
                 onLongPress={handleLongPress}
-                delayLongPress={200} // Only trigger hold start after 200ms
+                delayLongPress={200}
                 hitSlop={8}
-                style={({ pressed }) => [
-                    styles.cardContent,
-                    { opacity: pressed ? 0.9 : 1 }
-                ]}
+                style={[styles.cardContainer, styles.cardContent]}
             >
-                <LinearGradient
-                    colors={['rgba(255, 255, 255, 0.03)', 'rgba(255, 255, 255, 0.01)']}
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="none"
-                />
-
-                {/* Header: Icon + Name */}
+                {/* Header: Name + Menu (zIndex 20 para o dropdown flutuar acima do conteúdo abaixo) */}
                 <View style={styles.cardHeader}>
-                    <View style={[styles.iconContainer, { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' }]} pointerEvents="none">
-                        <IntervalLottie
-                            source={require('../../assets/caixinhasamarelo.json')}
-                            size={18}
-                            interval={5000}
-                        />
-                    </View>
                     <View style={{ flex: 1 }}>
                         <Text style={styles.cardTitle} numberOfLines={1}>
                             {item.name.includes(' • ') ? (
@@ -227,8 +316,18 @@ const InvestmentCard = React.memo(({ item, index, onPress, onHoldStart, onHoldEn
                             </Text>
                         )}
                     </View>
-                    <ArrowRight size={20} color="#505050" />
+                    <MorphTouchable radius={13} style={styles.cardMenuButton} onPress={onToggleMenu}>
+                        <MoreVertical size={16} color="#A1A1A6" strokeWidth={2.4} />
+                    </MorphTouchable>
                 </View>
+
+                <InvestmentActionDropdown
+                    visible={isMenuOpen}
+                    onExtract={() => { onCloseMenu(); onExtract(); }}
+                    onMove={() => { onCloseMenu(); onMove(); }}
+                    onEdit={() => { onCloseMenu(); onEdit(); }}
+                    onDelete={() => { onCloseMenu(); onDelete(); }}
+                />
 
                 {/* Amounts */}
                 <View style={styles.amountContainer}>
@@ -251,7 +350,7 @@ const InvestmentCard = React.memo(({ item, index, onPress, onHoldStart, onHoldEn
                 {/* Footer: Progress Bar or Sync Info */}
                 {item.source === 'pluggy' ? (
                     item.lastSyncedAt && (
-                        <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 8, marginHorizontal: -12, paddingHorizontal: 12 }}>
+                        <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: '#252525', paddingTop: 8, marginHorizontal: -12, paddingHorizontal: 12 }}>
                             <Text style={[styles.amountLabel, { fontSize: 10, marginBottom: 0, textAlign: 'right' }]}>
                                 Última atualização em {new Date(item.lastSyncedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </Text>
@@ -277,30 +376,21 @@ const InvestmentCard = React.memo(({ item, index, onPress, onHoldStart, onHoldEn
                         </View>
                     )
                 )}
-            </Pressable>
+            </MorphTouchable>
         </Animated.View>
     );
 });
+
+InvestmentCard.displayName = 'InvestmentCard';
 
 export default function PlanningScreen() {
     const { user } = useAuthContext();
     const [investments, setInvestments] = useState<Investment[]>([]);
     const [loading, setLoading] = useState(true);
-    const [loadingDots, setLoadingDots] = useState('');
-
-    useEffect(() => {
-        if (!loading) return;
-        const interval = setInterval(() => {
-            setLoadingDots(prev => {
-                if (prev === '...') return '';
-                return prev + '.';
-            });
-        }, 500);
-        return () => clearInterval(interval);
-    }, [loading]);
     const [createModalVisible, setCreateModalVisible] = useState(false);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+    const [detailsInitialView, setDetailsInitialView] = useState<'menu' | 'movement'>('menu');
     const [statementModalVisible, setStatementModalVisible] = useState(false);
     const [selectedInvestment, setSelectedInvestment] = useState<Investment | null>(null);
 
@@ -311,6 +401,9 @@ export default function PlanningScreen() {
     // Hold Interaction State
     const [holdingItem, setHoldingItem] = useState<Investment | null>(null);
     const ignorePressRef = useRef(false);
+
+    // Action menu (dropdown) state — lifted up so the open card can render above siblings
+    const [openMenuItemId, setOpenMenuItemId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!user) return;
@@ -449,39 +542,68 @@ export default function PlanningScreen() {
             <View style={styles.contentWrapper}>
                 {/* Header Fixo */}
                 <View style={styles.header}>
-                    <Text style={styles.title}>Caixinhas</Text>
+                    <View style={styles.headerTitleRow}>
+                        <Image
+                            source={require('../../assets/images/icon.png')}
+                            style={styles.headerIcon}
+                            resizeMode="contain"
+                        />
+                        <Text style={styles.screenHeader} numberOfLines={1}>
+                            Patrimônio
+                        </Text>
+                    </View>
 
-                    <TouchableOpacity
+                    <MorphTouchable
+                        radius={HEADER_CONTROL_HEIGHT / 2}
                         style={styles.headerButton}
-                        activeOpacity={0.7}
                         onPress={() => setCreateModalVisible(true)}
                     >
-                        <IntervalLottie source={require('../../assets/adicionar.json')} size={18} interval={4000} />
+                        <Plus size={17} color="#FFFFFF" strokeWidth={2.6} />
                         <Text style={styles.headerButtonText}>Criar</Text>
-                    </TouchableOpacity>
+                    </MorphTouchable>
                 </View>
 
 
 
                 {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <LottieView
-                            source={require('@/assets/carregando.json')}
-                            autoPlay
-                            loop
-                            style={{ width: 50, height: 50 }}
-                        />
-                        <Text style={styles.loadingText}>Carregando suas caixinhas{loadingDots}</Text>
-                    </View>
+                    <IosCoreLoader />
                 ) : investments.length > 0 ? (
                     <FlatList
                         data={investments}
                         keyExtractor={(item) => item.id}
+                        extraData={openMenuItemId}
+                        CellRendererComponent={({ item, children, style, ...rest }: any) => {
+                            const isOpen = openMenuItemId === item.id;
+                            return (
+                                <View
+                                    {...rest}
+                                    style={[style, isOpen && { zIndex: 100, elevation: 20 }]}
+                                >
+                                    {children}
+                                </View>
+                            );
+                        }}
                         renderItem={({ item, index }) => (
                             <InvestmentCard
                                 item={item}
                                 index={index}
-                                onPress={() => openDetails(item)}
+                                isMenuOpen={openMenuItemId === item.id}
+                                onToggleMenu={() => setOpenMenuItemId((prev) => (prev === item.id ? null : item.id))}
+                                onCloseMenu={() => setOpenMenuItemId(null)}
+                                onExtract={() => {
+                                    setSelectedInvestment(item);
+                                    setStatementModalVisible(true);
+                                }}
+                                onMove={() => {
+                                    setSelectedInvestment(item);
+                                    setDetailsInitialView('movement');
+                                    setDetailsModalVisible(true);
+                                }}
+                                onEdit={() => {
+                                    setSelectedInvestment(item);
+                                    setEditModalVisible(true);
+                                }}
+                                onDelete={() => handleRequestDelete(item)}
                                 onHoldStart={() => {
                                     ignorePressRef.current = false;
                                     setHoldingItem(item);
@@ -494,41 +616,23 @@ export default function PlanningScreen() {
                         showsVerticalScrollIndicator={false}
                     />
                 ) : (
-                    <ScrollView
-                        style={styles.container}
-                        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingBottom: 100 }}
-                        showsVerticalScrollIndicator={false}
-                    >
-                        {/* Empty State */}
-                        <View style={styles.emptyContainer}>
-                            <View style={styles.emptyIconWrapper}>
-                                <IntervalLottie
-                                    source={require('../../assets/caixinhas.json')}
-                                    size={120}
-                                    interval={5000}
-                                />
-                            </View>
-
-                            <Text style={styles.emptyTitle}>
-                                Nenhuma caixinha
-                            </Text>
-
-                            <Text style={styles.emptyText}>
-                                Crie caixinhas para organizar seus objetivos financeiros e sonhos.
-                            </Text>
-
-                            <TouchableOpacity
-                                style={styles.emptyButton}
-                                activeOpacity={0.8}
-                                onPress={() => setCreateModalVisible(true)}
-                            >
-                                <IntervalLottie source={require('../../assets/adicionar.json')} size={20} interval={4000} />
-                                <Text style={styles.emptyButtonText}>
-                                    Nova Caixinha
-                                </Text>
-                            </TouchableOpacity>
+                    <View style={styles.emptyContainer}>
+                        <View style={styles.emptyIconWrapper}>
+                            <IntervalLottie
+                                source={require('../../assets/caixinhas.json')}
+                                size={48}
+                                interval={3000}
+                            />
                         </View>
-                    </ScrollView>
+
+                        <Text style={styles.emptyTitle}>
+                            Nenhuma caixinha
+                        </Text>
+
+                        <Text style={styles.emptyText}>
+                            Crie caixinhas para organizar seus objetivos financeiros.
+                        </Text>
+                    </View>
                 )}
             </View>
 
@@ -561,9 +665,10 @@ export default function PlanningScreen() {
             {selectedInvestment && (
                 <InvestmentDetailsModal
                     visible={detailsModalVisible}
+                    initialView={detailsInitialView}
                     onClose={() => {
                         setDetailsModalVisible(false);
-                        // Limpar selectedInvestment após a animação de fechamento
+                        setDetailsInitialView('menu');
                         setTimeout(() => setSelectedInvestment(null), 350);
                     }}
                     onSaveMovement={handleUpdateBalance}
@@ -635,47 +740,48 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-    },
-    container: {
-        flex: 1,
-        paddingHorizontal: 20,
+        paddingTop: 58,
+        zIndex: 10,
     },
     listContainer: {
         paddingTop: 0,
-        paddingHorizontal: 20,
+        paddingHorizontal: 22,
         paddingBottom: 100,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 12,
-    },
-    loadingText: {
-        color: '#888',
-        fontSize: 14,
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: 60,
-        paddingBottom: 20,
-        paddingHorizontal: 20,
+        paddingHorizontal: 22,
+        marginBottom: 12,
         zIndex: 10,
     },
-    title: {
-        fontSize: 24,
-        fontWeight: '700',
+    headerTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        flex: 1,
+        minWidth: 0,
+    },
+    headerIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+    },
+    screenHeader: {
+        fontSize: 18,
+        fontFamily: 'AROneSans_400Regular',
         color: '#FFFFFF',
+        flexShrink: 1,
     },
     headerButton: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         backgroundColor: '#D97757',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 20,
+        height: HEADER_CONTROL_HEIGHT,
+        paddingHorizontal: 14,
+        borderRadius: HEADER_CONTROL_HEIGHT / 2,
         gap: 6,
     },
     headerButtonText: {
@@ -685,12 +791,10 @@ const styles = StyleSheet.create({
     },
     // Card Styles
     cardContainer: {
-        marginBottom: 10,
         borderRadius: 16,
-        overflow: 'hidden',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-        backgroundColor: '#141414',
+        borderColor: '#252525',
+        backgroundColor: '#101010',
     },
     cardContent: {
         padding: 12,
@@ -700,6 +804,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 10,
         gap: 8,
+        position: 'relative',
+        zIndex: 20,
     },
     iconContainer: {
         width: 32,
@@ -767,7 +873,7 @@ const styles = StyleSheet.create({
     progressBarBg: {
         width: '100%',
         height: 4,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: '#252525',
         borderRadius: 2,
         overflow: 'hidden',
     },
@@ -779,43 +885,28 @@ const styles = StyleSheet.create({
     emptyContainer: {
         alignItems: 'center',
         justifyContent: 'center',
-        width: '100%',
+        paddingHorizontal: 28,
+        paddingBottom: 96,
+        flex: 1,
     },
     emptyIconWrapper: {
-        marginBottom: 0,
         alignItems: 'center',
         justifyContent: 'center',
     },
     emptyTitle: {
-        fontSize: 20,
+        fontSize: 15,
         fontWeight: '600',
-        color: '#FFF',
-        marginBottom: 12,
+        color: '#F5F5F7',
+        marginTop: 8,
+        marginBottom: 4,
         textAlign: 'center',
     },
     emptyText: {
-        fontSize: 15,
-        color: '#888',
+        fontSize: 13,
+        color: '#8E8E93',
         textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: 32,
-        paddingHorizontal: 20,
-    },
-    emptyButton: {
-        backgroundColor: '#D97757',
-        paddingHorizontal: 32,
-        paddingVertical: 14,
-        borderRadius: 100,
-        elevation: 0,
-        shadowColor: 'transparent',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    emptyButtonText: {
-        color: '#FFF',
-        fontSize: 15,
-        fontWeight: '600',
+        maxWidth: 232,
+        lineHeight: 18,
     },
     // Open Finance Pill Styles
     openFinancePill: {
@@ -845,13 +936,13 @@ const styles = StyleSheet.create({
         elevation: 50,
     },
     holdPill: {
-        backgroundColor: '#1E1E1E',
+        backgroundColor: '#101010',
         borderRadius: 14,
         height: 28, // Ultra compact
         width: 120, // Very small width
         paddingHorizontal: 10,
         borderWidth: 1,
-        borderColor: '#333',
+        borderColor: '#252525',
         overflow: 'hidden',
         position: 'relative',
         alignItems: 'center',
@@ -880,5 +971,57 @@ const styles = StyleSheet.create({
         margin: 0,
         includeFontPadding: false,
         textAlignVertical: 'center',
+    },
+    cardMenuButton: {
+        width: 28,
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    // Dropdown do card de investimento
+    investmentDropdown: {
+        position: 'absolute',
+        top: 44,
+        right: 8,
+        width: 160,
+        zIndex: 1000,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.07)',
+        overflow: 'hidden',
+        borderRadius: 20,
+        backgroundColor: 'rgba(17, 17, 17, 0.94)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+        elevation: 12,
+    },
+    investmentDropdownOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(17, 17, 17, 0.94)',
+    },
+    investmentDropdownContent: {
+        paddingVertical: 4,
+    },
+    investmentDropdownItem: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    investmentDropdownText: {
+        color: '#E0E0E0',
+        fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    investmentDropdownTextDestructive: {
+        color: '#FF6B6B',
+        fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    investmentDropdownDivider: {
+        height: 1,
+        width: '100%',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
     },
 });

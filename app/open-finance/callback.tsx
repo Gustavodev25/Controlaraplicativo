@@ -1,7 +1,8 @@
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { openFinanceConnectionState } from '@/services/openFinanceConnectionState';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 const normalizeParam = (value: string | string[] | undefined): string | null => {
     if (Array.isArray(value)) return value[0] ?? null;
@@ -47,10 +48,7 @@ export default function OpenFinanceCallbackScreen() {
     }, [params.error, params.itemId, params.status, router]);
 
     return (
-        <View style={styles.container}>
-            <ActivityIndicator size="large" color="#D97757" />
-            <Text style={styles.text}>Finalizando conexão bancária...</Text>
-        </View>
+        <IosCoreLoader style={styles.container} />
     );
 }
 
@@ -58,14 +56,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#0C0C0C',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 12,
         paddingHorizontal: 24
     },
-    text: {
-        color: '#E5E7EB',
-        fontSize: 14,
-        textAlign: 'center'
-    }
 });

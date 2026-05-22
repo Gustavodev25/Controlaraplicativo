@@ -1,8 +1,69 @@
-import { buildInvoices, buildInvoicesPluggyFirst, CreditCardAccount, formatDate, normalizePluggyDate, parseDate, toDateStr, Transaction } from '../services/invoiceBuilder';
+import { buildInvoices, buildInvoicesPluggyFirst, calculateInvoicePeriodDates, CreditCardAccount, formatDate, normalizePluggyDate, parseDate, toDateStr, Transaction } from '../services/invoiceBuilder';
 
 process.env.TZ = 'UTC';
 
+afterEach(() => {
+  jest.useRealTimers();
+});
+
+test('rotates current bill automatically when due date is today', () => {
+  const card: CreditCardAccount = {
+    id: 'rotating-card',
+    type: 'credit',
+    currentBill: {
+      id: 'bill_2026-04',
+      periodStart: '2026-03-21',
+      periodEnd: '2026-04-20',
+      dueDate: '2026-05-01',
+      totalAmount: 150
+    }
+  } as any;
+
+  const periods = calculateInvoicePeriodDates(card, new Date(2026, 4, 1, 9, 0, 0));
+
+  expect(toDateStr(periods.lastClosingDate)).toBe('2026-04-20');
+  expect(toDateStr(periods.currentClosingDate)).toBe('2026-05-20');
+  expect(toDateStr(periods.currentDueDate)).toBe('2026-06-01');
+});
+
+test('keeps May as current when old closed bill still has future due date', () => {
+  jest.useFakeTimers().setSystemTime(new Date(2026, 4, 1, 9, 0, 0));
+
+  const card: CreditCardAccount = {
+    id: 'gold-card',
+    type: 'credit',
+    currentBill: {
+      id: 'bill_2026-04',
+      periodStart: '2026-03-29',
+      periodEnd: '2026-04-28',
+      dueDate: '2026-05-10',
+      totalAmount: 706.33
+    }
+  } as any;
+
+  const transactions: Transaction[] = [
+    {
+      id: 'may_tx',
+      description: 'Ec *Pichauinforma 7/10',
+      amount: 396.43,
+      date: '2026-05-01',
+      type: 'expense',
+      cardId: 'gold-card',
+      creditCardMetadata: { billId: 'bill_2026-04' }
+    }
+  ];
+
+  const result = buildInvoicesPluggyFirst(card, transactions, 'gold-card');
+
+  expect(result.currentInvoice.referenceMonth).toBe('2026-05');
+  expect(toDateStr(result.periods.currentClosingDate)).toBe('2026-05-28');
+  expect(toDateStr(result.periods.currentDueDate)).toBe('2026-06-10');
+  expect(result.currentInvoice.items.some((item) => item.id === 'may_tx')).toBe(true);
+});
+
 test('Nubank - periodStart/periodEnd classification places transactions in closedInvoice', () => {
+  jest.useFakeTimers().setSystemTime(new Date(2026, 1, 15, 9, 0, 0));
+
   const card: CreditCardAccount = {
     id: 'nubank',
     type: 'credit',
@@ -40,6 +101,8 @@ test('Nubank - periodStart/periodEnd classification places transactions in close
 });
 
 test('Bradesco - merges multiple bills in same month into single invoice', () => {
+  jest.useFakeTimers().setSystemTime(new Date(2026, 0, 31, 9, 0, 0));
+
   // Simula problema do Bradesco que divide uma fatura em múltiplos bills (29 jan até 01 fev)
   const card: CreditCardAccount = {
     id: 'bradesco-gol',
@@ -96,29 +159,19 @@ test('Bradesco - merges multiple bills in same month into single invoice', () =>
 
   const result = buildInvoicesPluggyFirst(card, transactions, 'bradesco-gol');
   
-  // Coleta todas as transações de currentInvoice e futureInvoices
-  const allItems = [
-    ...result.currentInvoice.items,
-    ...(result.futureInvoices[0]?.items || [])
+  const invoiceBuckets = [
+    result.beforeLastInvoice,
+    result.closedInvoice,
+    result.currentInvoice,
+    ...result.futureInvoices
   ];
-  
-  // eslint-disable-next-line no-console
-  console.log('Bradesco merged invoice - currentInvoice:', {
-    total: result.currentInvoice.total,
-    itemCount: result.currentInvoice.items.length,
-    items: result.currentInvoice.items.map(i => ({ desc: i.description, amount: i.amount }))
-  });
-  // eslint-disable-next-line no-console
-  console.log('Bradesco merged invoice - future[0]:', {
-    total: result.futureInvoices[0]?.total || 0,
-    itemCount: result.futureInvoices[0]?.items.length || 0,
-    items: (result.futureInvoices[0]?.items || []).map(i => ({ desc: i.description, amount: i.amount }))
+  const mergedInvoice = invoiceBuckets.find((invoice) => {
+    const descriptions = new Set(invoice.items.map((item) => item.description));
+    return descriptions.has('COMPRA 1') && descriptions.has('COMPRA 2') && descriptions.has('COMPRA 3');
   });
   
   // Verifica que todas as 3 transações estão juntas (mescladas)
-  expect(allItems.some(i => i.description === 'COMPRA 1')).toBe(true);
-  expect(allItems.some(i => i.description === 'COMPRA 2')).toBe(true);
-  expect(allItems.some(i => i.description === 'COMPRA 3')).toBe(true);
+  expect(mergedInvoice).toBeTruthy();
 });
 
 test('normalizePluggyDate normaliza ISO com timezone e data simples', () => {

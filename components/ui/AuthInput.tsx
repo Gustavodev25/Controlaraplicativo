@@ -1,6 +1,8 @@
 import { LucideIcon } from 'lucide-react-native';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
+import { ThemedText } from '@/components/themed-text';
+
 
 interface AuthInputProps extends TextInputProps {
     label: string;
@@ -22,13 +24,13 @@ export const AuthInput = ({ label, icon: Icon, rightIcon, error, style, ...props
             ]}>
                 {Icon && (
                     <View style={styles.iconContainer}>
-                        <Icon size={18} color={isFocused ? '#d97757' : '#6b7280'} />
+                        <Icon size={20} color={isFocused ? '#d97757' : '#9ca3af'} />
                     </View>
                 )}
                 <TextInput
                     style={[
                         styles.input,
-                        Icon ? { paddingLeft: 40 } : null,
+                        Icon ? { paddingLeft: 44 } : null,
                         rightIcon ? { paddingRight: 44 } : null,
                         style
                     ]}
@@ -43,60 +45,59 @@ export const AuthInput = ({ label, icon: Icon, rightIcon, error, style, ...props
                     </View>
                 )}
             </View>
-            {error && <Text style={styles.errorText}>{error}</Text>}
+            {error && <ThemedText style={styles.errorText}>{error}</ThemedText>}
         </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
-        marginBottom: 10,
+        marginBottom: 12,
     },
     label: {
-        fontSize: 10,
-        fontWeight: 'bold',
-        color: '#9ca3af',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-        marginBottom: 6,
-        paddingLeft: 4,
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#faf9f5',
+        marginBottom: 8,
+        paddingLeft: 2,
     },
     inputContainer: {
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#1C1C1E', // iOS Dark Gray
         borderWidth: 1,
-        borderColor: '#2B2B2B',
-        borderRadius: 12,
-        height: 50,
+        borderColor: '#2C2C2E',
+        borderRadius: 14,
+        height: 52,
         justifyContent: 'center',
         position: 'relative',
     },
     focusedContainer: {
         borderColor: '#d97757',
+        backgroundColor: '#242426',
     },
     errorContainer: {
         borderColor: '#ef4444',
     },
     iconContainer: {
         position: 'absolute',
-        left: 12,
+        left: 14,
         zIndex: 10,
     },
     rightIconContainer: {
         position: 'absolute',
-        right: 12,
+        right: 14,
         zIndex: 10,
     },
     input: {
         flex: 1,
         color: '#faf9f5',
-        fontSize: 14,
-        paddingHorizontal: 12,
+        fontSize: 16,
+        paddingHorizontal: 16,
         height: '100%',
     },
     errorText: {
         color: '#ef4444',
         fontSize: 12,
-        marginTop: 4,
+        marginTop: 6,
         paddingLeft: 4,
     }
 });

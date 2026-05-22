@@ -1,4 +1,4 @@
-import { BottomModal } from '@/components/ui/BottomModal';
+import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { databaseService } from '@/services/firebase';
 import { AlertCircle, Clock, Zap } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
@@ -26,11 +26,12 @@ export function CreditsModal({ visible, onClose, credits, userId }: CreditsModal
     }, []);
 
     return (
-        <BottomModal
+        <ModalPadrao
             visible={visible}
             onClose={onClose}
             title="Créditos de Sincronização"
-            height="auto"
+            titleAlign="start"
+            maxHeightRatio={0.82}
         >
             <View style={styles.container}>
                 <Text style={styles.sectionHeader}>STATUS DA CONTA</Text>
@@ -90,7 +91,7 @@ export function CreditsModal({ visible, onClose, credits, userId }: CreditsModal
                     </View>
                 </View>
             </View>
-        </BottomModal>
+        </ModalPadrao>
     );
 }
 

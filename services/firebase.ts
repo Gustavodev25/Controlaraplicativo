@@ -1255,8 +1255,11 @@ export const databaseService = {
 
             const transactionsRef = collection(db, 'users', userId, 'transactions');
             const creditCardTransactionsRef = collection(db, 'users', userId, 'creditCardTransactions');
+            const investmentsRef = collection(db, 'users', userId, 'investments');
             const checkingDocRefs = new Map<string, any>();
             const creditDocRefs = new Map<string, any>();
+            const investmentDocRefs = new Map<string, any>();
+            const investmentHistoryDocRefs = new Map<string, any>();
 
             for (const accountId of normalizedAccountIds) {
                 const [
@@ -1264,13 +1267,15 @@ export const databaseService = {
                     checkingByPluggyAccount,
                     creditByCardId,
                     creditByAccountId,
-                    creditByPluggyRawAccountId
+                    creditByPluggyRawAccountId,
+                    investmentsByPluggyAccount
                 ] = await Promise.all([
                     getDocs(query(transactionsRef, where('accountId', '==', accountId))),
                     getDocs(query(transactionsRef, where('pluggyAccountId', '==', accountId))),
                     getDocs(query(creditCardTransactionsRef, where('cardId', '==', accountId))),
                     getDocs(query(creditCardTransactionsRef, where('accountId', '==', accountId))),
-                    getDocs(query(creditCardTransactionsRef, where('pluggyRaw.accountId', '==', accountId)))
+                    getDocs(query(creditCardTransactionsRef, where('pluggyRaw.accountId', '==', accountId))),
+                    getDocs(query(investmentsRef, where('pluggyAccountId', '==', accountId)))
                 ]);
 
                 [checkingByAccount, checkingByPluggyAccount].forEach((snapshot) => {
@@ -1284,10 +1289,29 @@ export const databaseService = {
                         creditDocRefs.set(snap.ref.path, snap.ref);
                     });
                 });
+
+                investmentsByPluggyAccount.docs.forEach((snap) => {
+                    investmentDocRefs.set(snap.ref.path, snap.ref);
+                });
+
+                const savingsInvestmentRef = doc(db, 'users', userId, 'investments', `savings_${accountId}`);
+                const savingsInvestmentSnap = await getDoc(savingsInvestmentRef);
+                if (savingsInvestmentSnap.exists()) {
+                    investmentDocRefs.set(savingsInvestmentRef.path, savingsInvestmentRef);
+                }
+            }
+
+            for (const investmentRef of investmentDocRefs.values()) {
+                const historySnapshot = await getDocs(collection(db, investmentRef.path, 'history'));
+                historySnapshot.docs.forEach((snap) => {
+                    investmentHistoryDocRefs.set(snap.ref.path, snap.ref);
+                });
             }
 
             const deletedCheckingTransactions = await deleteDocRefsInChunks([...checkingDocRefs.values()]);
             const deletedCreditCardTransactions = await deleteDocRefsInChunks([...creditDocRefs.values()]);
+            const deletedInvestmentHistory = await deleteDocRefsInChunks([...investmentHistoryDocRefs.values()]);
+            const deletedInvestments = await deleteDocRefsInChunks([...investmentDocRefs.values()]);
             const accountDocRefs = normalizedAccountIds.map((accountId) => doc(db, 'users', userId, 'accounts', accountId));
             const deletedAccounts = await deleteDocRefsInChunks(accountDocRefs);
 
@@ -1296,7 +1320,9 @@ export const databaseService = {
                 deleted: {
                     accounts: deletedAccounts,
                     checkingTransactions: deletedCheckingTransactions,
-                    creditCardTransactions: deletedCreditCardTransactions
+                    creditCardTransactions: deletedCreditCardTransactions,
+                    investments: deletedInvestments,
+                    investmentHistory: deletedInvestmentHistory
                 }
             };
         } catch (error: any) {
@@ -1339,6 +1365,8 @@ export const databaseService = {
             // Use Pluggy account ID as document ID for consistency
             const accountId = accountData.id;
             const docRef = doc(db, 'users', userId, 'accounts', accountId);
+            const existingAccountSnap = await getDoc(docRef);
+            const existingAccountData = existingAccountSnap.exists() ? existingAccountSnap.data() : null;
             const effectiveConnector = accountData.connector ?? connector ?? null;
             const normalizedConnector = normalizeConnectorForStorage(effectiveConnector);
 
@@ -1369,7 +1397,7 @@ export const databaseService = {
             const rawCreditCloseDate = accountData.creditData?.balanceCloseDate || null;
             const rawCreditDueDate = accountData.creditData?.balanceDueDate || null;
 
-            console.log('[Pluggy] Datas brutas da API creditData:', {
+            if (__DEV__) console.log('[Pluggy] Datas brutas da API creditData:', {
                 accountId,
                 accountName: accountData.name,
                 'creditData.balanceCloseDate': rawCreditCloseDate,
@@ -1406,7 +1434,7 @@ export const databaseService = {
                 finalBalanceDueDate = normalizePluggyDateField(currentBill.dueDate, 'fallback:currentBill.dueDate');
             }
 
-            console.log('[Pluggy] Datas finais normalizadas para salvar:', {
+            if (__DEV__) console.log('[Pluggy] Datas finais normalizadas para salvar:', {
                 accountId,
                 finalBalanceCloseDate,
                 finalBalanceDueDate,
@@ -1475,7 +1503,7 @@ export const databaseService = {
 
                 // Timestamps
                 lastSyncedAt: new Date().toISOString(),
-                createdAt: Timestamp.now(),
+                createdAt: existingAccountData?.createdAt ?? Timestamp.now(),
                 updatedAt: Timestamp.now()
             };
 
@@ -2601,7 +2629,7 @@ export const databaseService = {
             const recurrencesRef = collection(db, 'users', userId, 'recurrences');
             const qRec = query(recurrencesRef, orderBy('dueDate', 'asc'));
             const recSnap = await getDocs(qRec);
-            const manualItems = recSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const manualItems = recSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), sourceCollection: 'recurrences' }));
 
             // 2. Get items from 'subscriptions' collection (if exists)
             // 2. Get items from 'subscriptions' collection (if exists)
@@ -2626,6 +2654,7 @@ export const databaseService = {
                         return new Date().toISOString();
                     })(),
                     type: 'subscription',
+                    sourceCollection: 'subscriptions',
                     status: isPaid ? 'paid' : 'pending',
                     frequency: data.frequency || data.cycle || 'monthly',
                     category: data.category || 'Assinaturas',
@@ -2654,6 +2683,7 @@ export const databaseService = {
                     amount: Number(data.amount || data.value || 0),
                     dueDate: rawDate.split('T')[0],
                     type: 'reminder',
+                    sourceCollection: 'reminders',
                     status: ((data.status && data.status.toLowerCase() === 'paid') || data.paid === true) ? 'paid' : 'pending',
                     frequency: data.frequency || data.cycle || data.recurrence || 'monthly',
                     category: data.category || 'Lembretes',
@@ -2839,6 +2869,7 @@ export const databaseService = {
                     isRecurrence: true,
                     recurrence: recurrence.frequency, // Duplicate frequency info
                     type: 'subscription',
+                    transactionType: recurrence.transactionType === 'income' ? 'income' : 'expense',
                     createdAt: Timestamp.now(),
                     updatedAt: Timestamp.now()
                 };
@@ -2890,6 +2921,7 @@ export const databaseService = {
                     dueDate: data.dueDate,
                     date: data.dueDate,
                     recurrence: data.frequency, // Web usa recurrence
+                    transactionType: data.transactionType === 'income' ? 'income' : (data.transactionType === 'expense' ? 'expense' : undefined),
                     updatedAt: Timestamp.now()
                 };
             }
@@ -3121,7 +3153,12 @@ export const databaseService = {
 
     // Delete recurrence
     // Delete recurrence
-    deleteRecurrence: async (userId: string, recurrenceId: string, type: 'subscription' | 'reminder' = 'subscription') => {
+    deleteRecurrence: async (
+        userId: string,
+        recurrenceId: string,
+        type: 'subscription' | 'reminder' = 'subscription',
+        sourceCollection?: 'recurrences' | 'subscriptions' | 'reminders'
+    ) => {
         try {
             // Check if this is a virtual item (auto-detected, future transaction, or bill)
             const isVirtual = recurrenceId.startsWith('auto_') || recurrenceId.startsWith('tx_') || recurrenceId.startsWith('bill_');
@@ -3141,14 +3178,22 @@ export const databaseService = {
                 return { success: true };
             }
 
-            // For real documents, delete normally
-            const collectionName = type === 'subscription' ? 'subscriptions' : 'reminders';
+            // For real documents, delete from the source collection when known.
+            const collectionName = sourceCollection || (type === 'subscription' ? 'subscriptions' : 'reminders');
             const docRef = doc(db, 'users', userId, collectionName, recurrenceId);
             await deleteDoc(docRef);
 
-            // Tenta deletar também da collection legada "recurrences" caso o item seja muito antigo
-            const legacyDocRef = doc(db, 'users', userId, 'recurrences', recurrenceId);
-            await deleteDoc(legacyDocRef);
+            // Tenta deletar também da collection legada quando o item veio das coleções novas.
+            if (collectionName !== 'recurrences') {
+                try {
+                    const legacyDocRef = doc(db, 'users', userId, 'recurrences', recurrenceId);
+                    await deleteDoc(legacyDocRef);
+                } catch (legacyError) {
+                    if (__DEV__) {
+                        console.warn('[Firebase] Ignoring legacy recurrence delete failure:', legacyError);
+                    }
+                }
+            }
 
             return { success: true };
         } catch (error: any) {
@@ -3232,13 +3277,19 @@ export const databaseService = {
             const investmentsRef = collection(db, 'users', userId, 'investments');
             const newDocRef = doc(investmentsRef);
 
-            await setDoc(newDocRef, {
+            const payload: Record<string, any> = {
                 ...investment,
                 createdAt: investment.createdAt || new Date().toISOString().split('T')[0],
                 currentAmount: Number(investment.currentAmount || 0),
                 targetAmount: Number(investment.targetAmount || 0),
                 updatedAt: Timestamp.now()
+            };
+            // Firestore rejeita undefined — remove campos opcionais não preenchidos (ex.: deadline)
+            Object.keys(payload).forEach((key) => {
+                if (payload[key] === undefined) delete payload[key];
             });
+
+            await setDoc(newDocRef, payload);
 
             return { success: true, id: newDocRef.id };
         } catch (error: any) {
@@ -3251,10 +3302,15 @@ export const databaseService = {
     updateInvestment: async (userId: string, investmentId: string, data: any) => {
         try {
             const docRef = doc(db, 'users', userId, 'investments', investmentId);
-            await updateDoc(docRef, {
+            const payload: Record<string, any> = {
                 ...data,
                 updatedAt: Timestamp.now()
+            };
+            // Firestore rejeita undefined — remove campos opcionais não preenchidos
+            Object.keys(payload).forEach((key) => {
+                if (payload[key] === undefined) delete payload[key];
             });
+            await updateDoc(docRef, payload);
             return { success: true };
         } catch (error: any) {
             console.error('[Firebase] Error updating investment:', error);
@@ -3806,6 +3862,7 @@ export const databaseService = {
                 return {
                     id: doc.id,
                     ...data,
+                    sourceCollection: 'recurrences',
                     status: ((data.status && data.status.toLowerCase() === 'paid') || data.paid === true) ? 'paid' : 'pending'
                 };
             });
@@ -3831,12 +3888,14 @@ export const databaseService = {
                     amount: Number(data.amount || data.value || data.price || 0),
                     dueDate: rawDate.split('T')[0],
                     type: 'subscription',
+                    sourceCollection: 'subscriptions',
                     status: ((data.status && data.status.toLowerCase() === 'paid') || data.paid === true) ? 'paid' : 'pending',
                     frequency: data.frequency || data.cycle || 'monthly',
                     category: data.category || 'Assinaturas',
                     logo: data.logo || data.icon || null,
                     cancellationDate: data.cancellationDate || null,
-                    paidMonths: data.paidMonths || []
+                    paidMonths: data.paidMonths || [],
+                    transactionType: data.transactionType === 'income' ? 'income' : 'expense'
                 };
             });
             notify();
@@ -3861,6 +3920,7 @@ export const databaseService = {
                     amount: Number(data.amount || data.value || 0),
                     dueDate: rawDate.split('T')[0],
                     type: 'reminder',
+                    sourceCollection: 'reminders',
                     status: ((data.status && data.status.toLowerCase() === 'paid') || data.paid === true) ? 'paid' : 'pending',
                     frequency: data.frequency || data.cycle || data.recurrence || 'monthly',
                     category: data.category || 'Lembretes',

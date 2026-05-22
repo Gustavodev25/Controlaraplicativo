@@ -1,36 +1,33 @@
 import { BankConnectorLogo } from '@/components/open-finance/BankConnectorLogo';
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
-import { DynamicText } from '@/components/ui/DynamicText';
 import { databaseService } from '@/services/firebase';
 import { notificationService } from '@/services/notifications';
+import { openFinanceSyncBus } from '@/services/openFinanceSyncBus';
+import { BlurView } from 'expo-blur';
 import {
     CheckCircle,
-    Database,
-    Eye,
-    EyeOff,
-    Landmark,
-    Link2,
     Lock,
-    ScrollText
+    MoreVertical,
+    RefreshCw,
+    XCircle
 } from 'lucide-react-native';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Alert,
+    Animated as NativeAnimated,
+    Easing,
     LayoutAnimation,
     Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
     UIManager,
+    useWindowDimensions,
     View
 } from 'react-native';
-import Animated, {
-    Extrapolate,
-    FadeIn,
-    interpolate,
+import Reanimated, {
     useAnimatedStyle,
     useSharedValue,
-    withTiming
+    withSpring
 } from 'react-native-reanimated';
 
 // Enable LayoutAnimation on Android
@@ -39,22 +36,6 @@ if (Platform.OS === 'android') {
         UIManager.setLayoutAnimationEnabledExperimental(true);
     }
 }
-
-const IntervalLottie = React.memo(({ source, size = 20, interval = 3000 }: { source: any; size?: number; interval?: number }) => (
-    <DelayedLoopLottie
-        source={source}
-        style={{ width: size, height: size }}
-        delay={interval}
-        initialDelay={100}
-        renderMode="HARDWARE"
-        resizeMode="contain"
-        jitterRatio={0.15}
-    />
-));
-IntervalLottie.displayName = 'ConnectedBankCardIntervalLottie';
-
-// Components moved to bottom
-
 
 export type BankSyncStatus = {
     step: 'idle' | 'connecting' | 'fetching_accounts' | 'saving_accounts' | 'fetching_transactions' | 'saving_transactions' | 'done' | 'error';
@@ -75,24 +56,267 @@ interface ConnectedBankCardProps {
     onConsumeCredit?: (action: 'sync', itemId?: string) => Promise<{ success: boolean; error?: string }>;
     hiddenAccountIds?: string[];
     onToggleVisibility?: (accountId: string) => void;
+    onStatusChange?: (group: any, status: BankSyncStatus) => void;
 }
-
-const STEPS = [
-    { key: 'connecting', label: 'Conectando...', icon: Link2 },
-    { key: 'fetching_accounts', label: 'Verificando contas', icon: Landmark },
-    { key: 'fetching_transactions', label: 'Buscando transações', icon: ScrollText },
-    { key: 'saving_transactions', label: 'Processando dados', icon: Database },
-];
 
 // Helper Component: Minimalist progress indicator
 // Removed complex stepper components (PulseRing, StepIcon, StepItem) for a minimalist design
 
-const formatCurrency = (value: number) => {
-    return value.toLocaleString('pt-BR', {
-        style: 'currency',
-        currency: 'BRL'
-    });
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+});
+
+const formatCurrency = (value: number) => currencyFormatter.format(value);
+
+const splitCurrency = (value: number) => {
+    const safeValue = Number.isFinite(value) ? value : 0;
+    const isNegative = safeValue < 0;
+    const absValue = Math.abs(safeValue);
+    const integerPart = Math.floor(absValue);
+    const fractionPart = Math.round((absValue - integerPart) * 100);
+    const integerStr = integerPart.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    const fractionStr = fractionPart.toString().padStart(2, '0');
+
+    return {
+        currency: isNegative ? '-R$' : 'R$',
+        amount: `${integerStr},${fractionStr}`
+    };
 };
+
+const isCreditAccount = (account: any) => (
+    account.type === 'CREDIT' ||
+    account.type === 'credit' ||
+    account.type === 'CREDIT_CARD' ||
+    account.subtype === 'CREDIT_CARD'
+);
+
+const getAccountTypeLabel = (account: any) => {
+    if (isCreditAccount(account)) return 'Cartão de Crédito';
+
+    if (account.subtype === 'SAVINGS_ACCOUNT') return 'Conta Poupança';
+    if (account.subtype === 'CHECKING_ACCOUNT' || account.type === 'BANK' || account.type === 'checking') {
+        return 'Conta Corrente';
+    }
+
+    return 'Conta Corrente';
+};
+
+const getAccountNumericValue = (account: any) => {
+    const value = isCreditAccount(account)
+        ? (account.creditLimit ?? account.creditData?.creditLimit ?? account.availableCreditLimit ?? account.creditData?.availableCreditLimit)
+        : account.balance;
+
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
+const normalizeDateValue = (value: any): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value?.toDate === 'function') return value.toDate();
+    if (typeof value?.seconds === 'number') return new Date(value.seconds * 1000);
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getLatestSyncDate = (accounts: any[]) => {
+    return accounts.reduce<Date | null>((latest, account) => {
+        const date = normalizeDateValue(account.lastSyncedAt || account.syncedAt || account.updatedAt);
+        if (!date) return latest;
+        if (!latest || date.getTime() > latest.getTime()) return date;
+        return latest;
+    }, null);
+};
+
+const formatRelativeSyncTime = (date: Date | null) => {
+    if (!date) return 'agora';
+
+    const diffMs = Math.max(0, Date.now() - date.getTime());
+    const minutes = Math.max(1, Math.floor(diffMs / 60000));
+
+    if (minutes < 60) {
+        return minutes === 1 ? 'há 1 minuto' : `há ${minutes} minutos`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+        return hours === 1 ? 'há 1 hora' : `há ${hours} horas`;
+    }
+
+    const days = Math.floor(hours / 24);
+    if (days < 7) {
+        return days === 1 ? 'há 1 dia' : `há ${days} dias`;
+    }
+
+    return `em ${date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+};
+
+interface BankCardDropdownProps {
+    visible: boolean;
+    syncDisabled: boolean;
+    onSync: () => void;
+    onDisconnect: () => void;
+}
+
+function BankCardDropdown({
+    visible,
+    syncDisabled,
+    onSync,
+    onDisconnect
+}: BankCardDropdownProps) {
+    const sheetOpacity = useRef(new NativeAnimated.Value(0)).current;
+    const sheetScaleX = useRef(new NativeAnimated.Value(0.955)).current;
+    const sheetScaleY = useRef(new NativeAnimated.Value(0.935)).current;
+    const sheetY = useRef(new NativeAnimated.Value(-10)).current;
+    const contentOpacity = useRef(new NativeAnimated.Value(0)).current;
+
+    useEffect(() => {
+        if (visible) {
+            sheetOpacity.setValue(0);
+            sheetScaleX.setValue(0.955);
+            sheetScaleY.setValue(0.935);
+            sheetY.setValue(-10);
+            contentOpacity.setValue(0);
+
+            NativeAnimated.parallel([
+                NativeAnimated.timing(sheetOpacity, {
+                    toValue: 1,
+                    duration: 170,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.spring(sheetY, {
+                    toValue: 0,
+                    damping: 18,
+                    stiffness: 235,
+                    mass: 0.78,
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.sequence([
+                    NativeAnimated.timing(sheetScaleX, {
+                        toValue: 1.018,
+                        duration: 165,
+                        easing: Easing.out(Easing.cubic),
+                        useNativeDriver: false,
+                    }),
+                    NativeAnimated.spring(sheetScaleX, {
+                        toValue: 1,
+                        damping: 13,
+                        stiffness: 190,
+                        mass: 0.62,
+                        useNativeDriver: false,
+                    }),
+                ]),
+                NativeAnimated.sequence([
+                    NativeAnimated.timing(sheetScaleY, {
+                        toValue: 1.012,
+                        duration: 185,
+                        easing: Easing.out(Easing.cubic),
+                        useNativeDriver: false,
+                    }),
+                    NativeAnimated.spring(sheetScaleY, {
+                        toValue: 1,
+                        damping: 13,
+                        stiffness: 185,
+                        mass: 0.62,
+                        useNativeDriver: false,
+                    }),
+                ]),
+                NativeAnimated.timing(contentOpacity, {
+                    toValue: 1,
+                    duration: 260,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: false,
+                }),
+            ]).start();
+        } else {
+            NativeAnimated.parallel([
+                NativeAnimated.timing(sheetOpacity, {
+                    toValue: 0,
+                    duration: 130,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(contentOpacity, {
+                    toValue: 0,
+                    duration: 110,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(sheetScaleX, {
+                    toValue: 0.955,
+                    duration: 170,
+                    easing: Easing.bezier(0.22, 1, 0.36, 1),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(sheetScaleY, {
+                    toValue: 0.935,
+                    duration: 180,
+                    easing: Easing.bezier(0.22, 1, 0.36, 1),
+                    useNativeDriver: false,
+                }),
+                NativeAnimated.timing(sheetY, {
+                    toValue: -10,
+                    duration: 180,
+                    easing: Easing.bezier(0.22, 1, 0.36, 1),
+                    useNativeDriver: false,
+                }),
+            ]).start();
+        }
+    }, [visible, sheetOpacity, sheetScaleX, sheetScaleY, sheetY, contentOpacity]);
+
+    return (
+        <NativeAnimated.View
+            pointerEvents={visible ? 'auto' : 'none'}
+            style={[
+                styles.actionDropdownContainer,
+                {
+                    opacity: sheetOpacity,
+                    transform: [
+                        { translateY: sheetY },
+                        { scaleX: sheetScaleX },
+                        { scaleY: sheetScaleY },
+                    ],
+                },
+            ]}
+        >
+            <View style={styles.actionDropdownShell}>
+                <BlurView
+                    intensity={16}
+                    tint="dark"
+                    experimentalBlurMethod="dimezisBlurView"
+                    style={styles.actionDropdownBlur}
+                >
+                    <View style={styles.actionDropdownOverlay} />
+                    <NativeAnimated.View style={[styles.actionDropdownContent, { opacity: contentOpacity }]}>
+                        <TouchableOpacity
+                            style={[styles.actionDropdownItem, syncDisabled && styles.actionDropdownItemDisabled]}
+                            onPress={onSync}
+                            disabled={syncDisabled}
+                            activeOpacity={0.78}
+                        >
+                            <Text style={[styles.actionDropdownText, syncDisabled && styles.actionDropdownTextDisabled]}>
+                                Sincronizar
+                            </Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.actionDropdownDivider} />
+
+                        <TouchableOpacity
+                            style={styles.actionDropdownItem}
+                            onPress={onDisconnect}
+                            activeOpacity={0.78}
+                        >
+                            <Text style={styles.actionDropdownTextDestructive}>Desconectar</Text>
+                        </TouchableOpacity>
+                    </NativeAnimated.View>
+                </BlurView>
+            </View>
+        </NativeAnimated.View>
+    );
+}
 
 
 export const ConnectedBankCard = ({
@@ -103,9 +327,17 @@ export const ConnectedBankCard = ({
     canSyncItem,
     onConsumeCredit,
     hiddenAccountIds,
-    onToggleVisibility
+    onStatusChange
 }: ConnectedBankCardProps) => {
+    const { width } = useWindowDimensions();
+    const isNarrowPhone = width < 360;
+    const isTinyPhone = width < 340;
+    const logoSize = isNarrowPhone ? 38 : 44;
+    const logoRadius = logoSize / 2;
     const [expanded, setExpanded] = useState(false);
+    const [menuVisible, setMenuVisible] = useState(false);
+    const pressProgress = useSharedValue(0);
+    const morphProgress = useSharedValue(0);
     const [syncStatus, setSyncStatus] = useState<BankSyncStatus>({
         step: 'idle',
         message: '',
@@ -116,6 +348,72 @@ export const ConnectedBankCard = ({
     useEffect(() => {
         syncStepRef.current = syncStatus.step;
     }, [syncStatus.step]);
+
+    const updateSyncStatus = useCallback((status: BankSyncStatus) => {
+        syncStepRef.current = status.step;
+        setSyncStatus(status);
+        onStatusChange?.(group, status);
+
+        const bankName = group?.connector?.name || null;
+        const inFlight = status.step !== 'idle' && status.step !== 'done' && status.step !== 'error';
+        openFinanceSyncBus.setState({
+            active: inFlight || status.step === 'error',
+            phase: status.step,
+            message: status.message || '',
+            progress: typeof status.progress === 'number' ? status.progress : 0,
+            bankName,
+            accountsProcessed: status.details?.checking,
+            creditAccountsProcessed: status.details?.credit,
+        });
+
+        if (status.step === 'done') {
+            // clear the banner shortly after completion
+            setTimeout(() => {
+                const cur = openFinanceSyncBus.getState();
+                if (cur.phase === 'done') openFinanceSyncBus.reset();
+            }, 1500);
+        }
+    }, [group, onStatusChange]);
+
+    const cardAnimatedStyle = useAnimatedStyle(() => {
+        const pressed = pressProgress.value;
+        const morph = morphProgress.value;
+
+        return {
+            borderRadius: 20 + morph * 4 - pressed * 1.2,
+            transform: [
+                { translateY: pressed * 1.4 },
+                { scaleX: 1 + morph * 0.012 - pressed * 0.012 },
+                { scaleY: 1 + morph * 0.016 + pressed * 0.008 },
+            ],
+        };
+    });
+
+    const startCardMorph = () => {
+        pressProgress.value = withSpring(1, {
+            damping: 16,
+            stiffness: 250,
+            mass: 0.42,
+        });
+        morphProgress.value = withSpring(1, {
+            damping: 13,
+            stiffness: 190,
+            mass: 0.48,
+        });
+    };
+
+    const endCardMorph = () => {
+        pressProgress.value = withSpring(0, {
+            damping: 15,
+            stiffness: 215,
+            mass: 0.45,
+        });
+        morphProgress.value = withSpring(0, {
+            damping: 11,
+            stiffness: 145,
+            mass: 0.52,
+        });
+    };
 
 
     // Timer state for countdown until midnight
@@ -157,6 +455,37 @@ export const ConnectedBankCard = ({
     // Sync is disabled if: no credits OR already synced this bank today
     const isSyncDisabled = !hasCredits || !canSyncThisBank;
 
+    useEffect(() => {
+        if (isSyncing) setMenuVisible(false);
+    }, [isSyncing]);
+
+    const accounts = Array.isArray(group.accounts) ? group.accounts : [];
+    const hiddenIds = hiddenAccountIds || [];
+    const bankName = group.connector?.name || 'Instituição';
+    const cashAccounts = accounts.filter((account: any) => !isCreditAccount(account));
+    const totalBalance = cashAccounts.reduce((sum: number, account: any) => {
+        if (hiddenIds.includes(account.id)) return sum;
+        return sum + getAccountNumericValue(account);
+    }, 0);
+    const totalBalanceParts = splitCurrency(totalBalance);
+    const latestSyncDate = getLatestSyncDate(accounts);
+    const canTapSync = !isSyncing && !(isSyncDisabled && syncStatus.step === 'idle');
+    const syncStatusLabel = syncStatus.step === 'done'
+        ? 'Sincronizado agora'
+        : syncStatus.step === 'error'
+            ? 'Erro ao sincronizar'
+            : isSyncing
+                ? (syncStatus.message || 'Sincronizando...')
+                : latestSyncDate
+                    ? `Sincronizado ${formatRelativeSyncTime(latestSyncDate)}`
+                    : 'Sincronizar agora';
+    const syncIconColor = syncStatus.step === 'done'
+        ? '#04D361'
+        : syncStatus.step === 'error'
+            ? '#EF4444'
+            : canTapSync
+                ? '#C9CDD3'
+                : '#A6ABB3';
     const handleSync = async () => {
         if (isSyncing) return;
 
@@ -183,9 +512,9 @@ export const ConnectedBankCard = ({
             return;
         }
 
-        // Consume credit for sync - pass itemId to track per-bank
-        if (onConsumeCredit) {
-            const creditResult = await onConsumeCredit('sync', itemId);
+        const shouldConsumeCreditBeforeSync = false;
+        if (shouldConsumeCreditBeforeSync && onConsumeCredit) {
+            const creditResult: { success: boolean; error?: string } = { success: true };
             if (!creditResult.success) {
                 Alert.alert('Erro', creditResult.error || 'Erro ao consumir crédito.');
                 return;
@@ -195,43 +524,50 @@ export const ConnectedBankCard = ({
             notificationService.scheduleBankAvailabilityNotification(group.connector?.name || 'Banco');
         }
 
-        setSyncStatus({ step: 'connecting', message: 'Iniciando...', progress: 0 });
+        updateSyncStatus({ step: 'connecting', message: 'Iniciando...', progress: 0 });
 
         try {
-            await onSync(group, setSyncStatus);
+            await onSync(group, updateSyncStatus);
             // Fallback: guarantee a final status when sync resolves without done/error.
             if (!['idle', 'done', 'error'].includes(syncStepRef.current)) {
-                setSyncStatus({
+                updateSyncStatus({
                     step: 'done',
                     message: 'Sincronizacao concluida com sucesso.',
                     progress: 100
                 });
                 setTimeout(() => {
-                    setSyncStatus({ step: 'idle', message: '', progress: 0 });
+                    updateSyncStatus({ step: 'idle', message: '', progress: 0 });
                 }, 3000);
             }
-        } catch (error) {
-            setSyncStatus({ step: 'error', message: 'Erro na sincronização', progress: 0 });
+
+            if (syncStepRef.current !== 'error' && onConsumeCredit) {
+                const postSuccessCredit = await onConsumeCredit('sync', itemId);
+                if (!postSuccessCredit.success) {
+                    Alert.alert('Aviso', postSuccessCredit.error || 'Sincronizacao concluida, mas o credito nao foi atualizado.');
+                } else {
+                    notificationService.scheduleBankAvailabilityNotification(group.connector?.name || 'Banco');
+                }
+            }
+        } catch {
+            updateSyncStatus({ step: 'error', message: 'Erro na sincronização', progress: 0 });
             setTimeout(() => {
-                setSyncStatus({ step: 'idle', message: '', progress: 0 });
+                updateSyncStatus({ step: 'idle', message: '', progress: 0 });
             }, 3000);
         }
     };
 
-    const rotation = useSharedValue(expanded ? 0 : 180);
+    const handleMenuSync = () => {
+        setMenuVisible(false);
+        handleSync();
+    };
 
-    // Sync rotation with expanded state changes
-    useEffect(() => {
-        rotation.value = withTiming(expanded ? 0 : 180, { duration: 300 });
-    }, [expanded]);
-
-    const animatedChevronStyle = useAnimatedStyle(() => {
-        return {
-            transform: [{ rotate: `${rotation.value}deg` }],
-        };
-    });
+    const handleDisconnect = () => {
+        setMenuVisible(false);
+        onDelete(group);
+    };
 
     const toggleExpand = () => {
+        setMenuVisible(false);
         LayoutAnimation.configureNext({
             duration: 300,
             create: {
@@ -249,289 +585,229 @@ export const ConnectedBankCard = ({
         setExpanded(!expanded);
     };
 
-    const getCurrentStepIndex = (step: string) => {
-        if (step === 'saving_accounts') return 1;
-        const idx = STEPS.findIndex(s => s.key === step);
-        return idx === -1 ? (step === 'done' ? STEPS.length : -1) : idx;
-    };
-
-    const currentStepIndex = getCurrentStepIndex(syncStatus.step);
-    const showSyncBanner = isSyncing || syncStatus.step === 'done';
-
-    const renderHeaderSyncStatus = () => {
-        const isDone = syncStatus.step === 'done' || currentStepIndex >= STEPS.length;
-        const currentLabel = syncStatus.message || STEPS[currentStepIndex]?.label || 'Sincronizando...';
-
-        return (
-            <Animated.View
-                key={`sync-status-${syncStatus.step}`}
-                entering={FadeIn.duration(300)}
-                style={styles.syncStatusHeader}
-            >
-                {isDone ? (
-                    <Animated.View entering={FadeIn} style={styles.labelWrapper}>
-                        <CheckCircle size={14} color="#04D361" />
-                        <DynamicText
-                            items={[{ text: 'Sincronização concluída', id: 'done' }]}
-                            loop={false}
-                            initialIndex={0}
-                            timing={{ interval: 2000, animationDuration: 350 }}
-                            dot={{
-                                visible: false,
-                                size: 6,
-                                color: '#04D361',
-                            }}
-                            text={{
-                                fontSize: 13,
-                                color: '#04D361',
-                                fontWeight: '600',
-                            }}
-                            animationPreset="fade"
-                            animationDirection="up"
-                        />
-                    </Animated.View>
-                ) : (
-                    <View style={styles.labelWrapper}>
-                        <DynamicText
-                            key={`sync-step-${syncStatus.step}`}
-                            items={[{ text: currentLabel, id: syncStatus.step }]}
-                            loop={false}
-                            initialIndex={0}
-                            timing={{ interval: 2000, animationDuration: 350 }}
-                            dot={{
-                                visible: true,
-                                size: 6,
-                                color: '#D97757',
-                                style: { marginRight: 4 },
-                            }}
-                            text={{
-                                fontSize: 13,
-                                color: '#E0E0E0',
-                                fontWeight: '500',
-                            }}
-                            animationPreset="fade"
-                            animationDirection="up"
-                        />
-                    </View>
-                )}
-            </Animated.View>
-        );
-    };
-
     return (
-        <View style={styles.connectedBankCard}>
-            <TouchableOpacity
-                style={styles.connectedBankHeader}
-                onPress={isSyncing ? undefined : toggleExpand}
-                activeOpacity={isSyncing ? 1 : 0.7}
-            >
-                <View style={styles.bankHeaderLeft}>
+        <Reanimated.View
+            style={[styles.connectedBankCard, cardAnimatedStyle]}
+            onTouchStart={startCardMorph}
+            onTouchEnd={endCardMorph}
+            onTouchCancel={endCardMorph}
+        >
+            <View pointerEvents="none" style={styles.connectedBankBackdrop}>
+                <BlurView
+                    intensity={12}
+                    tint="dark"
+                    experimentalBlurMethod="dimezisBlurView"
+                    style={StyleSheet.absoluteFillObject}
+                />
+                <View style={styles.connectedBankBackdropTint} />
+            </View>
+
+            <View style={styles.connectedBankContent}>
+            <View style={[styles.connectedBankHeader, isNarrowPhone && styles.connectedBankHeaderNarrow]}>
+                <View style={[styles.bankHeaderLeft, isNarrowPhone && styles.bankHeaderLeftNarrow]}>
                     <BankConnectorLogo
                         connector={group.connector}
-                        size={34}
-                        borderRadius={10}
-                        iconSize={16}
-                        borderColor="#2A2A2A"
+                        size={logoSize}
+                        borderRadius={logoRadius}
+                        iconSize={isNarrowPhone ? 16 : 18}
+                        showBorder={false}
+                        backgroundColor="#FFFFFF"
                         containerStyle={styles.connectorLogoContainer}
                     />
                     <View style={styles.headerInfo}>
-                        <Text style={styles.connectorName}>
-                            {group.connector?.name || 'Instituição'}
+                        <Text style={styles.connectorName} numberOfLines={1}>
+                            {bankName}
                         </Text>
                         <Text style={styles.accountCount}>
-                            {group.accounts.length} {group.accounts.length === 1 ? 'conta conectada' : 'contas conectadas'}
+                            {accounts.length} {accounts.length === 1 ? 'conta' : 'contas'}
                         </Text>
                     </View>
                 </View>
 
-                <View style={styles.bankHeaderRight}>
-                    {showSyncBanner ? (
-                        renderHeaderSyncStatus()
-                    ) : (
-                        <>
-                            <TouchableOpacity
-                                onPress={(e) => {
-                                    e.stopPropagation();
-                                    onDelete(group);
-                                }}
-                                style={styles.deleteButtonHeader}
-                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                <TouchableOpacity
+                    onPress={() => setMenuVisible((visible) => !visible)}
+                    style={[styles.menuButton, isSyncing && styles.headerActionDisabled]}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    disabled={isSyncing}
+                    activeOpacity={0.7}
+                >
+                    <MoreVertical size={21} color="#A7ADB6" strokeWidth={2.8} />
+                </TouchableOpacity>
+
+                <BankCardDropdown
+                    visible={menuVisible}
+                    syncDisabled={isSyncDisabled || isSyncing}
+                    onSync={handleMenuSync}
+                    onDisconnect={handleDisconnect}
+                />
+            </View>
+
+            <View style={[styles.balanceSection, isNarrowPhone && styles.balanceSectionNarrow]}>
+                <Text style={styles.balanceLabel}>Saldo em conta</Text>
+                <Text
+                    style={[styles.balanceAmount, isNarrowPhone && styles.balanceAmountNarrow]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                >
+                    <Text style={styles.balanceCurrency}>{totalBalanceParts.currency} </Text>
+                    {totalBalanceParts.amount}
+                </Text>
+            </View>
+
+            <View style={styles.cardDivider} />
+
+            {expanded && (
+                <View style={styles.accountsGroup}>
+                    {accounts.map((acc: any) => {
+                        const accountTypeLabel = getAccountTypeLabel(acc);
+                        const hasCustomName = acc.name && acc.name !== bankName;
+                        const accountName = hasCustomName ? acc.name : accountTypeLabel;
+                        const numericValue = getAccountNumericValue(acc);
+                        const formattedValue = formatCurrency(numericValue);
+                        const isMuted = hiddenIds.includes(acc.id) || Math.abs(numericValue) === 0;
+
+                        return (
+                            <View
+                                key={acc.id || `${accountName}-${formattedValue}`}
+                                style={[styles.accountRow, isNarrowPhone && styles.accountRowNarrow]}
                             >
-                                <IntervalLottie source={require('../../assets/lixeira.json')} size={16} />
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                onPress={handleSync}
-                                style={[
-                                    styles.syncButton,
-                                    syncStatus.step === 'done' && styles.syncButtonSuccess,
-                                    syncStatus.step === 'error' && styles.syncButtonError,
-                                    isSyncDisabled && styles.syncButtonDisabled,
-                                    !canSyncThisBank && styles.syncButtonTimer
-                                ]}
-                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                disabled={isSyncDisabled && syncStatus.step === 'idle'}
-                            >
-                                {syncStatus.step === 'done' ? (
-                                    <Text style={[styles.syncButtonText, { color: '#04D361' }]}>Concluído</Text>
-                                ) : syncStatus.step === 'error' ? (
-                                    <Text style={[styles.syncButtonText, { color: '#EF4444' }]}>Erro</Text>
-                                ) : !canSyncThisBank && timeUntilReset ? (
-                                    <View style={styles.timerContainer}>
-                                        <Lock size={12} color="#FFFFFF" />
-                                        <FlipTimer timeString={timeUntilReset} />
-                                    </View>
-                                ) : isSyncDisabled ? (
-                                    <Lock size={16} color="#FFFFFF" />
-                                ) : (
-                                    <IntervalLottie source={require('../../assets/sincronizar.json')} size={16} />
-                                )}
-                            </TouchableOpacity>
-
-                            <View style={styles.chevronContainer}>
-                                <Animated.View style={animatedChevronStyle}>
-                                    <IntervalLottie source={require('../../assets/cima.json')} size={16} />
-                                </Animated.View>
-                            </View>
-                        </>
-                    )}
-                </View>
-            </TouchableOpacity>
-
-            {isSyncing ? (
-                <View style={{ paddingBottom: 0 }} />
-            ) : (
-                expanded && (
-                    <View style={styles.connectedBankBody}>
-                        {/* Header/Content Separator */}
-                        <View style={styles.headerSeparator} />
-
-                        {/* Flat Accounts List */}
-                        <View style={styles.accountsGroup}>
-                            {group.accounts.map((acc: any, i: number) => {
-                                const isCredit = acc.type === 'CREDIT' || acc.type === 'credit' || acc.type === 'CREDIT_CARD' || acc.subtype === 'CREDIT_CARD';
-                                const defaultName = isCredit ? 'Cartão de Crédito' : 'Conta Corrente';
-                                const accountName = (acc.name && acc.name !== group.connector?.name)
-                                    ? acc.name
-                                    : defaultName;
-
-                                const creditLimit = acc.creditLimit ?? acc.creditData?.creditLimit ?? null;
-                                const availableCreditLimit = acc.availableCreditLimit ?? acc.creditData?.availableCreditLimit ?? null;
-                                const value = isCredit
-                                    ? (creditLimit ?? availableCreditLimit)
-                                    : acc.balance;
-                                const numericValue = value !== null && value !== undefined ? Number(value) : NaN;
-                                const label = isCredit
-                                    ? 'Limite Total'
-                                    : 'Saldo Disponivel';
-                                const formattedValue = Number.isFinite(numericValue)
-                                    ? formatCurrency(numericValue)
-                                    : '---';
-                                const secondaryCreditLabel = null;
-
-                                // Visibility Logic
-                                const isVisible = !(hiddenAccountIds || []).includes(acc.id);
-
-                                return (
-                                    <View
-                                        key={acc.id}
+                                <View style={[styles.accountDot, isMuted && styles.accountDotMuted]} />
+                                <View style={[styles.accountTextGroup, isNarrowPhone && styles.accountTextGroupNarrow]}>
+                                    <Text
                                         style={[
-                                            styles.accountRowContainer,
-                                            i === group.accounts.length - 1 && { marginBottom: 0 }
+                                            styles.accountName,
+                                            isNarrowPhone && styles.accountNameNarrow,
+                                            isMuted && styles.accountTextMuted
                                         ]}
+                                        numberOfLines={1}
                                     >
-                                        <View style={styles.accountRow}>
-                                            <View style={styles.accountIconContainer}>
-                                                <View style={[
-                                                    styles.accountIconWrapper,
-                                                    isCredit ? styles.creditIconBg : styles.debitIconBg
-                                                ]}>
-                                                    {isCredit ?
-                                                        <IntervalLottie source={require('../../assets/cartao.json')} size={20} interval={4500} /> :
-                                                        <IntervalLottie source={require('../../assets/carteira.json')} size={20} interval={4500} />
-                                                    }
-                                                </View>
-                                            </View>
-
-                                            <View style={styles.accountMainInfo}>
-                                                <Text style={styles.accountName} numberOfLines={1}>{accountName}</Text>
-                                                <Text style={styles.accountNumber}>
-                                                    {acc.number ? `"""" ${acc.number.slice(-4)}` : '""""'}
-                                                </Text>
-                                            </View>
-
-                                            <View style={styles.accountBalanceInfo}>
-                                                <Text style={[
-                                                    styles.accountValue,
-                                                    !isCredit && (numericValue > 0 ? styles.positiveValue : numericValue < 0 ? styles.negativeValue : {})
-                                                ]}>
-                                                    {formattedValue}
-                                                </Text>
-                                                <Text style={styles.accountLabel}>{label}</Text>
-                                                {secondaryCreditLabel && (
-                                                    <Text style={styles.accountSecondaryLabel}>{secondaryCreditLabel}</Text>
-                                                )}
-                                            </View>
-
-                                            {/* Visibility Toggle for Checking Accounts */}
-                                            {!isCredit && onToggleVisibility && (
-                                                <TouchableOpacity
-                                                    style={styles.visibilityButton}
-                                                    onPress={() => onToggleVisibility(acc.id)}
-                                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                                >
-                                                    {isVisible ? (
-                                                        <Eye size={18} color="#666" />
-                                                    ) : (
-                                                        <EyeOff size={18} color="#D97757" />
-                                                    )}
-                                                </TouchableOpacity>
-                                            )}
-                                        </View>
-
-                                        {/* Separator - show only if NOT the last item */}
-                                        {i < group.accounts.length - 1 && <View style={styles.accountSeparator} />}
-                                    </View>
-                                );
-                            })}
-                        </View>
-                    </View>
-                )
+                                        {accountName}
+                                    </Text>
+                                    <Text
+                                        style={[styles.accountType, isNarrowPhone && styles.accountTypeNarrow]}
+                                        numberOfLines={1}
+                                    >
+                                        {accountTypeLabel}
+                                    </Text>
+                                </View>
+                                <Text
+                                    style={[
+                                        styles.accountValue,
+                                        isNarrowPhone && styles.accountValueNarrow,
+                                        isTinyPhone && styles.accountValueTiny,
+                                        isMuted && styles.accountValueMuted
+                                    ]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.78}
+                                >
+                                    {formattedValue}
+                                </Text>
+                            </View>
+                        );
+                    })}
+                </View>
             )}
-        </View>
+
+            <View style={styles.cardDivider} />
+
+            <View style={[styles.syncRow, isNarrowPhone && styles.syncRowNarrow]}>
+                <View style={styles.syncStatusTouch}>
+                    {syncStatus.step === 'done' ? (
+                        <CheckCircle size={14} color={syncIconColor} strokeWidth={2} />
+                    ) : syncStatus.step === 'error' ? (
+                        <XCircle size={14} color={syncIconColor} strokeWidth={2} />
+                    ) : !hasCredits ? (
+                        <Lock size={13} color={syncIconColor} strokeWidth={2} />
+                    ) : (
+                        <RefreshCw size={14} color={syncIconColor} strokeWidth={2} />
+                    )}
+                    <Text style={styles.syncStatusText} numberOfLines={1}>
+                        {syncStatusLabel}
+                    </Text>
+                </View>
+
+                <TouchableOpacity
+                    onPress={toggleExpand}
+                    style={styles.hideButton}
+                    activeOpacity={0.7}
+                    disabled={isSyncing}
+                >
+                    <Text style={styles.hideButtonText} numberOfLines={1}>
+                        {expanded ? 'Ocultar' : 'Exibir'}
+                    </Text>
+                </TouchableOpacity>
+            </View>
+
+            </View>
+
+        </Reanimated.View>
     );
 };
 
 const styles = StyleSheet.create({
     connectedBankCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        marginBottom: 16,
-        overflow: 'hidden',
+        backgroundColor: '#101010',
+        borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#2A2A2A',
+        borderColor: '#252525',
+        marginBottom: 12,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.24,
+        shadowRadius: 18,
+        elevation: 8,
+    },
+    connectedBankBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+    },
+    connectedBankBackdropTint: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(16, 16, 16, 0.92)',
+    },
+    connectedBankContent: {
+        position: 'relative',
+        zIndex: 1,
     },
     connectedBankHeader: {
+        position: 'relative',
+        zIndex: 20,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
-        backgroundColor: '#1A1A1A',
-        minHeight: 56,
+        paddingHorizontal: 20,
+        paddingTop: 19,
+        paddingBottom: 14,
+        minHeight: 67,
+    },
+    connectedBankHeaderNarrow: {
+        paddingHorizontal: 14,
+        paddingTop: 15,
+        paddingBottom: 12,
+        minHeight: 61,
     },
     bankHeaderLeft: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
         flex: 1,
+        minWidth: 0,
+    },
+    bankHeaderLeftNarrow: {
+        gap: 10,
     },
     headerInfo: {
         flex: 1,
+        minWidth: 0,
     },
     accountCount: {
         fontSize: 12,
-        color: '#666',
-        marginTop: 2,
+        color: '#A0A4AB',
+        marginTop: 1,
+        fontFamily: 'AROneSans_400Regular',
     },
     bankHeaderRight: {
         flexDirection: 'row',
@@ -542,58 +818,188 @@ const styles = StyleSheet.create({
         flexShrink: 0,
     },
     connectorName: {
-        fontSize: 16,
-        fontWeight: '600',
+        fontSize: 13,
+        fontWeight: '700',
         color: '#FFFFFF',
+        fontFamily: 'AROneSans_400Regular',
+    },
+    menuButton: {
+        width: 28,
+        height: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 3,
+    },
+    actionDropdownContainer: {
+        position: 'absolute',
+        top: 55,
+        right: 6,
+        width: 168,
+        zIndex: 1000,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+        elevation: 12,
+    },
+    actionDropdownShell: {
+        width: '100%',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.07)',
+        overflow: 'hidden',
+        borderRadius: 20,
+        backgroundColor: 'rgba(17, 17, 17, 0.94)',
+        zIndex: 1,
+    },
+    actionDropdownBlur: {
+        width: '100%',
+    },
+    actionDropdownOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(17, 17, 17, 0.94)',
+    },
+    actionDropdownContent: {
+        paddingVertical: 4,
+    },
+    actionDropdownItem: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    actionDropdownItemDisabled: {
+        opacity: 0.45,
+    },
+    actionDropdownText: {
+        color: '#E0E0E0',
+        fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    actionDropdownTextDisabled: {
+        color: '#8C8F96',
+    },
+    actionDropdownTextDestructive: {
+        color: '#FF6B6B',
+        fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    actionDropdownDivider: {
+        height: 1,
+        width: '100%',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    balanceSection: {
+        paddingHorizontal: 20,
+        paddingTop: 18,
+        paddingBottom: 22,
+    },
+    balanceSectionNarrow: {
+        paddingHorizontal: 14,
+        paddingTop: 14,
+        paddingBottom: 18,
+    },
+    balanceLabel: {
+        color: '#9EA2AA',
+        fontSize: 11,
+        lineHeight: 14,
+        fontFamily: 'AROneSans_400Regular',
+        marginBottom: 7,
+    },
+    balanceAmount: {
+        color: '#FFFFFF',
+        fontSize: 20,
+        lineHeight: 24,
+        fontWeight: '800',
+        fontFamily: 'AROneSans_400Regular',
+    },
+    balanceAmountNarrow: {
+        fontSize: 19,
+    },
+    balanceCurrency: {
+        color: '#E6E8EC',
+        fontSize: 13,
+        fontWeight: '700',
+        fontFamily: 'AROneSans_400Regular',
+    },
+    cardDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#242424',
+        width: '100%',
     },
     connectedBankBody: {
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#111111',
         paddingTop: 0,
     },
     headerSeparator: {
-        height: 1,
-        backgroundColor: '#2A2A2A',
-        width: '100%',
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        marginHorizontal: 0,
     },
     accountsGroup: {
-        marginTop: 12,
+        marginTop: 0,
         marginBottom: 0,
-        marginHorizontal: 12,
-        paddingBottom: 12,
+        paddingHorizontal: 0,
+        paddingVertical: 12,
     },
     accountRowContainer: {
         position: 'relative',
-        marginBottom: 8,
     },
     accountRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-        backgroundColor: '#141414',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#262626',
+        minHeight: 39,
+        paddingVertical: 8,
+        paddingHorizontal: 20,
+        backgroundColor: 'transparent',
+    },
+    accountRowNarrow: {
+        minHeight: 44,
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+    },
+    accountDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#3899F3',
+        marginRight: 11,
+    },
+    accountDotMuted: {
+        backgroundColor: '#17324D',
+    },
+    accountTextGroup: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingRight: 12,
+        gap: 8,
+    },
+    accountTextGroupNarrow: {
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 1,
+        paddingRight: 8,
     },
     accountSeparator: {
-        display: 'none',
-    },
-    accountIconContainer: {
-        marginRight: 10,
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        marginLeft: 0,
+        marginRight: 0,
     },
     accountIconWrapper: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     creditIconBg: {
-        backgroundColor: 'rgba(217, 119, 87, 0.15)',
+        backgroundColor: 'rgba(217, 119, 87, 0.12)',
     },
     debitIconBg: {
-        backgroundColor: 'rgba(4, 211, 97, 0.15)',
+        backgroundColor: 'rgba(4, 211, 97, 0.12)',
     },
     accountMainInfo: {
         flex: 1,
@@ -601,43 +1007,74 @@ const styles = StyleSheet.create({
         paddingRight: 8,
     },
     accountName: {
-        fontSize: 14,
-        color: '#FFF',
-        fontWeight: '500',
-        marginBottom: 2,
+        fontSize: 13,
+        color: '#FFFFFF',
+        fontFamily: 'AROneSans_400Regular',
+        maxWidth: '62%',
+    },
+    accountNameNarrow: {
+        maxWidth: '100%',
+        fontSize: 12,
+    },
+    accountTextMuted: {
+        color: '#64676D',
+    },
+    accountType: {
+        flexShrink: 1,
+        fontSize: 11,
+        color: '#62666E',
+        fontFamily: 'AROneSans_400Regular',
+    },
+    accountTypeNarrow: {
+        maxWidth: '100%',
+        fontSize: 10,
     },
     accountNumber: {
-        fontSize: 11,
-        color: '#666',
-        fontFamily: Platform.select({ ios: 'Courier', default: 'monospace' }),
+        fontSize: 12,
+        color: '#606060',
+        fontFamily: 'AROneSans_400Regular',
     },
     accountBalanceInfo: {
         alignItems: 'flex-end',
         justifyContent: 'center',
     },
     accountValue: {
-        fontSize: 14,
-        color: '#FFF',
-        fontWeight: '600',
-        marginBottom: 2,
+        fontSize: 12,
+        color: '#FFFFFF',
+        fontWeight: '700',
+        fontFamily: 'AROneSans_400Regular',
+        minWidth: 83,
+        textAlign: 'right',
+    },
+    accountValueNarrow: {
+        minWidth: 76,
+        fontSize: 11,
+    },
+    accountValueTiny: {
+        minWidth: 70,
+    },
+    accountValueMuted: {
+        color: '#555961',
+        fontWeight: '400',
     },
     accountLabel: {
-        fontSize: 9,
-        color: '#888',
+        fontSize: 10,
+        color: '#505050',
         textTransform: 'uppercase',
-        fontWeight: '500',
         letterSpacing: 0.5,
+        fontFamily: 'AROneSans_400Regular',
     },
     accountSecondaryLabel: {
         fontSize: 9,
-        color: '#A1A1AA',
+        color: '#606060',
         marginTop: 2,
+        fontFamily: 'AROneSans_400Regular',
     },
     positiveValue: {
         color: '#04D361',
     },
     negativeValue: {
-        color: '#EF4444',
+        color: '#FF4C4C',
     },
     visibilityButton: {
         marginLeft: 12,
@@ -649,6 +1086,43 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingTop: 12,
         paddingBottom: 4,
+    },
+    syncRow: {
+        height: 43,
+        paddingHorizontal: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    syncRowNarrow: {
+        paddingHorizontal: 14,
+    },
+    syncStatusTouch: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingRight: 12,
+    },
+    syncStatusText: {
+        flex: 1,
+        color: '#A4A8AF',
+        fontSize: 10,
+        lineHeight: 13,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    hideButton: {
+        minWidth: 50,
+        height: 28,
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+    },
+    hideButtonText: {
+        color: '#E8845B',
+        fontSize: 11,
+        fontWeight: '700',
+        fontFamily: 'AROneSans_400Regular',
     },
     syncButton: {
         flexDirection: 'row',
@@ -864,6 +1338,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    headerActionDisabled: {
+        opacity: 0.45,
+    },
     chevronContainer: {
         width: 32,
         height: 32,
@@ -877,66 +1354,4 @@ const styles = StyleSheet.create({
         paddingRight: 8,
     }
 });
-
-// Animated digit component for flip clock effect
-function AnimatedDigit({ digit, style }: { digit: string; style?: any }) {
-    const [currentDigit, setCurrentDigit] = useState(digit);
-    const [previousDigit, setPreviousDigit] = useState(digit);
-    const flipAnim = useSharedValue(0);
-
-    useEffect(() => {
-        if (digit !== currentDigit) {
-            setPreviousDigit(currentDigit);
-            flipAnim.value = 0;
-            flipAnim.value = withTiming(1, { duration: 300 });
-            setCurrentDigit(digit);
-        }
-    }, [digit]);
-
-    const exitStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(flipAnim.value, [0, 0.5], [1, 0], Extrapolate.CLAMP),
-        transform: [
-            { translateY: interpolate(flipAnim.value, [0, 0.5], [0, -8], Extrapolate.CLAMP) },
-        ],
-    }));
-
-    const enterStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(flipAnim.value, [0.5, 1], [0, 1], Extrapolate.CLAMP),
-        transform: [
-            { translateY: interpolate(flipAnim.value, [0.5, 1], [8, 0], Extrapolate.CLAMP) },
-        ],
-    }));
-
-    return (
-        <View style={styles.digitContainer}>
-            <Animated.Text style={[style, exitStyle, styles.digitAbsolute]}>
-                {previousDigit}
-            </Animated.Text>
-            <Animated.Text style={[style, enterStyle]}>
-                {currentDigit}
-            </Animated.Text>
-        </View>
-    );
-};
-
-function FlipTimer({ timeString }: { timeString: string }) {
-    const parts = timeString.split(':');
-    if (parts.length !== 3) return <Text style={styles.timerText}>{timeString}</Text>;
-
-    const [hours, minutes, seconds] = parts;
-
-    return (
-        <View style={styles.flipTimerContainer}>
-            <AnimatedDigit digit={hours[0]} style={styles.timerDigit} />
-            <AnimatedDigit digit={hours[1]} style={styles.timerDigit} />
-            <Text style={styles.timerColon}>:</Text>
-            <AnimatedDigit digit={minutes[0]} style={styles.timerDigit} />
-            <AnimatedDigit digit={minutes[1]} style={styles.timerDigit} />
-            <Text style={styles.timerColon}>:</Text>
-            <AnimatedDigit digit={seconds[0]} style={styles.timerDigit} />
-            <AnimatedDigit digit={seconds[1]} style={styles.timerDigit} />
-        </View>
-    );
-};
-
 

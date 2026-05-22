@@ -12,6 +12,8 @@ interface CacheOptions {
 
 class QueryCacheService {
     private memoryCache: Map<string, CacheEntry<any>> = new Map();
+    private inFlight: Map<string, Promise<any>> = new Map();
+    private invalidationVersion: Map<string, number> = new Map();
     private persistenceKeyPrefix = '@query_cache:';
     private subscribers: Map<string, Set<(data: any) => void>> = new Map();
 
@@ -51,13 +53,30 @@ class QueryCacheService {
 
         // 3. Define the update function (background fetch)
         const refresh = async () => {
-            try {
+            const pending = this.inFlight.get(key) as Promise<T> | undefined;
+            if (pending) {
+                return pending;
+            }
+
+            const version = this.invalidationVersion.get(key) ?? 0;
+            const request = (async () => {
                 const freshData = await fetcher();
-                this.set(key, freshData, options.persist);
+                if ((this.invalidationVersion.get(key) ?? 0) === version) {
+                    await this.set(key, freshData, options.persist);
+                }
                 return freshData;
+            })();
+
+            this.inFlight.set(key, request);
+            try {
+                return await request;
             } catch (err) {
                 console.error('[QueryCache] Background fetch failed for', key, err);
                 throw err;
+            } finally {
+                if (this.inFlight.get(key) === request) {
+                    this.inFlight.delete(key);
+                }
             }
         };
 
@@ -125,6 +144,8 @@ class QueryCacheService {
      */
     async invalidate(key: string) {
         this.memoryCache.delete(key);
+        this.invalidationVersion.set(key, (this.invalidationVersion.get(key) ?? 0) + 1);
+        this.inFlight.delete(key);
         try {
             await AsyncStorage.removeItem(this.persistenceKeyPrefix + key);
         } catch (e) {

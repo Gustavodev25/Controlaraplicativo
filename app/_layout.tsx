@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
@@ -10,7 +10,6 @@ import { NetworkProvider } from '@/contexts/NetworkContext';
 import { OpenFinanceSyncProvider } from '@/contexts/OpenFinanceSyncContext';
 import { PerformanceProvider } from '@/contexts/PerformanceContext';
 import { ToastProvider } from '@/contexts/ToastContext';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { offlineSync } from '@/services/offlineSync';
 
 
@@ -25,8 +24,19 @@ import {
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+const APP_NAV_THEME = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    primary: '#D97757',
+    background: '#0C0C0C',
+    card: '#0C0C0C',
+    border: 'rgba(255,255,255,0.08)',
+    text: '#FFFFFF',
+  },
+};
+
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
   const [fontsLoaded] = useFonts({
     AROneSans_400Regular,
     AROneSans_500Medium,
@@ -53,12 +63,24 @@ export default function RootLayout() {
               <SubscriptionBlocker>
                 <CategoryProvider>
                   <OpenFinanceSyncProvider>
-                    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-                      <Stack initialRouteName="index" screenOptions={{ animation: 'fade' }}>
+                    <ThemeProvider value={APP_NAV_THEME}>
+                      <Stack
+                        initialRouteName="index"
+                        screenOptions={{
+                          animation: 'fade',
+                          contentStyle: { backgroundColor: '#0C0C0C' },
+                        }}
+                      >
                         <Stack.Screen name="index" options={{ headerShown: false }} />
                         <Stack.Screen name="(public)" options={{ headerShown: false }} />
                         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                        <Stack.Screen name="settings" options={{ headerShown: false }} />
+                        <Stack.Screen
+                          name="settings"
+                          options={{
+                            headerShown: false,
+                            contentStyle: { backgroundColor: '#0C0C0C' },
+                          }}
+                        />
                         <Stack.Screen name="open-finance/callback" options={{ headerShown: false }} />
                       </Stack>
                       <StatusBar style="light" translucent backgroundColor="transparent" />

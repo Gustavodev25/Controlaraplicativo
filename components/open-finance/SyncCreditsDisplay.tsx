@@ -1,15 +1,20 @@
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { databaseService } from '@/services/firebase';
 import { Clock, Zap } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
+    StyleProp,
     StyleSheet,
     Text,
     TouchableOpacity,
-    View
+    TouchableOpacityProps,
+    View,
+    ViewStyle
 } from 'react-native';
 import Animated, {
-    FadeIn
+    FadeIn,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring
 } from 'react-native-reanimated';
 import { CreditsModal } from './CreditsModal';
 
@@ -32,6 +37,76 @@ export interface SyncCreditsData {
 }
 
 // Helper Lottie component that plays at intervals (matching RecurrenceView)
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+interface MorphTouchableProps extends TouchableOpacityProps {
+    children: React.ReactNode;
+    style?: StyleProp<ViewStyle>;
+    radius?: number;
+}
+
+function MorphTouchable({
+    children,
+    style,
+    radius = 20,
+    onPressIn,
+    onPressOut,
+    ...props
+}: MorphTouchableProps) {
+    const pressProgress = useSharedValue(0);
+    const morphProgress = useSharedValue(0);
+
+    const animatedStyle = useAnimatedStyle(() => {
+        const pressed = pressProgress.value;
+        const morph = morphProgress.value;
+
+        return {
+            borderRadius: radius + morph * 3 - pressed * 0.8,
+            transform: [
+                { translateY: pressed * 1.2 },
+                { scaleX: 1 + morph * 0.01 - pressed * 0.01 },
+                { scaleY: 1 + morph * 0.014 + pressed * 0.006 },
+            ],
+        };
+    });
+
+    return (
+        <AnimatedTouchableOpacity
+            {...props}
+            activeOpacity={1}
+            onPressIn={(event) => {
+                pressProgress.value = withSpring(1, {
+                    damping: 16,
+                    stiffness: 250,
+                    mass: 0.42,
+                });
+                morphProgress.value = withSpring(1, {
+                    damping: 13,
+                    stiffness: 190,
+                    mass: 0.48,
+                });
+                onPressIn?.(event);
+            }}
+            onPressOut={(event) => {
+                pressProgress.value = withSpring(0, {
+                    damping: 15,
+                    stiffness: 215,
+                    mass: 0.45,
+                });
+                morphProgress.value = withSpring(0, {
+                    damping: 11,
+                    stiffness: 145,
+                    mass: 0.52,
+                });
+                onPressOut?.(event);
+            }}
+            style={[style, animatedStyle]}
+        >
+            {children}
+        </AnimatedTouchableOpacity>
+    );
+}
 
 
 export const SyncCreditsDisplay = ({
@@ -113,7 +188,10 @@ export const SyncCreditsDisplay = ({
             return (
                 <View style={[styles.unifiedButton, styles.unifiedButtonDisabled, { opacity: 0.8 }]}>
                     <Clock size={16} color="#AAA" />
-                    <Text style={[styles.unifiedButtonText, { color: '#AAA' }]}>
+                    <Text
+                        style={[styles.unifiedButtonText, { color: '#AAA' }]}
+                        numberOfLines={1}
+                    >
                         Faltam {timeUntilReset}
                     </Text>
                 </View>
@@ -123,27 +201,18 @@ export const SyncCreditsDisplay = ({
         return (
             <>
                 {onConnect && (
-                    <TouchableOpacity
+                    <MorphTouchable
                         onPress={onConnect}
-                        activeOpacity={0.7}
                         disabled={connectDisabled}
                         style={[
                             styles.unifiedButton,
                             connectDisabled && styles.unifiedButtonDisabled
                         ]}
                     >
-                        <DelayedLoopLottie
-                            source={require('@/assets/adicionar.json')}
-                            style={{ width: 18, height: 18 }}
-                            delay={3000}
-                            initialDelay={500}
-                            jitterRatio={0.3}
-                            renderMode="HARDWARE"
-                        />
-                        <Text style={styles.unifiedButtonText}>
+                        <Text style={styles.unifiedButtonText} numberOfLines={1}>
                             Conectar <Text style={{ opacity: 0.8 }}>({creditsData.unlimited ? '∞' : creditsData.credits})</Text>
                         </Text>
-                    </TouchableOpacity>
+                    </MorphTouchable>
                 )}
 
                 <CreditsModal
@@ -342,9 +411,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#D97757',
         paddingVertical: 8,
-        paddingHorizontal: 16,
+        paddingHorizontal: 12,
         borderRadius: 20,
         gap: 6,
+        minHeight: 36,
+        maxWidth: 126,
     },
     unifiedButtonDisabled: {
         backgroundColor: '#444',
@@ -354,6 +425,7 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontWeight: '700',
         fontSize: 14,
+        flexShrink: 1,
     },
 });
 

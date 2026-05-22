@@ -41,8 +41,10 @@ function getIAP(): typeof import('react-native-iap') | null {
 // Re-exported types (these are type-only so no runtime cost)
 // ---------------------------------------------------------------------------
 
-export type SubscriptionPurchase = import('react-native-iap').SubscriptionPurchase;
+export type StorePurchase = import('react-native-iap').Purchase;
+export type SubscriptionPurchase = StorePurchase;
 export type PurchaseError = import('react-native-iap').PurchaseError;
+export type ProductSubscription = import('react-native-iap').ProductSubscription;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,7 +55,7 @@ const BACKEND_URL =
     'https://backendcontrolarapp-production.up.railway.app';
 
 export const PRO_PRODUCT_ID = 'com.gustavodev25.controlarapp.pro.monthly';
-export const PRO_PRICE_STRING = 'R$ 35,90';
+export const PRO_PRICE_STRING = 'R$ 34,90';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,6 +65,11 @@ export interface PurchaseResult {
     success: boolean;
     alreadyActive?: boolean;
     userCancelled?: boolean;
+    hasPro?: boolean;
+    status?: string;
+    expiresAt?: string | null;
+    cancelAtPeriodEnd?: boolean;
+    autoRenewStatus?: string | null;
     error?: string;
 }
 
@@ -75,6 +82,61 @@ export interface RestoreResult {
 export interface OfferingsResult {
     priceString: string;
     error?: string;
+}
+
+export interface AppleSubscriptionSnapshot {
+    plan: string;
+    status: string;
+    provider?: string | null;
+    paymentProvider?: string | null;
+    iapSource?: string | null;
+    productId?: string | null;
+    billingCycle?: 'monthly' | 'yearly' | null;
+    price?: number | null;
+    currency?: string | null;
+    expiresAt?: string | null;
+    nextBillingDate?: string | null;
+    renewalDate?: string | null;
+    startedAt?: string | null;
+    cancelledAt?: string | null;
+    cancelAtPeriodEnd?: boolean;
+    autoRenewStatus?: string | null;
+    transactionId?: string | null;
+    originalTransactionId?: string | null;
+    updatedAt?: string | null;
+}
+
+export interface AppleSubscriptionStatusResult {
+    success: boolean;
+    hasPro: boolean;
+    plan: string;
+    status: string;
+    provider: string | null;
+    expiresAt: string | null;
+    cancelAtPeriodEnd: boolean;
+    autoRenewStatus?: string | null;
+    subscription: AppleSubscriptionSnapshot | null;
+    error?: string;
+}
+
+let connectionPromise: Promise<void> | null = null;
+
+function getTrustedDisplayPrice(product: ProductSubscription): string {
+    const displayPrice = String(product.displayPrice || '').trim();
+    const currency = String((product as any).currency || '').trim().toUpperCase();
+
+    if (!displayPrice) return PRO_PRICE_STRING;
+
+    const isDollarPrice =
+        (displayPrice.includes('$') && !displayPrice.includes('R$')) ||
+        /\bUSD\b/i.test(displayPrice);
+    if (isDollarPrice) return PRO_PRICE_STRING;
+
+    if (currency && currency !== 'BRL' && !displayPrice.includes('R$')) {
+        return PRO_PRICE_STRING;
+    }
+
+    return displayPrice;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,11 +187,17 @@ export async function initializePurchases(_userId?: string): Promise<void> {
     const iap = getIAP();
     if (!iap) return;
 
-    try {
-        await iap.initConnection();
-    } catch (e) {
-        console.error('[IAP] initConnection error:', e);
+    if (!connectionPromise) {
+        connectionPromise = iap
+            .initConnection()
+            .then(() => undefined)
+            .catch((e) => {
+                connectionPromise = null;
+                console.error('[IAP] initConnection error:', e);
+            });
     }
+
+    await connectionPromise;
 }
 
 export async function getProOffering(): Promise<OfferingsResult> {
@@ -139,45 +207,170 @@ export async function getProOffering(): Promise<OfferingsResult> {
     if (!iap) return { priceString: PRO_PRICE_STRING };
 
     try {
-        const products = await iap.getSubscriptions({ skus: [PRO_PRODUCT_ID] });
-        if (products.length > 0) {
-            return { priceString: products[0].localizedPrice || PRO_PRICE_STRING };
+        await initializePurchases();
+        const products = await iap.fetchProducts({
+            skus: [PRO_PRODUCT_ID],
+            type: 'subs',
+        }) as ProductSubscription[];
+        const product = products.find((item) => item.id === PRO_PRODUCT_ID) || products[0];
+        if (product) {
+            return { priceString: getTrustedDisplayPrice(product) };
         }
     } catch (e) {
-        console.error('[IAP] getSubscriptions error:', e);
+        console.error('[IAP] fetchProducts error:', e);
     }
     return { priceString: PRO_PRICE_STRING };
 }
 
-export async function checkProStatus(firebaseUid: string): Promise<boolean> {
+function createFallbackStatus(error?: string): AppleSubscriptionStatusResult {
+    return {
+        success: false,
+        hasPro: false,
+        plan: 'free',
+        status: 'inactive',
+        provider: null,
+        expiresAt: null,
+        cancelAtPeriodEnd: false,
+        subscription: null,
+        error,
+    };
+}
+
+export async function getAppleSubscriptionStatus(firebaseUid: string): Promise<AppleSubscriptionStatusResult> {
     try {
         const response = await fetch(
             `${BACKEND_URL}/api/apple/subscription-status?firebaseUid=${encodeURIComponent(firebaseUid)}`
         );
-        const data = await response.json();
-        return data.hasPro === true;
-    } catch {
-        return false;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Erro ao consultar assinatura Apple');
+        }
+
+        return {
+            success: true,
+            hasPro: data.hasPro === true,
+            plan: String(data.plan || data.subscription?.plan || 'free').trim().toLowerCase(),
+            status: String(data.status || data.subscription?.status || 'inactive').trim().toLowerCase(),
+            provider: data.provider || data.subscription?.provider || null,
+            expiresAt: data.expiresAt || data.subscription?.expiresAt || null,
+            cancelAtPeriodEnd: data.cancelAtPeriodEnd === true || data.subscription?.cancelAtPeriodEnd === true,
+            autoRenewStatus: data.autoRenewStatus || data.subscription?.autoRenewStatus || null,
+            subscription: data.subscription || null,
+        };
+    } catch (e: any) {
+        console.error('[IAP] subscription-status error:', e);
+        return createFallbackStatus(e?.message || 'Erro ao consultar assinatura Apple');
     }
+}
+
+export async function syncAppleSubscriptionStatus(firebaseUid: string): Promise<AppleSubscriptionStatusResult> {
+    const currentStatus = await getAppleSubscriptionStatus(firebaseUid);
+
+    if (Platform.OS !== 'ios' || isExpoGo) {
+        return currentStatus;
+    }
+
+    const receiptData = await getReceiptDataForValidation({ refreshIfMissing: false });
+    if (!receiptData) {
+        return currentStatus;
+    }
+
+    const validation = await validateReceiptWithBackend(firebaseUid, receiptData);
+    if (validation.error) {
+        return currentStatus;
+    }
+
+    return getAppleSubscriptionStatus(firebaseUid);
+}
+
+export async function checkProStatus(firebaseUid: string): Promise<boolean> {
+    const status = await syncAppleSubscriptionStatus(firebaseUid);
+    return status.hasPro === true;
 }
 
 export async function validateReceiptWithBackend(
     firebaseUid: string,
-    receiptData: string
+    receiptData: string,
+    purchase?: StorePurchase
 ): Promise<PurchaseResult> {
     try {
         const response = await fetch(`${BACKEND_URL}/api/apple/validate-receipt`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ firebaseUid, receiptData }),
+            body: JSON.stringify({
+                firebaseUid,
+                receiptData,
+                productId: purchase?.productId,
+                transactionId: purchase?.transactionId,
+                originalTransactionId: (purchase as any)?.originalTransactionIdentifierIOS,
+                purchaseToken: purchase?.purchaseToken,
+            }),
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Erro ao validar recibo');
-        return { success: data.hasPro === true };
+        return {
+            success: data.hasPro === true,
+            hasPro: data.hasPro === true,
+            status: data.status,
+            expiresAt: data.expiresAt || null,
+            cancelAtPeriodEnd: data.cancelAtPeriodEnd === true,
+            autoRenewStatus: data.autoRenewStatus || null,
+        };
     } catch (e: any) {
         console.error('[IAP] validate-receipt error:', e);
-        return { success: false, error: e.message };
+        return { success: false, error: e?.message || 'Erro ao validar recibo' };
     }
+}
+
+async function getReceiptDataForValidation(
+    options: { refreshIfMissing?: boolean } = {}
+): Promise<string | null> {
+    if (Platform.OS !== 'ios' || isExpoGo) return null;
+
+    const iap = getIAP();
+    if (!iap) return null;
+
+    try {
+        await initializePurchases();
+        const receipt = await iap.getReceiptIOS();
+        if (receipt) return receipt;
+    } catch (e) {
+        console.warn('[IAP] getReceiptIOS unavailable:', e);
+    }
+
+    if (options.refreshIfMissing === false) {
+        return null;
+    }
+
+    try {
+        const refreshedReceipt = await iap.requestReceiptRefreshIOS();
+        return refreshedReceipt || null;
+    } catch (e) {
+        console.warn('[IAP] requestReceiptRefreshIOS failed:', e);
+    }
+
+    try {
+        const receiptData = await iap.getReceiptDataIOS();
+        return receiptData || null;
+    } catch (e) {
+        console.error('[IAP] getReceiptDataIOS failed:', e);
+        return null;
+    }
+}
+
+export async function validatePurchaseWithBackend(
+    firebaseUid: string,
+    purchase: StorePurchase
+): Promise<PurchaseResult> {
+    const receiptData = await getReceiptDataForValidation();
+    if (!receiptData) {
+        return {
+            success: false,
+            error: 'Nao foi possivel obter o recibo da App Store. Tente restaurar a compra.',
+        };
+    }
+
+    return validateReceiptWithBackend(firebaseUid, receiptData, purchase);
 }
 
 export async function restorePurchases(firebaseUid: string): Promise<RestoreResult> {
@@ -189,12 +382,17 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
     if (!iap) return { success: false, hasPro: false, error: 'IAP not available' };
 
     try {
-        const purchases = await iap.getAvailablePurchases();
+        await initializePurchases();
+        await iap.restorePurchases();
+        const purchases = await iap.getAvailablePurchases({
+            onlyIncludeActiveItemsIOS: true,
+            alsoPublishToEventListenerIOS: false,
+        });
         const proPurchase = purchases.find(p => p.productId === PRO_PRODUCT_ID);
-        if (!proPurchase?.transactionReceipt) {
+        if (!proPurchase) {
             return { success: true, hasPro: false };
         }
-        const result = await validateReceiptWithBackend(firebaseUid, proPurchase.transactionReceipt);
+        const result = await validatePurchaseWithBackend(firebaseUid, proPurchase);
         if (result.success) {
             await iap.finishTransaction({ purchase: proPurchase as any, isConsumable: false });
         }
@@ -206,10 +404,29 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
 }
 
 export async function purchaseProSubscription(): Promise<void> {
+    if (Platform.OS !== 'ios') {
+        throw new Error('Assinaturas no iOS devem ser feitas pela App Store.');
+    }
     if (isExpoGo) {
         throw new Error('Compras não são suportadas no Expo Go. Use um build nativo (EAS).');
     }
     const iap = getIAP();
     if (!iap) throw new Error('IAP não disponível neste ambiente');
-    await iap.requestSubscription({ sku: PRO_PRODUCT_ID });
+    await initializePurchases();
+    await iap.requestPurchase({
+        request: {
+            apple: { sku: PRO_PRODUCT_ID },
+        },
+        type: 'subs',
+    });
+}
+
+export async function openSubscriptionManagement(): Promise<void> {
+    if (Platform.OS !== 'ios' || isExpoGo) return;
+
+    const iap = getIAP();
+    if (!iap) throw new Error('IAP nao disponivel neste ambiente');
+
+    await initializePurchases();
+    await iap.deepLinkToSubscriptions();
 }

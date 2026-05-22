@@ -33,7 +33,7 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
         }
 
         // Already on subscription/plans pages — don't redirect
-        if (pathname.includes('subscription') || pathname.includes('plans') || pathname.includes('login') || pathname.includes('register') || pathname.includes('welcome')) {
+        if (pathname.includes('subscription') || pathname.includes('plans') || pathname.includes('legal') || pathname.includes('login') || pathname.includes('register') || pathname.includes('welcome')) {
             return;
         }
 

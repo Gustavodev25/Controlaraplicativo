@@ -34,11 +34,15 @@ export const getDashboardLoadPlan = ({
   }
 
   if (trigger === 'initial') {
+    if (hasInitialLoad && lastMonthKeyLoaded === selectedMonthKey) {
+      return EMPTY_PLAN;
+    }
+
     return {
-      fetchMonthScopedData: true,
-      fetchCreditOverviewData: true,
+      fetchMonthScopedData: lastMonthKeyLoaded !== selectedMonthKey,
+      fetchCreditOverviewData: !hasInitialLoad,
       updateLastMonthKey: selectedMonthKey,
-      markInitialLoad: true,
+      markInitialLoad: !hasInitialLoad,
     };
   }
 

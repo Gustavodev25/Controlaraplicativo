@@ -1,7 +1,10 @@
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Eye, EyeOff, Lock, Mail } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
+import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import type { KeyboardAvoidingViewProps } from 'react-native';
+
+import { ThemedText } from '@/components/themed-text';
 
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { AuthButton } from '@/components/ui/AuthButton';
@@ -9,7 +12,7 @@ import { AuthInput } from '@/components/ui/AuthInput';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 
-const KEYBOARD_BEHAVIOR = Platform.select({ ios: 'padding', android: 'height' });
+const KEYBOARD_BEHAVIOR: KeyboardAvoidingViewProps['behavior'] = Platform.select({ ios: 'padding', android: 'height' });
 
 export default function LoginScreen() {
     const router = useRouter();
@@ -71,44 +74,45 @@ export default function LoginScreen() {
                     <View style={styles.centerContainer}>
                         <View style={styles.titleSection}>
                             <View style={styles.logoContainer}>
-                                <Image 
-                                    source={require('@/assets/images/android-icon-foreground.png')} 
+                                <Image
+                                    source={require('@/assets/images/icon.png')}
                                     style={styles.logo}
                                     resizeMode="contain"
                                 />
                             </View>
-                            <Text style={styles.subtitle}>Faça login para continuar</Text>
+                            <ThemedText type="title" style={styles.title}>Bem-vindo de volta</ThemedText>
+                            <ThemedText style={styles.subtitle}>Gerencie suas finanças com simplicidade e elegância.</ThemedText>
                         </View>
 
                         <View style={styles.form}>
-                            <AuthInput 
-                                label="E-mail" 
-                                placeholder="seu@email.com" 
-                                icon={Mail} 
-                                value={email} 
-                                onChangeText={setEmail} 
-                                autoCapitalize="none" 
-                                keyboardType="email-address" 
+                            <AuthInput
+                                label="E-mail"
+                                placeholder="seu@email.com"
+                                icon={Mail}
+                                value={email}
+                                onChangeText={setEmail}
+                                autoCapitalize="none"
+                                keyboardType="email-address"
                             />
-                            <AuthInput 
-                                label="Senha" 
-                                placeholder="••••••••" 
-                                icon={Lock} 
-                                value={password} 
-                                onChangeText={setPassword} 
-                                secureTextEntry={!showPassword} 
+                            <AuthInput
+                                label="Senha"
+                                placeholder="••••••••"
+                                icon={Lock}
+                                value={password}
+                                onChangeText={setPassword}
+                                secureTextEntry={!showPassword}
                                 rightIcon={
                                     <TouchableOpacity onPress={togglePasswordVisibility}>
                                         {showPassword ? <EyeOff size={20} color="#9ca3af" /> : <Eye size={20} color="#9ca3af" />}
                                     </TouchableOpacity>
-                                } 
+                                }
                             />
-                            
-                            <AuthButton 
-                                title="Entrar" 
-                                onPress={handleLogin} 
-                                isLoading={isLoading} 
-                                style={styles.button} 
+
+                            <AuthButton
+                                title="Entrar"
+                                onPress={handleLogin}
+                                isLoading={isLoading}
+                                style={styles.button}
                             />
 
                             <TouchableOpacity onPress={handleNewAccount} style={styles.registerLink}>
@@ -141,43 +145,54 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         paddingHorizontal: 32,
-        paddingBottom: 40,
+        paddingBottom: 20,
     },
     titleSection: {
-        alignItems: 'center',
-        marginBottom: 40,
+        alignItems: 'flex-start',
+        marginBottom: 48,
     },
     logoContainer: {
-        width: 80,
-        height: 80,
+        width: 56,
+        height: 56,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 20,
     },
     logo: {
-        width: 60,
-        height: 60,
-        borderRadius: 12,
+        width: 56,
+        height: 56,
+        borderRadius: 14,
     },
-    subtitle: { 
-        fontSize: 15, 
-        color: '#9ca3af', 
+    title: {
+        fontSize: 32,
+        fontWeight: '800',
+        color: '#faf9f5',
+        marginBottom: 12,
+        textAlign: 'left',
+        letterSpacing: -1,
+    },
+    subtitle: {
+        fontSize: 16,
+        color: '#9ca3af',
         fontWeight: '400',
+        textAlign: 'left',
+        lineHeight: 24,
+        paddingRight: 20,
     },
-    form: { 
+    form: {
         width: '100%',
         gap: 16,
     },
-    button: { 
+    button: {
         marginTop: 12,
     },
-    registerLink: { 
+    registerLink: {
         marginTop: 24,
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
-    registerLinkText: { 
-        fontSize: 14, 
-        color: '#9ca3af', 
-        fontWeight: '500' 
+    registerLinkText: {
+        fontSize: 14,
+        color: '#9ca3af',
+        fontWeight: '500'
     },
 });

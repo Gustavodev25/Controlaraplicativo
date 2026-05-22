@@ -26,6 +26,7 @@ yarn-error.*
 server/.env
 server/serviceAccountKey.json
 .agent/
+.claude/
 
 *.tsbuildinfo
 

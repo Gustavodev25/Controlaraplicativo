@@ -1,6 +1,6 @@
-import { CreditCardFilterModal, FilterState } from '@/components/CreditCardFilterModal';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useCategories } from '@/hooks/use-categories';
 import { usePerformanceBudget } from '@/hooks/usePerformanceBudget';
@@ -14,9 +14,10 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { collection, getDocs, limit, orderBy, query, QueryDocumentSnapshot, startAfter } from 'firebase/firestore';
-import LottieView from 'lottie-react-native';
 import {
     ArrowRightLeft,
+    ChevronLeft,
+    ChevronRight,
     Baby,
     BookOpen,
     Car,
@@ -25,7 +26,6 @@ import {
     Coffee,
     DollarSign,
     Dumbbell,
-    Filter,
     Fuel,
     Gamepad2,
     Gift,
@@ -41,21 +41,36 @@ import {
     Smartphone,
     Stethoscope,
     Utensils,
+    Search,
     Wifi,
+    X,
     Zap
 } from 'lucide-react-native';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    LayoutAnimation,
+    Image,
     RefreshControl,
+    ScrollView,
     SectionList,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View
 } from 'react-native';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import Animated, {
+    Extrapolation,
+    FadeIn,
+    FadeOut,
+    interpolate,
+    LinearTransition,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withSequence,
+    withSpring,
+} from 'react-native-reanimated';
 
 interface Transaction {
     id: string;
@@ -78,9 +93,264 @@ interface TransactionSection {
     data: Transaction[];
 }
 
+const HEADER_CONTROL_HEIGHT = 36;
+const FOCUS_REFRESH_MIN_INTERVAL_MS = 15000;
+
+const IOS_CORE_LAYOUT = LinearTransition
+    .springify()
+    .damping(21)
+    .stiffness(245)
+    .mass(0.72)
+    .overshootClamping(0);
+
+const IOS_FADE_IN = FadeIn.duration(220);
+const IOS_FADE_OUT = FadeOut.duration(140);
+
+const MORPH_PRESS_SPRING = {
+    damping: 16,
+    stiffness: 250,
+    mass: 0.42,
+} as const;
+
+const MORPH_SHAPE_SPRING = {
+    damping: 13,
+    stiffness: 190,
+    mass: 0.48,
+} as const;
+
+const MORPH_RELEASE_PRESS_SPRING = {
+    damping: 15,
+    stiffness: 215,
+    mass: 0.45,
+} as const;
+
+const MORPH_RELEASE_SHAPE_SPRING = {
+    damping: 11,
+    stiffness: 145,
+    mass: 0.52,
+} as const;
+
+const AS_SPRING_ENTRY   = { damping: 16, stiffness: 195, mass: 1.05, overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_SPRING_STRETCH = { damping: 12, stiffness: 165, mass: 1.1,  overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_SPRING_RECOIL  = { damping: 16, stiffness: 150, mass: 1.05, overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_SPRING_SETTLE  = { damping: 22, stiffness: 160, mass: 1,    overshootClamping: false, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.001 } as const;
+const AS_LABEL_SPRING   = { damping: 18, stiffness: 260, mass: 0.7,  overshootClamping: false } as const;
+const AS_PRESS_SPRING   = { damping: 16, stiffness: 360, mass: 0.5,  overshootClamping: false } as const;
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+interface ArrowSelectorOption { label: string; value: string | null; }
+
+function ArrowSelector({ options, selectedValue, onChange }: {
+    options: ArrowSelectorOption[];
+    selectedValue: string | null;
+    onChange: (value: string | null) => void;
+}) {
+    const currentIndex = Math.max(0, options.findIndex(o => o.value === selectedValue));
+    const directionRef = useRef(0);
+
+    const visibility    = useSharedValue(0);
+    const squash        = useSharedValue(0.84);
+    const contentReveal = useSharedValue(1);
+    const leftPress     = useSharedValue(0);
+    const rightPress    = useSharedValue(0);
+
+    useEffect(() => {
+        squash.value    = 0.84;
+        visibility.value = withSpring(1, AS_SPRING_ENTRY);
+        squash.value    = withSequence(
+            withSpring(1.085, AS_SPRING_STRETCH),
+            withSpring(0.976, AS_SPRING_RECOIL),
+            withSpring(1,     AS_SPRING_SETTLE),
+        );
+    }, []);
+
+    useEffect(() => {
+        squash.value = withSequence(
+            withSpring(1.075, AS_SPRING_STRETCH),
+            withSpring(0.978, AS_SPRING_RECOIL),
+            withSpring(1,     AS_SPRING_SETTLE),
+        );
+        contentReveal.value = 0;
+        contentReveal.value = withDelay(75, withSpring(1, AS_LABEL_SPRING));
+    }, [currentIndex]);
+
+    const containerStyle = useAnimatedStyle(() => {
+        const pressAmount = Math.max(leftPress.value, rightPress.value);
+        const stretchX = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [0.92, 0.99, 1, 1.04],  Extrapolation.CLAMP);
+        const stretchY = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [1.08, 1.018, 1, 0.976], Extrapolation.CLAMP);
+        const baseScaleX = interpolate(visibility.value, [0, 0.34, 0.68, 1], [0.18, 1.028, 0.992, 1], Extrapolation.CLAMP);
+        const baseScaleY = interpolate(visibility.value, [0, 0.42, 0.78, 1], [0.18, 0.94,  1.012, 1], Extrapolation.CLAMP);
+        const pressScaleX = interpolate(pressAmount, [0, 1], [1, 0.986], Extrapolation.CLAMP);
+        const pressScaleY = interpolate(pressAmount, [0, 1], [1, 1.035], Extrapolation.CLAMP);
+        const translateY  = interpolate(visibility.value, [0, 0.5, 0.82, 1], [14, -3, 1, 0], Extrapolation.CLAMP);
+        return {
+            opacity: interpolate(visibility.value, [0, 0.22, 1], [0, 0.86, 1], Extrapolation.CLAMP),
+            transform: [
+                { translateY },
+                { scaleX: baseScaleX * stretchX * pressScaleX },
+                { scaleY: baseScaleY * stretchY * pressScaleY },
+            ],
+        };
+    });
+
+    const contentCounterStyle = useAnimatedStyle(() => {
+        const cx = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [1.09, 1.012, 1, 0.962], Extrapolation.CLAMP);
+        const cy = interpolate(squash.value, [0.84, 0.976, 1, 1.085], [0.93, 0.984, 1, 1.024], Extrapolation.CLAMP);
+        return { transform: [{ scaleX: cx }, { scaleY: cy }] };
+    });
+
+    const labelStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(contentReveal.value, [0, 0.45, 1], [0, 0.35, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateY: interpolate(contentReveal.value, [0, 1], [4, 0],  Extrapolation.CLAMP) },
+            { translateX: interpolate(contentReveal.value, [0, 1], [directionRef.current * 5, 0], Extrapolation.CLAMP) },
+            { scale:      interpolate(contentReveal.value, [0, 1], [0.965, 1], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const leftBtnStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(leftPress.value, [0, 1], [0.68, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateX: interpolate(leftPress.value,  [0, 1], [0, -1.4], Extrapolation.CLAMP) },
+            { scale:      interpolate(leftPress.value,  [0, 1], [1, 0.88], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const rightBtnStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(rightPress.value, [0, 1], [0.68, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateX: interpolate(rightPress.value, [0, 1], [0, 1.4],  Extrapolation.CLAMP) },
+            { scale:      interpolate(rightPress.value, [0, 1], [1, 0.88], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const handlePrev = () => {
+        directionRef.current = -1;
+        const prev = currentIndex === 0 ? options.length - 1 : currentIndex - 1;
+        onChange(options[prev].value);
+    };
+
+    const handleNext = () => {
+        directionRef.current = 1;
+        const next = (currentIndex + 1) % options.length;
+        onChange(options[next].value);
+    };
+
+    return (
+        <Animated.View style={[txStyles.arrowSelector, containerStyle]}>
+            <Animated.View style={[txStyles.arrowSelectorContent, contentCounterStyle]}>
+                <AnimatedTouchableOpacity
+                    onPress={handlePrev}
+                    onPressIn={() => { leftPress.value = withSpring(1, AS_PRESS_SPRING); }}
+                    onPressOut={() => { leftPress.value = withSpring(0, AS_PRESS_SPRING); }}
+                    style={[txStyles.arrowSelectorBtn, leftBtnStyle]}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <ChevronLeft size={14} color="#F5F5F7" strokeWidth={2.4} />
+                </AnimatedTouchableOpacity>
+
+                <View style={txStyles.arrowSelectorLabelWrapper}>
+                    <Animated.Text
+                        key={options[currentIndex].label}
+                        style={[txStyles.arrowSelectorLabel, labelStyle]}
+                        numberOfLines={1}
+                    >
+                        {options[currentIndex].label}
+                    </Animated.Text>
+                </View>
+
+                <AnimatedTouchableOpacity
+                    onPress={handleNext}
+                    onPressIn={() => { rightPress.value = withSpring(1, AS_PRESS_SPRING); }}
+                    onPressOut={() => { rightPress.value = withSpring(0, AS_PRESS_SPRING); }}
+                    style={[txStyles.arrowSelectorBtn, rightBtnStyle]}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <ChevronRight size={14} color="#F5F5F7" strokeWidth={2.4} />
+                </AnimatedTouchableOpacity>
+            </Animated.View>
+        </Animated.View>
+    );
+}
+
+// Styles compartilhados do ArrowSelector (fora do StyleSheet principal)
+const txStyles = StyleSheet.create({
+    arrowSelector: {
+        width: 146,
+        height: 36,
+        borderRadius: 24,
+        overflow: 'hidden',
+        backgroundColor: '#101010',
+        borderWidth: 1,
+        borderColor: '#252525',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 16,
+        elevation: 6,
+    },
+    arrowSelectorContent: {
+        ...StyleSheet.absoluteFillObject,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 7,
+        gap: 4,
+        zIndex: 5,
+    },
+    arrowSelectorBtn: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    arrowSelectorLabelWrapper: {
+        overflow: 'hidden',
+        width: 76,
+        height: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    arrowSelectorLabel: {
+        color: '#F5F5F7',
+        fontSize: 12,
+        fontWeight: '700',
+        textAlign: 'center',
+        position: 'absolute',
+    },
+});
+const CURRENCY_FORMATTER = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+});
+const MONTH_SHORT_FORMATTER = new Intl.DateTimeFormat('pt-BR', { month: 'short' });
+const MONTH_LONG_FORMATTER = new Intl.DateTimeFormat('pt-BR', { month: 'long' });
+
+type CategoryIconComponent = React.ComponentType<{
+    size?: number;
+    color?: string;
+    strokeWidth?: number;
+}>;
+
+interface CategoryConfig {
+    icon: CategoryIconComponent;
+    color: string;
+    backgroundColor: string;
+}
+
+const categoryConfigCache = new Map<string, CategoryConfig>();
+
 // Configuração de ícones e cores por categoria (mesmo do CreditCardInvoice)
-const getCategoryConfig = (category?: string) => {
+const getCategoryConfig = (category?: string): CategoryConfig => {
     const cat = category?.toLowerCase() || '';
+    const cached = categoryConfigCache.get(cat);
+    if (cached) {
+        return cached;
+    }
 
     const colors = {
         transport: '#FF9F0A',
@@ -104,7 +374,7 @@ const getCategoryConfig = (category?: string) => {
         return `rgba(${r}, ${g}, ${b}, 0.15)`;
     };
 
-    let icon = ShoppingBag;
+    let icon: CategoryIconComponent = ShoppingBag;
     let color = colors.gray;
 
     // Transport
@@ -154,15 +424,14 @@ const getCategoryConfig = (category?: string) => {
     else if (cat.includes('salary') || cat.includes('income') || cat.includes('salario') || cat.includes('pagamento')) { icon = DollarSign; color = colors.income; }
     else if (cat.includes('gift') || cat.includes('present')) { icon = Gift; color = '#FF375F'; }
 
-    return { icon, color, backgroundColor: getBg(color) };
+    const config = { icon, color, backgroundColor: getBg(color) };
+    categoryConfigCache.set(cat, config);
+    return config;
 };
 
 // Formatar moeda
 const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-        style: 'currency',
-        currency: 'BRL',
-    }).format(amount);
+    return CURRENCY_FORMATTER.format(amount);
 };
 
 const normalizeTransactionDate = (value?: string): string => {
@@ -193,67 +462,86 @@ const TransactionItem = React.memo(({
     const isFirst = index === 0;
     const isLast = index === total - 1;
     const hideInstallments = isNonInstallmentMerchant(item.description);
+    const press = useSharedValue(0);
+    const morph = useSharedValue(0);
 
     const amountColor = isExpense ? '#FFFFFF' : '#04D361';
-    const { icon: CategoryIcon, color: categoryColor, backgroundColor: categoryBg } = getCategoryConfig(item.category || item.description);
+    const formattedAmount = useMemo(() => formatCurrency(item.amount), [item.amount]);
 
     const borderStyle = {
-        borderTopLeftRadius: isFirst ? 16 : 0,
-        borderTopRightRadius: isFirst ? 16 : 0,
-        borderBottomLeftRadius: isLast ? 16 : 0,
-        borderBottomRightRadius: isLast ? 16 : 0,
+        borderTopLeftRadius: isFirst ? 12 : 0,
+        borderTopRightRadius: isFirst ? 12 : 0,
+        borderBottomLeftRadius: isLast ? 12 : 0,
+        borderBottomRightRadius: isLast ? 12 : 0,
         marginTop: index === 0 ? 0 : -1,
+    };
+
+    const cardMorphStyle = useAnimatedStyle(() => {
+        const pressed = press.value;
+        const morphed = morph.value;
+        const cornerMorph = morphed * 3 - pressed * 0.8;
+
+        return {
+            borderTopLeftRadius: isFirst ? 12 + cornerMorph : 0,
+            borderTopRightRadius: isFirst ? 12 + cornerMorph : 0,
+            borderBottomLeftRadius: isLast ? 12 + cornerMorph : 0,
+            borderBottomRightRadius: isLast ? 12 + cornerMorph : 0,
+            transform: [
+                { translateY: pressed * 1.4 },
+                { scaleX: 1 + morphed * 0.012 - pressed * 0.012 },
+                { scaleY: 1 + morphed * 0.016 + pressed * 0.008 },
+            ],
+        };
+    });
+
+    const handlePressIn = () => {
+        press.value = withSpring(1, MORPH_PRESS_SPRING);
+        morph.value = withSpring(1, MORPH_SHAPE_SPRING);
+    };
+
+    const handlePressOut = () => {
+        press.value = withSpring(0, MORPH_RELEASE_PRESS_SPRING);
+        morph.value = withSpring(0, MORPH_RELEASE_SHAPE_SPRING);
     };
 
     return (
         <Animated.View
-            layout={animateRow ? LinearTransition.duration(300) : undefined}
-            entering={animateRow ? FadeIn.duration(400) : undefined}
-            exiting={animateRow ? FadeOut.duration(200) : undefined}
-            style={[styles.transactionCard, borderStyle]}
+            layout={animateRow ? IOS_CORE_LAYOUT : undefined}
+            entering={animateRow ? IOS_FADE_IN : undefined}
+            exiting={animateRow ? IOS_FADE_OUT : undefined}
+            style={styles.transactionCardWrapper}
         >
-            <View style={{
-                width: 40, height: 40, borderRadius: 12,
-                backgroundColor: categoryBg,
-                justifyContent: 'center', alignItems: 'center',
-                marginRight: 12,
-                borderWidth: 1,
-                borderColor: categoryColor + '20'
-            }}>
-                <CategoryIcon size={20} color={categoryColor} strokeWidth={2.5} />
-            </View>
-
-            <View style={styles.detailsContainer}>
-                <View style={styles.descriptionRow}>
-                    <Text style={styles.description} numberOfLines={1}>
-                        {item.description}
-                    </Text>
+            <AnimatedTouchableOpacity
+                activeOpacity={1}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                style={[styles.transactionCard, borderStyle, cardMorphStyle]}
+            >
+                <View style={styles.detailsContainer}>
+                    <View style={styles.descriptionRow}>
+                        <Text style={styles.description} numberOfLines={1}>
+                            {item.description}
+                        </Text>
+                    </View>
+                    <View style={styles.subDetails}>
+                        <Text style={styles.category}>{getCategoryName(item.category)}</Text>
+                    </View>
                 </View>
-                <View style={styles.subDetails}>
-                    <Text style={styles.category}>{getCategoryName(item.category)}</Text>
-                </View>
-            </View>
 
-            <View style={styles.amountContainer}>
-                <Text style={[
-                    styles.amount,
-                    {
-                        color: amountColor,
-                        textShadowColor: amountColor + '40',
-                        textShadowOffset: { width: 0, height: 0 },
-                        textShadowRadius: 8,
-                    }
-                ]}>
-                    {isExpense ? '- ' : '+ '}{formatCurrency(item.amount)}
-                </Text>
-
-                {!hideInstallments && (item.totalInstallments && item.totalInstallments > 1) && (
-                    <Text style={{ fontSize: 10, color: '#666', marginTop: 2, textAlign: 'right', fontWeight: '500' }}>
-                        {item.installmentNumber}/{item.totalInstallments}
+                <View style={styles.amountContainer}>
+                    <Text style={[styles.amount, { color: amountColor }]}>
+                        {isExpense ? '- ' : '+ '}{formattedAmount}
                     </Text>
-                )}
-            </View>
-            {!isLast && <View style={styles.separator} />}
+                    {!hideInstallments && (item.totalInstallments && item.totalInstallments > 1) && (
+                        <View style={styles.installmentPill}>
+                            <Text style={styles.installmentPillText}>
+                                {item.installmentNumber}/{item.totalInstallments}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+                {!isLast && <View style={styles.separator} />}
+            </AnimatedTouchableOpacity>
         </Animated.View>
     );
 });
@@ -269,19 +557,6 @@ export default function TransactionsScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
-    const [loadingDots, setLoadingDots] = useState('');
-
-    useEffect(() => {
-        if (!loading) return;
-        const interval = setInterval(() => {
-            setLoadingDots(prev => {
-                if (prev === '...') return '';
-                return prev + '.';
-            });
-        }, 500);
-        return () => clearInterval(interval);
-    }, [loading]);
-
     // Pagination State
     const [lastCheckingDoc, setLastCheckingDoc] = useState<QueryDocumentSnapshot | null>(null);
     const [lastCreditDoc, setLastCreditDoc] = useState<QueryDocumentSnapshot | null>(null);
@@ -291,14 +566,8 @@ export default function TransactionsScreen() {
     const BATCH_SIZE = 50;
 
     // Filter State
-    const [filterModalVisible, setFilterModalVisible] = useState(false);
-    const [filters, setFilters] = useState<FilterState>({
-        search: '',
-        categories: [],
-        startDate: '',
-        endDate: '',
-        year: ''
-    });
+    const [filters, setFilters] = useState({ search: '', categories: [] as string[], year: '' });
+    const [typeFilter, setTypeFilter] = useState<string | null>(null);
 
     const isCredit = filter === 'credit';
     const hasMoreForCurrentFilter = filter === 'credit'
@@ -306,21 +575,11 @@ export default function TransactionsScreen() {
         : filter === 'account'
             ? hasMoreChecking
             : (hasMoreChecking || hasMoreCredit);
+    const screenEntryProgress = useSharedValue(0);
+    const hasCompletedInitialFetchRef = useRef(false);
+    const lastFocusRefreshAtRef = useRef(0);
 
-    // Calcular quantidade de filtros ativos
-    const activeFilterCount = [
-        filters.search,
-        filters.categories.length > 0,
-        filters.startDate,
-        filters.endDate,
-        filters.year
-    ].filter(Boolean).length;
-
-    // Handler para aplicar filtros
-    const handleApplyFilters = (newFilters: FilterState) => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setFilters(newFilters);
-    };
+    const hasActiveFilters = !!(filters.search || filters.categories.length > 0 || filters.year || typeFilter);
 
     // Calcular anos disponíveis
     const availableYears = useMemo(() => {
@@ -350,28 +609,19 @@ export default function TransactionsScreen() {
 
     // Filtrar transações
     const filteredTransactions = useMemo(() => {
-        // Primeiro, remover estornos de todas as transações
         const transactionsWithoutRefunds = transactions.filter(item => {
             const isRefund = (item as any).isRefund || item.category === 'Refund';
             return !isRefund;
         });
 
-        if (activeFilterCount === 0) return transactionsWithoutRefunds;
-
-        const parseFilterDate = (d: string) => {
-            const parts = d.split('/');
-            if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
-            return '';
-        };
+        const hasFilters = !!(filters.search || filters.categories.length > 0 || filters.year || typeFilter);
+        if (!hasFilters) return transactionsWithoutRefunds;
 
         const searchLower = filters.search.toLowerCase();
-        const startIso = parseFilterDate(filters.startDate);
-        const endIso = parseFilterDate(filters.endDate);
 
         return transactionsWithoutRefunds.filter(item => {
             let matches = true;
 
-            // Search
             if (filters.search) {
                 matches = matches && (
                     (!!item.description && item.description.toLowerCase().includes(searchLower)) ||
@@ -379,29 +629,21 @@ export default function TransactionsScreen() {
                 );
             }
 
-            // Category
             if (filters.categories.length > 0) {
                 matches = matches && !!item.category && filters.categories.includes(item.category);
             }
 
-            // Start Date
-            if (startIso) {
-                matches = matches && !!item.date && item.date >= startIso;
-            }
-
-            // End Date
-            if (endIso) {
-                matches = matches && !!item.date && item.date <= endIso;
-            }
-
-            // Year
             if (filters.year) {
                 matches = matches && !!item.date && item.date.startsWith(filters.year);
             }
 
+            if (typeFilter) {
+                matches = matches && item.type === typeFilter;
+            }
+
             return matches;
         });
-    }, [transactions, filters, activeFilterCount, isCredit]);
+    }, [transactions, filters, typeFilter]);
 
     // Agrupar transações por dia
     const groupedTransactions = useMemo(() => {
@@ -430,19 +672,19 @@ export default function TransactionsScreen() {
             if (isNaN(testD.getTime())) return;
             let header = '';
             if (item.date === todayYMD) {
-                const d = new Date(item.date + 'T12:00:00');
+                const d = testD;
                 const day = d.getDate();
-                const month = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(d).toUpperCase().replace('.', '');
+                const month = MONTH_SHORT_FORMATTER.format(d).toUpperCase().replace('.', '');
                 header = `HOJE, ${day} ${month}`;
             } else if (item.date === yesterdayYMD) {
-                const d = new Date(item.date + 'T12:00:00');
+                const d = testD;
                 const day = d.getDate();
-                const month = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(d).toUpperCase().replace('.', '');
+                const month = MONTH_SHORT_FORMATTER.format(d).toUpperCase().replace('.', '');
                 header = `ONTEM, ${day} ${month}`;
             } else {
-                const d = new Date(item.date + 'T12:00:00');
+                const d = testD;
                 const day = d.getDate();
-                const monthFull = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(d).toUpperCase();
+                const monthFull = MONTH_LONG_FORMATTER.format(d).toUpperCase();
                 header = `${day} ${monthFull}`;
             }
 
@@ -457,17 +699,17 @@ export default function TransactionsScreen() {
     }, [filteredTransactions]);
 
     const visibleItemsCount = filteredTransactions.length;
-    const animateRows = lod < 2 && visibleItemsCount <= 120;
+    const animateRows = lod === 0 && visibleItemsCount <= 40;
 
     // Optimized Fetch Logic
-    const fetchTransactions = async (isLoadMore = false) => {
+    const fetchTransactions = async (isLoadMore = false, isSilent = false) => {
         if (!user) return;
         if (isLoadMore && (loadingMore || !hasMoreForCurrentFilter)) return;
 
         try {
             if (isLoadMore) {
                 setLoadingMore(true);
-            } else {
+            } else if (!isSilent) {
                 setLoading(true);
             }
 
@@ -598,6 +840,9 @@ export default function TransactionsScreen() {
 
 
     useEffect(() => {
+        hasCompletedInitialFetchRef.current = false;
+        lastFocusRefreshAtRef.current = Date.now();
+
         // Reset pagination state when filters change or user changes
         setLastCheckingDoc(null);
         setLastCreditDoc(null);
@@ -605,21 +850,39 @@ export default function TransactionsScreen() {
         setHasMoreCredit(true);
         setTransactions([]); // Clear list to show loading state correctly
 
-        fetchTransactions(false);
+        void fetchTransactions(false).finally(() => {
+            hasCompletedInitialFetchRef.current = true;
+        });
     }, [user, filter]);
+
+    useFocusEffect(
+        useCallback(() => {
+            screenEntryProgress.value = 0;
+            screenEntryProgress.value = withDelay(35, withSpring(1, AS_SPRING_ENTRY));
+        }, [screenEntryProgress])
+    );
 
     // Refresh data when screen comes into focus (e.g., after connecting a bank)
     useFocusEffect(
         useCallback(() => {
-            if (user) {
-                // Silently refresh without showing loading state
-                setLastCheckingDoc(null);
-                setLastCreditDoc(null);
-                setHasMoreChecking(true);
-                setHasMoreCredit(true);
-                fetchTransactions(false);
+            if (!user || !hasCompletedInitialFetchRef.current) {
+                return;
             }
-        }, [user, filter, isCredit])
+
+            const now = Date.now();
+            if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_MIN_INTERVAL_MS) {
+                return;
+            }
+
+            lastFocusRefreshAtRef.current = now;
+
+            // Silently refresh without showing loading state
+            setLastCheckingDoc(null);
+            setLastCreditDoc(null);
+            setHasMoreChecking(true);
+            setHasMoreCredit(true);
+            void fetchTransactions(false, true);
+        }, [user, filter])
     );
 
 
@@ -630,7 +893,7 @@ export default function TransactionsScreen() {
         setLastCreditDoc(null);
         setHasMoreChecking(true);
         setHasMoreCredit(true);
-        fetchTransactions(false);
+        fetchTransactions(false, true);
     };
 
     const loadMore = () => {
@@ -660,6 +923,40 @@ export default function TransactionsScreen() {
         </View>
     ), [groupedTransactions, filteredTransactions.length]);
     const keyExtractor = useCallback((item: Transaction) => `${item.source}-${item.id}`, []);
+    const renderSectionSeparator = useCallback(() => <View style={styles.sectionSeparator} />, []);
+    const listFooter = useMemo(() => (
+        loadingMore ? (
+            <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color="#F5F5F7" />
+            </View>
+        ) : null
+    ), [loadingMore]);
+
+    const headerEntryStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(screenEntryProgress.value, [0, 0.28, 1], [0, 0.86, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateY: interpolate(screenEntryProgress.value, [0, 1], [-10, 0], Extrapolation.CLAMP) },
+            { scale: interpolate(screenEntryProgress.value, [0, 1], [0.985, 1], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const filterEntryStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(screenEntryProgress.value, [0, 0.22, 1], [0, 0.25, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateY: interpolate(screenEntryProgress.value, [0, 1], [10, 0], Extrapolation.CLAMP) },
+            { scaleX: interpolate(screenEntryProgress.value, [0, 1], [0.968, 1], Extrapolation.CLAMP) },
+            { scaleY: interpolate(screenEntryProgress.value, [0, 1], [1.025, 1], Extrapolation.CLAMP) },
+        ],
+    }));
+
+    const contentEntryStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(screenEntryProgress.value, [0, 0.34, 1], [0, 0.16, 1], Extrapolation.CLAMP),
+        transform: [
+            { translateY: interpolate(screenEntryProgress.value, [0, 1], [18, 0], Extrapolation.CLAMP) },
+            { scaleX: interpolate(screenEntryProgress.value, [0, 1], [0.992, 1], Extrapolation.CLAMP) },
+            { scaleY: interpolate(screenEntryProgress.value, [0, 1], [1.01, 1], Extrapolation.CLAMP) },
+        ],
+    }));
 
     return (
         <View style={styles.mainContainer}>
@@ -672,45 +969,73 @@ export default function TransactionsScreen() {
             />
 
             <View style={styles.container}>
-                {/* Mostrar header apenas se tiver transações ou filtros ativos */}
-                {(filteredTransactions.length > 0 || activeFilterCount > 0 || loading) && (
-                    <>
-                        <View style={styles.header}>
-                            <Text style={styles.title}>Transações</Text>
-                            <View style={styles.headerButtons}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.filterButton,
-                                        activeFilterCount > 0 && styles.filterButtonActive
-                                    ]}
-                                    onPress={() => setFilterModalVisible(true)}
-                                >
-                                    <Filter size={18} color={activeFilterCount > 0 ? '#D97757' : '#888'} />
-                                    {activeFilterCount > 0 && (
-                                        <View style={styles.filterBadge}>
-                                            <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-                                        </View>
-                                    )}
-                                </TouchableOpacity>
-                            </View>
-                        </View>
+                <Animated.View style={[styles.header, headerEntryStyle]}>
+                    <View style={styles.headerTitleRow}>
+                        <Image
+                            source={require('@/assets/images/icon.png')}
+                            style={styles.headerIcon}
+                            resizeMode="contain"
+                        />
+                        <Text style={styles.screenHeader} numberOfLines={1}>
+                            Transações
+                        </Text>
+                    </View>
+                </Animated.View>
 
-                    </>
-                )}
-
-
-
-                <View style={styles.content}>
-                    {loading ? (
-                        <View style={styles.loadingContainer}>
-                            <LottieView
-                                source={require('@/assets/carregando.json')}
-                                autoPlay
-                                loop
-                                style={{ width: 50, height: 50 }}
+                <Animated.View style={filterEntryStyle}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        style={styles.filterBarScroll}
+                        contentContainerStyle={styles.filterBarContent}
+                    >
+                        <View style={styles.filterSearchBar}>
+                            <Search size={15} color="#555" />
+                            <TextInput
+                                style={styles.filterSearchInput}
+                                value={filters.search}
+                                onChangeText={(t) => setFilters(prev => ({ ...prev, search: t }))}
+                                placeholder="Buscar..."
+                                placeholderTextColor="#555"
                             />
-                            <Text style={styles.loadingText}>Carregando transações{loadingDots}</Text>
+                            {filters.search.length > 0 && (
+                                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, search: '' }))}>
+                                    <X size={14} color="#8E8E93" />
+                                </TouchableOpacity>
+                            )}
                         </View>
+                        <ArrowSelector
+                            options={[
+                                { label: 'Tipo', value: null },
+                                { label: 'Receita', value: 'income' },
+                                { label: 'Despesa', value: 'expense' },
+                            ]}
+                            selectedValue={typeFilter}
+                            onChange={setTypeFilter}
+                        />
+                        <ArrowSelector
+                            options={[
+                                { label: 'Categoria', value: null },
+                                ...availableCategories.map(cat => ({ label: getCategoryName(cat), value: cat })),
+                            ]}
+                            selectedValue={filters.categories[0] ?? null}
+                            onChange={(v) => setFilters(prev => ({ ...prev, categories: v ? [v] : [] }))}
+                        />
+                        <ArrowSelector
+                            options={[
+                                { label: 'Ano', value: null },
+                                ...availableYears.map(y => ({ label: y, value: y })),
+                            ]}
+                            selectedValue={filters.year || null}
+                            onChange={(v) => setFilters(prev => ({ ...prev, year: v ?? '' }))}
+                        />
+                    </ScrollView>
+                </Animated.View>
+
+                <Animated.View style={[styles.content, contentEntryStyle]}>
+                    {loading ? (
+                        <IosCoreLoader />
                     ) : (
                         <SectionList
                             sections={groupedTransactions}
@@ -727,14 +1052,8 @@ export default function TransactionsScreen() {
                             updateCellsBatchingPeriod={lod >= 2 ? 80 : 50}
                             windowSize={lod >= 2 ? 5 : 7}
                             removeClippedSubviews={lod >= 1}
-                            SectionSeparatorComponent={() => <View style={{ height: 16 }} />}
-                            ListFooterComponent={
-                                loadingMore ? (
-                                    <View style={{ padding: 20 }}>
-                                        <ActivityIndicator size="small" color="#D97757" />
-                                    </View>
-                                ) : null
-                            }
+                            SectionSeparatorComponent={renderSectionSeparator}
+                            ListFooterComponent={listFooter}
                             refreshControl={
                                 <RefreshControl
                                     refreshing={refreshing}
@@ -743,7 +1062,7 @@ export default function TransactionsScreen() {
                                 />
                             }
                             ListHeaderComponent={
-                                activeFilterCount > 0 && filteredTransactions.length > 0 ? (
+                                hasActiveFilters && filteredTransactions.length > 0 ? (
                                     <View style={styles.listHeader}>
                                         <Text style={styles.listHeaderTitle}>Resultados do Filtro</Text>
                                     </View>
@@ -762,15 +1081,15 @@ export default function TransactionsScreen() {
                                         />
                                     </View>
                                     <Text style={styles.emptyTitle}>
-                                        {activeFilterCount > 0 ? 'Nenhum resultado' : 'Nenhuma transação'}
+                                        {hasActiveFilters ? 'Nenhum resultado' : 'Nenhuma transação'}
                                     </Text>
                                     <Text style={styles.emptyText}>
-                                        {activeFilterCount > 0
+                                        {hasActiveFilters
                                             ? 'Tente ajustar os filtros para encontrar transações.'
                                             : 'Suas movimentações financeiras aparecerão aqui.'}
                                     </Text>
 
-                                    {activeFilterCount === 0 && (
+                                    {!hasActiveFilters && (
                                         <TouchableOpacity
                                             style={styles.connectButton}
                                             onPress={() => router.push('/(tabs)/open-finance')}
@@ -783,20 +1102,10 @@ export default function TransactionsScreen() {
                             }
                         />
                     )}
-                </View>
+                </Animated.View>
             </View>
 
 
-            {/* Filter Modal */}
-            <CreditCardFilterModal
-                visible={filterModalVisible}
-                onClose={() => setFilterModalVisible(false)}
-                onApply={handleApplyFilters}
-                initialFilters={filters}
-                categories={availableCategories}
-                getCategoryName={getCategoryName}
-                years={availableYears}
-            />
         </View>
     );
 }
@@ -812,72 +1121,79 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 100,
-        paddingTop: 60,
-        paddingHorizontal: 20,
+        paddingTop: 58,
         zIndex: 10,
     },
     header: {
-        marginBottom: 20,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        paddingHorizontal: 22,
+        marginBottom: 12,
     },
-    title: {
-        fontSize: 24,
-        fontWeight: '700',
-        color: '#FFFFFF',
-    },
-    headerButtons: {
+    headerTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
+        flex: 1,
+        minWidth: 0,
     },
-    filterButton: {
-        padding: 10,
-        borderRadius: 12,
-        backgroundColor: '#1A1A1A',
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
-    },
-    filterButtonActive: {
-        backgroundColor: 'rgba(217, 119, 87, 0.1)',
-        borderColor: '#D97757',
-    },
-    filterBadge: {
-        position: 'absolute',
-        top: -4,
-        right: -4,
-        backgroundColor: '#D97757',
+    headerIcon: {
+        width: 40,
+        height: 40,
         borderRadius: 10,
-        minWidth: 18,
-        height: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 4,
     },
-    filterBadgeText: {
-        color: '#000',
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    settingsButton: {
-        padding: 10,
-        borderRadius: 12,
-        backgroundColor: '#1A1A1A',
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
+    screenHeader: {
+        fontSize: 18,
+        fontFamily: 'AROneSans_400Regular',
+        color: '#FFFFFF',
+        flexShrink: 1,
     },
     content: {
         flex: 1,
     },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
+    filterBarScroll: {
+        height: HEADER_CONTROL_HEIGHT + 4,
+        maxHeight: HEADER_CONTROL_HEIGHT + 4,
+        flexGrow: 0,
+        flexShrink: 0,
+        marginBottom: 8,
+    },
+    filterBarContent: {
+        flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        paddingHorizontal: 22,
+        gap: 10,
+        minHeight: HEADER_CONTROL_HEIGHT + 4,
+        paddingVertical: 2,
+    },
+    filterSearchBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#101010',
+        borderRadius: 24,
+        paddingHorizontal: 12,
+        height: 36,
+        width: 160,
+        gap: 8,
+        borderWidth: 1,
+        borderColor: '#252525',
+    },
+    filterSearchInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 13,
+        padding: 0,
     },
     listContent: {
         paddingBottom: 20,
+        paddingHorizontal: 22,
+    },
+    sectionSeparator: {
+        height: 16,
+    },
+    footerLoader: {
+        padding: 20,
     },
 
     // List Header
@@ -921,36 +1237,47 @@ const styles = StyleSheet.create({
     },
 
     // Transaction Item Styles
+    transactionCardWrapper: {
+        width: '100%',
+    },
     transactionCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#151515',
-        padding: 10,
-        borderWidth: 1,
+        backgroundColor: '#101010',
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        minHeight: 66,
+        overflow: 'hidden',
         borderColor: '#252525',
+        borderWidth: 1,
     },
     separator: {
         position: 'absolute',
         bottom: 0,
         left: 14,
         right: 14,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#252525',
     },
     detailsContainer: {
         flex: 1,
         gap: 2,
+        minWidth: 0,
+        paddingRight: 8,
     },
     descriptionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
+        minWidth: 0,
     },
     description: {
         fontSize: 14,
-        fontWeight: '600',
+        lineHeight: 18,
+        fontWeight: '400',
         color: '#FFFFFF',
         flex: 1,
+        flexShrink: 1,
     },
     subDetails: {
         flexDirection: 'row',
@@ -958,7 +1285,7 @@ const styles = StyleSheet.create({
     },
     category: {
         fontSize: 12,
-        color: '#666',
+        color: '#8E8E93',
         marginTop: 1,
     },
     dot: {
@@ -966,23 +1293,30 @@ const styles = StyleSheet.create({
         color: '#888',
         marginHorizontal: 6,
     },
-    installments: {
-        fontSize: 12,
-        color: '#D97757',
-        fontWeight: '500',
-    },
     amountContainer: {
-        alignItems: 'flex-end',
-        justifyContent: 'center',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 6,
+        flexShrink: 0,
     },
     amount: {
-        fontSize: 14,
-        fontWeight: '700',
+        fontSize: 15,
+        fontWeight: '400',
     },
-    loadingText: {
-        color: '#888',
-        fontSize: 14,
-        marginTop: 10,
+    installmentPill: {
+        borderRadius: 999,
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+    },
+    installmentPillText: {
+        fontSize: 9,
+        lineHeight: 11,
+        color: '#B8B8BE',
+        fontWeight: '600',
     },
     // Empty State Styles
     emptyState: {

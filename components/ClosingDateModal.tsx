@@ -1,10 +1,11 @@
-import { FileText, Info } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { AuthButton } from './ui/AuthButton';
 import { ModalPadrao } from './ui/ModalPadrao';
 
 export interface ClosingDateItem {
-    id: string; // e.g. referenceMonth
+    id: string;
+    monthKey?: string; // e.g. referenceMonth (YYYY-MM)
     label: string;
     subLabel?: string;
     currentDate: string;
@@ -15,6 +16,8 @@ interface ClosingDateModalProps {
     onClose: () => void;
     onSave: (updates: { id: string, exactDate: string }[]) => Promise<void>;
     items: ClosingDateItem[];
+    hasBankData?: boolean;
+    onRefreshBank?: () => Promise<void> | void;
     bankName?: string;
     originalCloseDate?: string | null;
     originalDueDate?: string | null;
@@ -30,6 +33,7 @@ export function ClosingDateModal({
     originalDueDate
 }: ClosingDateModalProps) {
     const [days, setDays] = useState<Record<string, string>>({});
+    const [isSaving, setIsSaving] = useState(false);
 
 
     useEffect(() => {
@@ -44,6 +48,7 @@ export function ClosingDateModal({
                 }
             });
             setDays(initialDays);
+            setIsSaving(false);
         }
     }, [visible, items]);
 
@@ -58,14 +63,19 @@ export function ClosingDateModal({
                     const parts = item.currentDate.split('-');
                     if (parts.length === 3) {
                         const newDate = `${parts[0]}-${parts[1]}-${String(d).padStart(2, '0')}`;
-                        updates.push({ id: item.id, exactDate: newDate });
+                        updates.push({ id: item.monthKey || item.id, exactDate: newDate });
                     }
                 }
             }
         });
 
-        await onSave(updates);
-        onClose();
+        setIsSaving(true);
+        try {
+            await onSave(updates);
+            onClose();
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleDayChange = (id: string, text: string) => {
@@ -77,16 +87,23 @@ export function ClosingDateModal({
             visible={visible}
             onClose={onClose}
             title="Editar fechamento"
-
+            titleAlign="start"
+            footer={
+                <AuthButton
+                    title="Salvar"
+                    onPress={handleSave}
+                    isLoading={isSaving}
+                />
+            }
         >
             <View style={styles.container}>
                 <Text style={styles.closingModalSubtitle}>
                     Defina o dia exato do fechamento para as faturas abaixo.
                 </Text>
 
-                <View style={styles.infoBox}>
-                    <Info size={16} color="#8E8E93" style={{ marginRight: 8, marginTop: 2 }} />
-                    <View style={{ flex: 1 }}>
+                <Text style={styles.sectionTitle}>ORIGEM DOS DADOS</Text>
+                <View style={styles.groupCard}>
+                    <View style={styles.infoContent}>
                         {originalCloseDate ? (
                             <Text style={styles.infoBoxText}>
                                 Obtivemos o fechamento (<Text style={styles.boldDate}>{originalCloseDate}</Text>) e o vencimento (<Text style={styles.boldDate}>{originalDueDate || 'Não informado'}</Text>) enviados pelo seu banco {bankName ? `(${bankName})` : ''}.
@@ -103,49 +120,36 @@ export function ClosingDateModal({
                     </View>
                 </View>
 
-                <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>FECHAMENTO</Text>
+                <View style={styles.groupCard}>
                     {items.map((item, index) => (
                         <View key={item.id}>
-                            <View style={styles.itemContainer}>
-                                <View style={styles.itemIconContainer}>
-                                    <FileText size={20} color="#E0E0E0" />
+                            <View style={styles.itemContent}>
+                                <View style={styles.itemTextBlock}>
+                                    <Text style={styles.itemTitle}>{item.label}</Text>
+                                    {item.subLabel ? (
+                                        <Text style={styles.itemSubLabel}>{item.subLabel}</Text>
+                                    ) : null}
                                 </View>
-                                <View style={styles.itemRightContainer}>
-                                    <View style={styles.itemContent}>
-                                        <View style={{ flex: 1, marginRight: 8 }}>
-                                            <Text style={styles.itemTitle}>{item.label}</Text>
-                                            {item.subLabel ? (
-                                                <Text style={styles.itemSubLabel}>{item.subLabel}</Text>
-                                            ) : null}
-                                        </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <Text style={{ color: '#909090', fontSize: 16, marginRight: 8 }}>Dia</Text>
-                                            <TextInput
-                                                style={styles.inputRight}
-                                                value={days[item.id] || ''}
-                                                onChangeText={(text) => handleDayChange(item.id, text)}
-                                                placeholder="Ex: 25"
-                                                placeholderTextColor="#555"
-                                                keyboardType="numeric"
-                                                textAlign="right"
-                                                maxLength={2}
-                                            />
-                                        </View>
-                                    </View>
+
+                                <View style={styles.dayInputGroup}>
+                                    <Text style={styles.dayLabel}>Dia</Text>
+                                    <TextInput
+                                        style={styles.inputRight}
+                                        value={days[item.id] || ''}
+                                        onChangeText={(text) => handleDayChange(item.id, text)}
+                                        placeholder="25"
+                                        placeholderTextColor="#636366"
+                                        keyboardType="numeric"
+                                        textAlign="center"
+                                        maxLength={2}
+                                    />
                                 </View>
                             </View>
                             {index < items.length - 1 && <View style={styles.itemSeparator} />}
                         </View>
                     ))}
                 </View>
-
-                <TouchableOpacity
-                    style={styles.closingModalSaveButton}
-                    onPress={handleSave}
-                    activeOpacity={0.85}
-                >
-                    <Text style={styles.closingModalSaveButtonText}>Salvar</Text>
-                </TouchableOpacity>
             </View>
         </ModalPadrao>
     );
@@ -153,20 +157,33 @@ export function ClosingDateModal({
 
 const styles = StyleSheet.create({
     container: {
-        gap: 16,
+        paddingTop: 12,
+        paddingBottom: 0,
     },
     closingModalSubtitle: {
         fontSize: 14,
         color: '#8E8E93',
         textAlign: 'left',
-        lineHeight: 20,
-        marginBottom: 4,
+        lineHeight: 18,
+        marginBottom: 24,
     },
-    infoBox: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginTop: -4,
+    sectionTitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#8E8E93',
         marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    groupCard: {
+        backgroundColor: '#1C1C1E',
+        borderRadius: 12,
+        marginBottom: 24,
+        overflow: 'hidden',
+    },
+    infoContent: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
     },
     infoBoxText: {
         fontSize: 13,
@@ -177,70 +194,51 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#FFFFFF',
     },
-    sectionCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
-        overflow: 'hidden',
-    },
-    itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        position: 'relative',
-        backgroundColor: '#1A1A1A',
-    },
-    itemIconContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    itemRightContainer: {
-        flex: 1,
-    },
     itemContent: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        minHeight: 60,
+    },
+    itemTextBlock: {
+        flex: 1,
+        marginRight: 12,
     },
     itemTitle: {
-        fontSize: 16,
+        fontSize: 17,
         color: '#FFFFFF',
-        fontWeight: '500',
+        fontWeight: '400',
     },
     itemSubLabel: {
         fontSize: 12,
         color: '#8E8E93',
-        marginTop: 2,
+        marginTop: 1,
+    },
+    dayInputGroup: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    dayLabel: {
+        color: '#8E8E93',
+        fontSize: 15,
     },
     itemSeparator: {
-        height: 1,
-        backgroundColor: '#2A2A2A',
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#38383A',
+        marginLeft: 16,
     },
     inputRight: {
         color: '#FFFFFF',
-        fontSize: 16,
-        minWidth: 40,
-        padding: 0,
-        fontWeight: '600',
-    },
-    closingModalSaveButton: {
-        backgroundColor: '#D97757',
-        paddingVertical: 14,
-        borderRadius: 12,
-        alignItems: 'center',
-        marginTop: 8
-    },
-    closingModalSaveButtonText: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '700',
+        fontSize: 17,
+        width: 44,
+        height: 34,
+        paddingVertical: 0,
+        paddingHorizontal: 0,
+        borderRadius: 8,
+        backgroundColor: '#2C2C2E',
     },
 });
 

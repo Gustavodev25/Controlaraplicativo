@@ -1,9 +1,8 @@
 import { CategoryGroup } from '@/constants/defaultCategories';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { BlurView } from 'expo-blur';
-import { Search } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
     Dimensions,
     ScrollView,
     StyleSheet,
@@ -33,11 +32,18 @@ export function CategorySelectorModal({
 }: CategorySelectorModalProps) {
     const [search, setSearch] = useState('');
 
+    useEffect(() => {
+        if (!visible) {
+            setSearch('');
+        }
+    }, [visible]);
+
+    const normalizedSearch = search.trim().toLowerCase();
     const filteredCategories = categories.map(group => ({
         ...group,
         items: group.items.filter(item =>
-            item.label.toLowerCase().includes(search.toLowerCase()) ||
-            group.title.toLowerCase().includes(search.toLowerCase())
+            item.label.toLowerCase().includes(normalizedSearch) ||
+            group.title.toLowerCase().includes(normalizedSearch)
         )
     })).filter(group => group.items.length > 0);
 
@@ -45,51 +51,61 @@ export function CategorySelectorModal({
         <ModalPadrao
             visible={visible}
             onClose={onClose}
-            title="Selecionar Categoria"
+            title="Mudar categoria"
+            titleAlign="start"
+            maxHeightRatio={0.82}
         >
             <View style={styles.container}>
-                <View style={styles.searchContainer}>
-                    <View style={styles.searchBar}>
-                        <Search size={18} color="#666" style={styles.searchIcon} />
-                        <TextInput
-                            style={styles.searchInput}
-                            value={search}
-                            onChangeText={setSearch}
-                            placeholder="Buscar categoria..."
-                            placeholderTextColor="#666"
-                            autoCorrect={false}
-                        />
-                    </View>
+                <Text style={styles.description}>
+                    Escolha uma nova categoria para esta transação.
+                </Text>
+
+                <View style={styles.searchBar}>
+                    <TextInput
+                        style={styles.searchInput}
+                        value={search}
+                        onChangeText={setSearch}
+                        placeholder="Buscar categoria"
+                        placeholderTextColor="#8E8E93"
+                        autoCorrect={false}
+                    />
                 </View>
 
+                <Text style={styles.sectionTitle}>CATEGORIAS</Text>
                 <ScrollView
                     style={styles.scrollView}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                 >
-                    {filteredCategories.map((group, groupIdx) => (
-                        <View key={`group-${groupIdx}`} style={styles.groupContainer}>
-                            <Text style={styles.groupTitle}>{group.title}</Text>
-                            <View style={styles.itemsGrid}>
-                                {group.items.map((item) => (
-                                    <TouchableOpacity
-                                        key={item.key}
-                                        style={styles.categoryItem}
-                                        onPress={() => {
-                                            onSelect(item.key);
-                                        }}
-                                    >
-                                        <Text style={styles.categoryLabel}>{item.label}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                    {filteredCategories.length === 0 ? (
+                        <View style={styles.groupCard}>
+                            <View style={styles.emptyContainer}>
+                                <Text style={styles.emptyText}>Nenhuma categoria encontrada</Text>
                             </View>
                         </View>
-                    ))}
-                    {filteredCategories.length === 0 && (
-                        <View style={styles.emptyState}>
-                            <Text style={styles.emptyText}>Nenhuma categoria encontrada</Text>
-                        </View>
+                    ) : (
+                        filteredCategories.map((group) => (
+                            <View key={group.title} style={styles.groupContainer}>
+                                <Text style={styles.groupTitle}>{group.title}</Text>
+                                <View style={styles.groupCard}>
+                                    {group.items.map((item, index) => (
+                                        <React.Fragment key={item.key}>
+                                            <TouchableOpacity
+                                                style={styles.categoryRow}
+                                                activeOpacity={0.72}
+                                                onPress={() => onSelect(item.key)}
+                                            >
+                                                <Text style={styles.categoryLabel} numberOfLines={1}>
+                                                    {item.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            {index < group.items.length - 1 && <View style={styles.separator} />}
+                                        </React.Fragment>
+                                    ))}
+                                </View>
+                            </View>
+                        ))
                     )}
                 </ScrollView>
             </View>
@@ -101,10 +117,7 @@ export function CategorySelectorModal({
                         tint="dark"
                         style={StyleSheet.absoluteFill}
                     />
-                    <View style={styles.loaderContainer}>
-                        <ActivityIndicator size="large" color="#D97757" />
-                        <Text style={styles.loadingText}>Processando...</Text>
-                    </View>
+                    <IosCoreLoader fill={false} style={styles.loaderContainer} />
                 </View>
             )}
         </ModalPadrao>
@@ -113,32 +126,40 @@ export function CategorySelectorModal({
 
 const styles = StyleSheet.create({
     container: {
-        maxHeight: SCREEN_HEIGHT * 0.75,
+        maxHeight: SCREEN_HEIGHT * 0.74,
+        paddingTop: 12,
     },
-    searchContainer: {
-        marginBottom: 16,
+    description: {
+        fontSize: 14,
+        color: '#8E8E93',
+        marginBottom: 20,
+        lineHeight: 18,
     },
     searchBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#111',
-        borderRadius: 14,
-        paddingHorizontal: 12,
+        backgroundColor: '#1C1C1E',
+        borderRadius: 12,
         height: 48,
-        borderWidth: 1,
-        borderColor: '#252525',
-    },
-    searchIcon: {
-        marginRight: 8,
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+        marginBottom: 24,
     },
     searchInput: {
-        flex: 1,
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: 17,
         height: '100%',
+        padding: 0,
+    },
+    sectionTitle: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#8E8E93',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
     scrollView: {
         flexGrow: 0,
+        maxHeight: SCREEN_HEIGHT * 0.52,
     },
     scrollContent: {
         paddingBottom: 20,
@@ -148,39 +169,39 @@ const styles = StyleSheet.create({
     },
     groupTitle: {
         fontSize: 12,
-        fontWeight: '700',
-        color: '#666',
+        fontWeight: '500',
+        color: '#8E8E93',
         textTransform: 'uppercase',
-        letterSpacing: 1,
-        marginBottom: 12,
-        marginLeft: 4,
+        letterSpacing: 0.5,
+        marginBottom: 8,
     },
-    itemsGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-    },
-    categoryItem: {
-        backgroundColor: '#1A1A1A',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
+    groupCard: {
+        backgroundColor: '#1C1C1E',
         borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#2A2A2A',
-        minWidth: '30%',
-        alignItems: 'center',
+        overflow: 'hidden',
+    },
+    categoryRow: {
+        minHeight: 48,
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
     },
     categoryLabel: {
-        color: '#E0E0E0',
-        fontSize: 14,
-        fontWeight: '500',
+        color: '#FFFFFF',
+        fontSize: 17,
+        fontWeight: '400',
     },
-    emptyState: {
-        paddingVertical: 40,
+    separator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#38383A',
+    },
+    emptyContainer: {
+        paddingVertical: 24,
+        paddingHorizontal: 16,
         alignItems: 'center',
     },
     emptyText: {
-        color: '#666',
+        color: '#8E8E93',
         fontSize: 15,
     },
     loadingOverlay: {
@@ -193,16 +214,10 @@ const styles = StyleSheet.create({
     },
     loaderContainer: {
         alignItems: 'center',
-        gap: 12,
         backgroundColor: 'rgba(26, 26, 26, 0.8)',
         padding: 24,
         borderRadius: 20,
         borderWidth: 1,
         borderColor: '#2A2A2A',
-    },
-    loadingText: {
-        color: '#FFFFFF',
-        fontSize: 14,
-        fontWeight: '600',
     },
 });

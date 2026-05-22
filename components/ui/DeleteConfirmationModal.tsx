@@ -1,17 +1,16 @@
-import LottieView from 'lottie-react-native';
-import React, { useEffect, useState } from 'react';
-import { Dimensions, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Animated, {
-    Layout,
-    SlideOutUp,
-    useAnimatedStyle,
-    useSharedValue,
-    withDelay,
-    withSpring,
-    withTiming
-} from 'react-native-reanimated';
-
-const { width } = Dimensions.get('window');
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    Animated,
+    Easing,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface DeleteConfirmationModalProps {
     visible: boolean;
@@ -22,152 +21,296 @@ interface DeleteConfirmationModalProps {
     cancelText?: string;
 }
 
+const EXPANDED_HEIGHT = 64;
+const COMPACT_SIZE = 16;
+
+const HORIZONTAL_MARGIN = 18;
+const MAX_EXPANDED_WIDTH = 360;
+
 export function DeleteConfirmationModal({
     visible,
     title,
     onCancel,
     onConfirm,
-    confirmText = "Desconectar",
-    cancelText = "Cancelar"
+    confirmText = 'Excluir',
+    cancelText = 'Cancelar',
 }: DeleteConfirmationModalProps) {
-    const [showContent, setShowContent] = useState(false);
+    const insets = useSafeAreaInsets();
+    const { width: screenWidth } = useWindowDimensions();
 
-    // Animation Values
-    // Start collapsed (width ~44, height ~44) then expand
-    const animatedWidth = useSharedValue(48);
-    const animatedOpacity = useSharedValue(0);
+    const [shouldRender, setShouldRender] = useState(visible);
+
+    const morph = useRef(new Animated.Value(visible ? 1 : 0)).current;
+    const content = useRef(new Animated.Value(visible ? 1 : 0)).current;
+    const pressConfirm = useRef(new Animated.Value(0)).current;
+    const pressCancel = useRef(new Animated.Value(0)).current;
+
+    const expandedWidth = Math.min(
+        screenWidth - HORIZONTAL_MARGIN * 2,
+        MAX_EXPANDED_WIDTH
+    );
+
+    const compactScaleX = COMPACT_SIZE / expandedWidth;
+    const compactScaleY = COMPACT_SIZE / EXPANDED_HEIGHT;
+
+    const islandTop =
+        Platform.OS === 'ios'
+            ? Math.max(10, insets.top - 46)
+            : Math.max(12, insets.top - 10);
+
+    /**
+     * Compensa o scale pelo centro, para parecer que nasce da bolinha
+     * no topo e expande para baixo.
+     */
+    const collapsedTranslateY = -((EXPANDED_HEIGHT - COMPACT_SIZE) / 2);
 
     useEffect(() => {
+        morph.stopAnimation();
+        content.stopAnimation();
+        pressConfirm.stopAnimation();
+        pressCancel.stopAnimation();
+
         if (visible) {
-            // Force reset values immediately
-            animatedWidth.value = 48;
-            animatedOpacity.value = 0;
-            setShowContent(false);
+            setShouldRender(true);
 
-            // 2. Expand width after a small delay
-            animatedWidth.value = withDelay(100, withSpring(width - 48, { damping: 15, mass: 1, stiffness: 100 }));
+            morph.setValue(0);
+            content.setValue(0);
 
-            // 3. Fade in content
-            animatedOpacity.value = withDelay(250, withTiming(1, { duration: 250 }));
+            requestAnimationFrame(() => {
+                Animated.parallel([
+                    Animated.spring(morph, {
+                        toValue: 1,
+                        stiffness: 235,
+                        damping: 16,
+                        mass: 0.72,
+                        velocity: 1.2,
+                        overshootClamping: false,
+                        restDisplacementThreshold: 0.001,
+                        restSpeedThreshold: 0.001,
+                        useNativeDriver: true,
+                    }),
+                    Animated.sequence([
+                        Animated.delay(80),
+                        Animated.spring(content, {
+                            toValue: 1,
+                            stiffness: 240,
+                            damping: 20,
+                            mass: 0.72,
+                            overshootClamping: false,
+                            restDisplacementThreshold: 0.001,
+                            restSpeedThreshold: 0.001,
+                            useNativeDriver: true,
+                        }),
+                    ]),
+                ]).start();
+            });
 
-            // Allow rendering of text after expansion starts
-            const timer = setTimeout(() => {
-                setShowContent(true);
-            }, 150);
-            return () => clearTimeout(timer);
+            return;
         }
-    }, [visible]);
 
+        Animated.parallel([
+            Animated.timing(content, {
+                toValue: 0,
+                duration: 70,
+                easing: Easing.out(Easing.quad),
+                useNativeDriver: true,
+            }),
+            Animated.spring(morph, {
+                toValue: 0,
+                stiffness: 280,
+                damping: 22,
+                mass: 0.76,
+                velocity: -1.1,
+                overshootClamping: false,
+                restDisplacementThreshold: 0.001,
+                restSpeedThreshold: 0.001,
+                useNativeDriver: true,
+            }),
+        ]).start(({ finished }) => {
+            if (finished) {
+                setShouldRender(false);
+            }
+        });
+    }, [visible, morph, content, pressConfirm, pressCancel]);
 
-
-    const rStyle = useAnimatedStyle(() => {
-        return {
-            width: animatedWidth.value,
-        };
-    });
-
-    const rContentStyle = useAnimatedStyle(() => {
-        return {
-            opacity: animatedOpacity.value,
-        };
-    });
-
-    const handleClose = (callback: () => void) => {
-        // 1. Fade out content immediately
-        animatedOpacity.value = withTiming(0, { duration: 100 });
-        setShowContent(false);
-
-        // 2. Shrink width back to circle (using timing for precision)
-        // Wait 50ms then shrink over 250ms
-        animatedWidth.value = withDelay(50, withTiming(48, { duration: 250 }));
-
-        // 3. Trigger actual close (unmount) after animation completes
-        setTimeout(() => {
-            callback();
-        }, 350);
+    const animateBtn = (value: Animated.Value, toValue: number) => {
+        Animated.spring(value, {
+            toValue,
+            stiffness: 420,
+            damping: 30,
+            mass: 0.56,
+            useNativeDriver: true,
+        }).start();
     };
 
-    if (!visible) return null;
+    if (!shouldRender) return null;
+
+    const scaleX = morph.interpolate({
+        inputRange: [0, 0.48, 0.74, 1],
+        outputRange: [compactScaleX, 1.075, 0.988, 1],
+    });
+
+    const scaleY = morph.interpolate({
+        inputRange: [0, 0.46, 0.72, 1],
+        outputRange: [compactScaleY, 1.095, 0.985, 1],
+    });
+
+    const translateY = morph.interpolate({
+        inputRange: [0, 0.48, 0.74, 1],
+        outputRange: [collapsedTranslateY, 4, -1.4, 0],
+    });
+
+    const borderRadius = morph.interpolate({
+        inputRange: [0, 0.5, 1],
+        outputRange: [999, 28, 24],
+    });
+
+    const overlayOpacity = morph.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+    });
+
+    const contentOpacity = content.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+    });
+
+    const contentTranslateY = content.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-3, 0],
+    });
+
+    const contentScale = content.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.97, 1],
+    });
+
+    const dotOpacity = morph.interpolate({
+        inputRange: [0, 0.2, 0.42],
+        outputRange: [1, 0.9, 0],
+        extrapolate: 'clamp',
+    });
+
+    const confirmScale = pressConfirm.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0.96],
+    });
+
+    const cancelScale = pressCancel.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0.97],
+    });
 
     return (
-        <View style={styles.overlay} pointerEvents="box-none">
-            <TouchableOpacity
-                style={StyleSheet.absoluteFill}
-                activeOpacity={1}
-                onPress={() => handleClose(onCancel)}
-            />
+        <Animated.View
+            style={[styles.overlay, { opacity: overlayOpacity }]}
+            pointerEvents="box-none"
+        >
+            <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
 
-            {/* Dynamic Pill Container */}
-            <Animated.View
-                entering={(values: any) => {
-                    'worklet';
-                    const animations = {
-                        transform: [{ translateY: withSpring(0, { damping: 15, mass: 1, stiffness: 100 }) }],
-                    };
-                    const initialValues = {
-                        transform: [{ translateY: -150 }],
-                    };
-                    return {
-                        initialValues,
-                        animations,
-                    };
-                }}
-                exiting={SlideOutUp.duration(200)}
-                layout={Layout.springify()}
-                style={[styles.pillWrapper, rStyle]} // Animated Width applied here
-                pointerEvents="auto"
+            <View
+                style={[
+                    styles.wrapper,
+                    {
+                        top: islandTop,
+                        width: expandedWidth,
+                        height: EXPANDED_HEIGHT,
+                    },
+                ]}
+                pointerEvents="box-none"
             >
-                <View style={styles.pillContainer}>
-                    {/* Visual Border */}
-                    <View style={styles.glassBorder} />
-
-                    {/* Always visible Icon (centered initially) */}
-                    <View style={styles.iconInitialPosition}>
-                        <LottieView
-                            source={require('../../assets/info.json')}
-                            autoPlay
-                            loop
-                            style={{ width: 24, height: 24 }}
+                <Animated.View
+                    pointerEvents="auto"
+                    style={[
+                        styles.morphContainer,
+                        {
+                            borderRadius,
+                            transform: [{ translateY }, { scaleX }, { scaleY }],
+                        },
+                    ]}
+                >
+                    <View style={styles.surface}>
+                        <Animated.View
+                            pointerEvents="none"
+                            style={[styles.topDot, { opacity: dotOpacity }]}
                         />
-                    </View>
 
-                    {/* Content that fades in after expansion */}
-                    {showContent && (
-                        <Animated.View style={[styles.contentRow, rContentStyle]}>
-                            {/* Spacer for the icon's width so text doesn't overlap */}
-                            <View style={{ width: 20 }} />
+                        <Animated.View
+                            style={[
+                                styles.content,
+                                {
+                                    opacity: contentOpacity,
+                                    transform: [
+                                        { translateY: contentTranslateY },
+                                        { scale: contentScale },
+                                    ],
+                                },
+                            ]}
+                        >
+                            <View style={styles.row}>
+                                <Text style={styles.title} numberOfLines={1}>
+                                    {title}
+                                </Text>
 
-                            {/* Text */}
-                            <Text style={styles.title} numberOfLines={1}>
-                                {title}
-                            </Text>
+                                <View style={styles.actionsRow}>
+                                    <Animated.View
+                                        style={{ transform: [{ scale: cancelScale }] }}
+                                    >
+                                        <TouchableOpacity
+                                            style={styles.cancelButton}
+                                            activeOpacity={0.9}
+                                            onPressIn={() =>
+                                                animateBtn(pressCancel, 1)
+                                            }
+                                            onPressOut={() =>
+                                                animateBtn(pressCancel, 0)
+                                            }
+                                            onPress={onCancel}
+                                            hitSlop={{
+                                                top: 8,
+                                                bottom: 8,
+                                                left: 8,
+                                                right: 8,
+                                            }}
+                                        >
+                                            <Text style={styles.cancelText}>
+                                                {cancelText}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
 
-                            {/* Divider */}
-                            <View style={styles.divider} />
-
-                            {/* Actions */}
-                            <View style={styles.actionsContainer}>
-                                <TouchableOpacity
-                                    style={styles.cancelButton}
-                                    onPress={() => handleClose(onCancel)}
-                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                >
-                                    <Text style={styles.cancelText}>{cancelText}</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={styles.deleteButton}
-                                    onPress={() => handleClose(onConfirm)}
-                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                >
-                                    <Text style={styles.deleteText}>{confirmText}</Text>
-                                </TouchableOpacity>
+                                    <Animated.View
+                                        style={{ transform: [{ scale: confirmScale }] }}
+                                    >
+                                        <TouchableOpacity
+                                            style={styles.confirmButton}
+                                            activeOpacity={0.9}
+                                            onPressIn={() =>
+                                                animateBtn(pressConfirm, 1)
+                                            }
+                                            onPressOut={() =>
+                                                animateBtn(pressConfirm, 0)
+                                            }
+                                            onPress={onConfirm}
+                                            hitSlop={{
+                                                top: 8,
+                                                bottom: 8,
+                                                left: 8,
+                                                right: 8,
+                                            }}
+                                        >
+                                            <Text style={styles.confirmText}>
+                                                {confirmText}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                </View>
                             </View>
                         </Animated.View>
-                    )}
-                </View>
-            </Animated.View>
-        </View>
+                    </View>
+                </Animated.View>
+            </View>
+        </Animated.View>
     );
 }
 
@@ -175,91 +318,110 @@ const styles = StyleSheet.create({
     overlay: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 9999,
-        justifyContent: 'flex-start',
-        paddingTop: Platform.OS === 'ios' ? 40 : 20,
         alignItems: 'center',
     },
-    pillWrapper: {
-        alignSelf: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-        elevation: 8,
-        height: 48, // Fixed height
-        overflow: 'hidden',
-        borderRadius: 999,
-        backgroundColor: 'transparent',
-    },
-    pillContainer: {
-        flex: 1,
-        width: '100%',
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#151515',
-        paddingHorizontal: 16, // Padding for content
-    },
-    glassBorder: {
-        ...StyleSheet.absoluteFillObject,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-    },
-    iconInitialPosition: {
+
+    wrapper: {
         position: 'absolute',
-        left: 14, // Roughly centered when width is 44
-        zIndex: 10,
-        justifyContent: 'center',
+        alignSelf: 'center',
         alignItems: 'center',
-        height: '100%',
+        justifyContent: 'flex-start',
     },
-    contentRow: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        paddingLeft: 4, // Slight detailed adjustment
+
+    morphContainer: {
         width: '100%',
-        justifyContent: 'space-between',
-        paddingRight: 0,
+        height: '100%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.28,
+        shadowRadius: 24,
+        elevation: 18,
+        overflow: 'hidden',
     },
-    title: {
-        fontSize: 13.5,
-        fontWeight: '400',
-        color: '#FFFFFF',
-        flex: 1, // Take available space
-    },
-    divider: {
-        width: 1,
-        height: 16,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        marginHorizontal: 4,
-    },
-    actionsContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-    },
-    cancelButton: {
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 99,
-    },
-    cancelText: {
-        fontSize: 13,
-        fontWeight: '500',
-        color: '#A0A0A0',
-    },
-    deleteButton: {
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 99,
-        alignItems: 'center',
+
+    surface: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#141414',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#2B2B2B',
+        paddingHorizontal: 14,
         justifyContent: 'center',
     },
-    deleteText: {
-        fontSize: 13,
+
+    topDot: {
+        position: 'absolute',
+        width: COMPACT_SIZE,
+        height: COMPACT_SIZE,
+        borderRadius: 999,
+        alignSelf: 'center',
+        top: (EXPANDED_HEIGHT - COMPACT_SIZE) / 2,
+        backgroundColor: '#0A0A0A',
+    },
+
+    content: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+
+    row: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+
+    title: {
+        flex: 1,
+        minWidth: 0,
+        color: '#F5F5F5',
+        fontSize: 16,
+        lineHeight: 20,
+        fontWeight: '700',
+        letterSpacing: -0.15,
+    },
+
+    actionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        flexShrink: 0,
+    },
+
+    cancelButton: {
+        minHeight: 30,
+        paddingHorizontal: 10,
+        borderRadius: 999,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.08)',
+    },
+
+    cancelText: {
+        color: '#A3A3A3',
+        fontSize: 12,
         fontWeight: '600',
+        letterSpacing: -0.05,
+    },
+
+    confirmButton: {
+        minHeight: 30,
+        paddingHorizontal: 12,
+        borderRadius: 999,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255, 69, 58, 0.14)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255, 69, 58, 0.28)',
+    },
+
+    confirmText: {
         color: '#FF453A',
+        fontSize: 12,
+        fontWeight: '700',
+        letterSpacing: -0.05,
     },
 });

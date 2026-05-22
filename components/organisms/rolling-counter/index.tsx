@@ -1,10 +1,7 @@
-import { BlurView, type BlurViewProps } from "expo-blur";
 import { type FC, memo, useState } from "react";
-import { Platform, StyleSheet, Text, View, ViewStyle } from "react-native";
+import { StyleSheet, Text, View, ViewStyle } from "react-native";
 import Animated, {
     Easing,
-    interpolate,
-    useAnimatedProps,
     useAnimatedReaction,
     useAnimatedStyle,
     useDerivedValue,
@@ -15,9 +12,6 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { SPRING_CONFIG } from "./const";
 import type { ICounter, IReusableDigit } from "./types";
-
-const AnimatedBlur =
-    Animated.createAnimatedComponent<Partial<BlurViewProps>>(BlurView);
 
 const getDigitAtPlace = <T extends number, I extends number>(
     num: T,
@@ -34,7 +28,7 @@ const getDigitCount = <T extends number>(num: T): number => {
 };
 
 const CounterDigit: FC<IReusableDigit> = memo<IReusableDigit>(
-    ({
+    function CounterDigit({
         place,
         counterValue,
         height,
@@ -46,7 +40,7 @@ const CounterDigit: FC<IReusableDigit> = memo<IReusableDigit>(
         springConfig,
     }: IReusableDigit):
         | (React.JSX.Element & React.ReactNode & React.ReactElement)
-        | null => {
+        | null {
         const currentDigit = useDerivedValue<number>(() =>
             getDigitAtPlace(counterValue.value, place),
         );
@@ -59,18 +53,6 @@ const CounterDigit: FC<IReusableDigit> = memo<IReusableDigit>(
                 });
                 return {
                     transform: [{ translateY: slideY.value }],
-                };
-            },
-        );
-        const blurEffectPropz = useAnimatedProps<Pick<BlurViewProps, "intensity">>(
-            () => {
-                const targetY = -height * currentDigit.value;
-                const delta = Math.abs(slideY.value - targetY);
-                const isMoving = delta > 0.5;
-                return {
-                    intensity: isMoving
-                        ? withSpring<number>(interpolate(delta, [0, height], [0, 3.5]))
-                        : 0,
                 };
             },
         );
@@ -102,15 +84,6 @@ const CounterDigit: FC<IReusableDigit> = memo<IReusableDigit>(
                             {i}
                         </Text>
                     ))}
-                    {Platform.OS === "ios" && (
-                        <AnimatedBlur
-                            animatedProps={blurEffectPropz}
-                            style={StyleSheet.absoluteFill}
-                            pointerEvents="none"
-                            // @ts-ignore
-                            tint="default"
-                        />
-                    )}
                 </Animated.View>
             </View>
         );
@@ -124,7 +97,7 @@ const getSeparatorCount = (digitCount: number): number => {
 };
 
 const RollingCounter: FC<ICounter> = memo(
-    ({
+    function RollingCounter({
         value,
         height = 60,
         width = 40,
@@ -135,12 +108,13 @@ const RollingCounter: FC<ICounter> = memo(
         springConfig = SPRING_CONFIG,
     }: ICounter):
         | (React.JSX.Element & React.ReactNode & React.ReactElement)
-        | null => {
+        | null {
         const internalCounter = useSharedValue<number>(0);
         const animatedValue = typeof value === "number" ? internalCounter : value;
         const [totalDigits, setTotalDigits] = useState<number>(() => {
-            const initialValue = typeof value === "number" ? value : value.value;
-            return getDigitCount<number>(initialValue);
+            if (typeof value === "number") return getDigitCount(value);
+            // SharedValue: can't read .value during render; useAnimatedReaction syncs this immediately
+            return 1;
         });
         useDerivedValue<void>(() => {
             if (typeof value === "number") {
