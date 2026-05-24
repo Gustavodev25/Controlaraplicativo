@@ -7,6 +7,9 @@ const fetch = global.fetch || require('node-fetch');
 const PRO_PRODUCT_ID = 'com.gustavodev25.controlarapp.pro.monthly';
 const PRO_PRICE = 34.90;
 const PRO_CURRENCY = 'BRL';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const APPLE_MONTHLY_FALLBACK_DAYS = 29;
+const APPLE_MONTHLY_FALLBACK_MS = APPLE_MONTHLY_FALLBACK_DAYS * DAY_MS;
 const APPLE_PRODUCTION_VERIFY_URL = 'https://buy.itunes.apple.com/verifyReceipt';
 const APPLE_SANDBOX_VERIFY_URL = 'https://sandbox.itunes.apple.com/verifyReceipt';
 const VALID_APPLE_RECEIPT_STATUSES = new Set([0, 21006]);
@@ -26,6 +29,26 @@ function dateValueToMillis(value) {
     if (typeof value.seconds === 'number') return value.seconds * 1000;
     const parsed = new Date(value).getTime();
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveMonthlyEntitlementPeriod({
+    explicitExpiresMs,
+    purchaseMs,
+    signedMs,
+    nowMs = Date.now(),
+    allowFallback = true,
+}) {
+    const appleExpiresMs = parseAppleMillis(explicitExpiresMs);
+    const anchorMs =
+        parseAppleMillis(purchaseMs) ||
+        parseAppleMillis(signedMs) ||
+        nowMs;
+
+    return {
+        periodStartMs: anchorMs,
+        expiresMs: appleExpiresMs || (allowFallback ? anchorMs + APPLE_MONTHLY_FALLBACK_MS : null),
+        usedFallbackExpiration: !appleExpiresMs && allowFallback,
+    };
 }
 
 function getLatestProReceipt(receipts) {
@@ -193,15 +216,24 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
     const userRef = db.collection('users').doc(firebaseUid);
 
     const now = Date.now();
-    const expiresMs = parseAppleMillis(latestReceipt.expires_date_ms);
     const purchaseMs = parseAppleMillis(latestReceipt.purchase_date_ms);
     const startedMs =
         parseAppleMillis(latestReceipt.original_purchase_date_ms) ||
         purchaseMs ||
         now;
     const cancellationMs = parseAppleMillis(latestReceipt.cancellation_date_ms);
+    const entitlementPeriod = resolveMonthlyEntitlementPeriod({
+        explicitExpiresMs: latestReceipt.expires_date_ms,
+        purchaseMs,
+        signedMs: startedMs,
+        nowMs: now,
+        allowFallback: result.status !== 21006,
+    });
+    const expiresMs = entitlementPeriod.expiresMs;
     const hasPro = !!expiresMs && expiresMs > now && !cancellationMs;
-    const willRenew = renewalInfo?.auto_renew_status === '1';
+    const autoRenewStatus = renewalInfo?.auto_renew_status == null
+        ? null
+        : renewalInfo.auto_renew_status === '1' ? 'enabled' : 'disabled';
     const transactionId = requestBody.transactionId || latestReceipt.transaction_id || null;
     const originalTransactionId =
         requestBody.originalTransactionId ||
@@ -230,8 +262,9 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
     mirrorSubscriptionField(update, 'originalTransactionId', originalTransactionId);
     mirrorSubscriptionField(update, 'appleTransactionId', latestReceipt.transaction_id || null);
     mirrorSubscriptionField(update, 'appleOriginalTransactionId', latestReceipt.original_transaction_id || null);
-    mirrorSubscriptionField(update, 'autoRenewStatus', willRenew ? 'enabled' : 'disabled');
-    mirrorSubscriptionField(update, 'cancelAtPeriodEnd', hasPro && !willRenew);
+    mirrorSubscriptionField(update, 'autoRenewStatus', autoRenewStatus);
+    mirrorSubscriptionField(update, 'cancelAtPeriodEnd', hasPro && autoRenewStatus === 'disabled');
+    mirrorSubscriptionField(update, 'appleExpirationFallbackApplied', entitlementPeriod.usedFallbackExpiration);
     mirrorSubscriptionField(update, 'startedAt', new Date(startedMs));
     if (expiresMs) {
         const expiresAt = new Date(expiresMs);
@@ -274,8 +307,8 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
         hasPro,
         status,
         expiresMs,
-        cancelAtPeriodEnd: hasPro && !willRenew,
-        autoRenewStatus: willRenew ? 'enabled' : 'disabled',
+        cancelAtPeriodEnd: hasPro && autoRenewStatus === 'disabled',
+        autoRenewStatus,
     };
 }
 
@@ -367,3 +400,8 @@ router.get('/subscription-status', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._test = {
+    APPLE_MONTHLY_FALLBACK_DAYS,
+    APPLE_MONTHLY_FALLBACK_MS,
+    resolveMonthlyEntitlementPeriod,
+};
