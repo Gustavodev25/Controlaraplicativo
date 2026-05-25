@@ -69,6 +69,7 @@ app.get('/api/diagnostics', (req, res) => {
 app.use('/api/pluggy', pluggyRoutes);
 app.use('/api/stripe', require('./api/stripe'));
 app.use('/api/apple', require('./api/apple'));
+app.use('/api/admin', require('./api/admin'));
 console.log('[Server] Rotas Stripe e Apple IAP carregadas ✅');
 
 app.use((err, req, res, next) => {

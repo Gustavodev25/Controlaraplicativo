@@ -18,6 +18,7 @@ const APPLE_SANDBOX_VERIFY_URL = 'https://sandbox.itunes.apple.com/verifyReceipt
 const VALID_APPLE_RECEIPT_STATUSES = new Set([0, 21006]);
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trial', 'trialing']);
 const APPLE_PROVIDER_VALUES = new Set(['apple', 'app_store', 'storekit']);
+const MANUAL_PROVIDER_VALUES = new Set(['manual', 'admin']);
 const APPLE_SERVER_API_PRODUCTION_URL = process.env.APPLE_SERVER_API_PRODUCTION_URL || 'https://api.storekit.apple.com';
 const APPLE_SERVER_API_SANDBOX_URL = process.env.APPLE_SERVER_API_SANDBOX_URL || 'https://api.storekit-sandbox.apple.com';
 const APPLE_SERVER_API_REFRESH_THROTTLE_MS = 15 * 60 * 1000;
@@ -471,9 +472,11 @@ function buildStatusSnapshot(sub) {
     const plan = String(sub.plan || '').trim().toLowerCase() || 'free';
     const provider = resolveProvider(sub);
     const isApple = APPLE_PROVIDER_VALUES.has(provider);
+    const isManual = MANUAL_PROVIDER_VALUES.has(provider);
     const expiresMs = dateValueToMillis(sub.expiresAt || sub.renewalDate || sub.nextBillingDate);
     const isPaidPlan = plan === 'pro' || plan === 'premium';
-    const expiredByDate = isApple && isPaidPlan && !!expiresMs && expiresMs <= now;
+    const expiresByDate = isApple || isManual;
+    const expiredByDate = expiresByDate && isPaidPlan && !!expiresMs && expiresMs <= now;
     let status = normalizeSubscriptionStatus(sub.status);
 
     if (expiredByDate && ACTIVE_SUBSCRIPTION_STATUSES.has(status)) {
@@ -483,7 +486,7 @@ function buildStatusSnapshot(sub) {
     const hasPro =
         isPaidPlan &&
         ACTIVE_SUBSCRIPTION_STATUSES.has(status) &&
-        (!isApple || !expiresMs || expiresMs > now);
+        (!expiresByDate || !expiresMs || expiresMs > now);
 
     const cancelAtPeriodEnd =
         sub.cancelAtPeriodEnd === true ||
@@ -524,7 +527,8 @@ function buildStatusSnapshot(sub) {
 }
 
 async function persistComputedAppleStatus({ admin, userRef, sub, snapshot }) {
-    if (!sub || !APPLE_PROVIDER_VALUES.has(resolveProvider(sub))) return false;
+    const provider = resolveProvider(sub);
+    if (!sub || (!APPLE_PROVIDER_VALUES.has(provider) && !MANUAL_PROVIDER_VALUES.has(provider))) return false;
 
     const currentStatus = normalizeSubscriptionStatus(sub.status);
     if (currentStatus === snapshot.status) return false;
