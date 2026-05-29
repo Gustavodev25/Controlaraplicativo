@@ -18,6 +18,10 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock('react-native', () => ({
+  Platform: { OS: 'ios' },
+}));
+
 jest.mock('../firebase', () => ({
   databaseService: {
     logNotification: jest.fn(() => Promise.resolve()),
@@ -26,6 +30,7 @@ jest.mock('../firebase', () => ({
 
 // Import mocks to assert
 const Notifications = require('expo-notifications');
+const { databaseService } = require('../firebase');
 
 describe('Notification Service', () => {
   beforeEach(() => {
@@ -52,9 +57,23 @@ describe('Notification Service', () => {
       await notificationService.scheduleNotificationWithRetry('Test', 'Body', date);
       
       expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
-        content: { title: 'Test', body: 'Body', sound: true },
+        content: expect.objectContaining({ title: 'Test', body: 'Body', sound: true }),
         trigger: { type: 'date', date: date },
       }));
+    });
+
+    it('should block prompt-like content before scheduling', async () => {
+      const date = new Date('2024-01-02T09:00:00Z');
+      const leakedPrompt = `We need to produce a proactive message for Gustavo M.
+According to the data:
+- TAREFA PRINCIPAL: "Regar plantas"
+Rules:
+1. Start with natural greeting.
+3. Max 3 sentences (WhatsApp).`;
+
+      await notificationService.scheduleNotificationWithRetry('Mensagem IA', leakedPrompt, date);
+
+      expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
     });
 
     it('should retry on failure', async () => {
@@ -63,9 +82,30 @@ describe('Notification Service', () => {
         .mockRejectedValueOnce(new Error('Fail 1'))
         .mockResolvedValueOnce('Success');
 
-      await notificationService.scheduleNotificationWithRetry('Test', 'Body', date);
+      const promise = notificationService.scheduleNotificationWithRetry('Test', 'Body', date);
+      await jest.advanceTimersByTimeAsync(500);
+      await promise;
       
       expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('External notification logs', () => {
+    it('should not log prompt-like recurrence names externally', async () => {
+      await notificationService.logToExternalService(
+        'user123',
+        {
+          id: 'bad-prompt',
+          name: 'We need to produce a proactive message. TAREFA PRINCIPAL: "Regar plantas"',
+          dueDate: '2024-01-02',
+          type: 'reminder',
+          status: 'pending',
+        } as RecurrenceItem,
+        new Date('2024-01-02T12:00:00Z'),
+        'due'
+      );
+
+      expect(databaseService.logNotification).not.toHaveBeenCalled();
     });
   });
 
@@ -75,7 +115,7 @@ describe('Notification Service', () => {
         id: '1',
         name: 'Netflix',
         dueDate: '2024-01-05', // Due in 4 days
-        type: 'subscription',
+        type: 'reminder',
         status: 'pending',
         frequency: 'monthly',
       },
@@ -83,7 +123,7 @@ describe('Notification Service', () => {
         id: '2',
         name: 'Gym',
         dueDate: '2024-01-15', // Due in 14 days
-        type: 'subscription',
+        type: 'reminder',
         status: 'pending',
         frequency: 'monthly',
       }
@@ -115,7 +155,7 @@ describe('Notification Service', () => {
         id: '3',
         name: 'Trial',
         dueDate: '2024-01-10',
-        type: 'subscription',
+        type: 'reminder',
         status: 'pending',
         cancellationDate: '2024-01-08', // Cancel on Jan 8th
       }];
@@ -128,7 +168,9 @@ describe('Notification Service', () => {
       
       // Expect calls for cancellation
       const calls = Notifications.scheduleNotificationAsync.mock.calls;
-      const cancellationCalls = calls.filter((call: any) => call[0].content.title.includes('Cancelamento'));
+      const cancellationCalls = calls.filter((call: any) =>
+        String(call[0].content.data?.triggerKey || '').startsWith('cancel_day_')
+      );
       expect(cancellationCalls.length).toBeGreaterThanOrEqual(2);
     });
   });

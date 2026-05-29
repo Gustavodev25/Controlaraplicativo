@@ -51,6 +51,27 @@ export interface PaymentAlertRescheduleParams {
 const PAYMENT_NOTIFICATION_CATEGORIES: NotificationCategory[] = ['recurrence', 'invoice', 'plan'];
 const DEFAULT_INVOICE_NOTIFICATION_PREFERENCES: InvoiceNotificationPreferences = { daysBeforeDue: 3, showAmount: false };
 
+const PROMPT_LEAK_PATTERNS = [
+    /\bwe need to produce\b/i,
+    /\baccording to the data\b/i,
+    /\brules\s*:/i,
+    /\bTAREFA PRINCIPAL\b/i,
+    /\bPERFIL COMPORTAMENTAL\b/i,
+    /\bWhatsApp\b/i,
+    /\bNever introduce yourself\b/i,
+    /\bMax 3 sentences\b/i,
+];
+
+const looksLikePromptLeak = (value: unknown): boolean => {
+    const text = String(value ?? '').trim();
+    if (!text) return false;
+    return PROMPT_LEAK_PATTERNS.some(pattern => pattern.test(text));
+};
+
+const normalizeNotificationText = (value: unknown): string => {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+};
+
 // Notification Templates
 const NotificationTemplates = {
     due: {
@@ -304,6 +325,14 @@ export const notificationService = {
         triggerDate: Date,
         options: ScheduleNotificationOptions = {}
     ) {
+        const safeTitle = normalizeNotificationText(title);
+        const safeBody = normalizeNotificationText(body);
+
+        if (!safeTitle || !safeBody || looksLikePromptLeak(safeTitle) || looksLikePromptLeak(safeBody)) {
+            await logActivity('Skipping unsafe notification content', { metadata: options.metadata });
+            return;
+        }
+
         const Notifications = getNotifications();
         if (!Notifications) return;
 
@@ -311,7 +340,7 @@ export const notificationService = {
 
         // ❗ NÃO agendar datas passadas
         if (triggerDate.getTime() <= Date.now() - 60000) {
-            await logActivity('Skipping past date', { title, triggerDate: triggerDate.toISOString() });
+            await logActivity('Skipping past date', { title: safeTitle, triggerDate: triggerDate.toISOString() });
             return;
         }
 
@@ -333,8 +362,8 @@ export const notificationService = {
             try {
                 await Notifications.scheduleNotificationAsync({
                     content: {
-                        title,
-                        body,
+                        title: safeTitle,
+                        body: safeBody,
                         sound: true,
                         priority: 'high', // Added for Android background
                         interruptionLevel: 'active', // Added for iOS background
@@ -354,7 +383,7 @@ export const notificationService = {
                 });
 
                 await logActivity('Notification scheduled', {
-                    title,
+                    title: safeTitle,
                     triggerDate: triggerDate.toISOString(),
                     metadata: options.metadata
                 });
@@ -364,7 +393,7 @@ export const notificationService = {
                 await logActivity(`Attempt ${attempt} failed`, error);
 
                 if (attempt === retries) {
-                    await logActivity('All retry attempts failed for notification', { title });
+                    await logActivity('All retry attempts failed for notification', { title: safeTitle });
                 } else {
                     await new Promise(resolve => setTimeout(resolve, 500 * attempt));
                 }
@@ -1138,6 +1167,14 @@ export const notificationService = {
         const hasLogged = await AsyncStorage.getItem(logKey);
 
         if (!hasLogged) {
+            if (looksLikePromptLeak(item.name)) {
+                await logActivity('Skipping unsafe external notification log', {
+                    recurrenceId: item.id,
+                    type,
+                });
+                return;
+            }
+
             await databaseService.logNotification(userId, {
                 recurrenceId: item.id,
                 name: item.name,

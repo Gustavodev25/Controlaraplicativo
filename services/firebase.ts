@@ -116,6 +116,23 @@ const getMonthKeyFromDate = (value: any): string => {
     return datePart.substring(0, 7);
 };
 
+const PROMPT_LEAK_PATTERNS = [
+    /\bwe need to produce\b/i,
+    /\baccording to the data\b/i,
+    /\brules\s*:/i,
+    /\bTAREFA PRINCIPAL\b/i,
+    /\bPERFIL COMPORTAMENTAL\b/i,
+    /\bWhatsApp\b/i,
+    /\bNever introduce yourself\b/i,
+    /\bMax 3 sentences\b/i,
+];
+
+const looksLikePromptLeak = (value: unknown): boolean => {
+    const text = String(value ?? '').trim();
+    if (!text) return false;
+    return PROMPT_LEAK_PATTERNS.some(pattern => pattern.test(text));
+};
+
 const MONTH_KEY_REGEX = /^\d{4}-\d{2}$/;
 
 const isValidMonthKeyValue = (value: unknown): value is string => {
@@ -3205,6 +3222,11 @@ export const databaseService = {
     // Log Notification Schedule
     logNotification: async (userId: string, data: { recurrenceId: string, name: string, dueDate: string, type: 'due' | 'cancellation' | 'invoice' | 'plan' }) => {
         try {
+            if (looksLikePromptLeak(data?.name) || looksLikePromptLeak(data?.recurrenceId)) {
+                console.warn('[Firebase] Blocked notification log with unsafe prompt-like content');
+                return { success: false, error: 'Unsafe notification content blocked' };
+            }
+
             // Create a deterministic ID to avoid duplicates
             // ID format: recurrenceId_dueDate_type
             const safeDate = data.dueDate.replace(/\//g, '-');
@@ -3942,5 +3964,3 @@ export const databaseService = {
 };
 
 // Export types for convenience
-
-
