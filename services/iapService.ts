@@ -9,6 +9,8 @@
 
 import { Platform } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
+import * as Crypto from 'expo-crypto';
+import { auth } from '@/services/firebase';
 
 // ---------------------------------------------------------------------------
 // Expo Go detection — MUST happen before any require of react-native-iap
@@ -54,8 +56,14 @@ const BACKEND_URL =
     process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, '') ||
     'https://backendcontrolarapp-production.up.railway.app';
 
-export const PRO_PRODUCT_ID = 'com.gustavodev25.controlarapp.pro.monthly';
+export const APPLE_PRO_PRODUCT_ID = 'com.gustavodev25.controlarapp.pro.monthly';
+export const GOOGLE_PLAY_PRO_PRODUCT_ID = 'controlarapp_pro_monthly';
+export const GOOGLE_PLAY_PACKAGE_NAME = 'com.gustavodev25.controlarapp';
+export const GOOGLE_PLAY_TRIAL_OFFER_ID = 'pro-monthly-trial-7d';
+export const PRO_PRODUCT_ID =
+    Platform.OS === 'android' ? GOOGLE_PLAY_PRO_PRODUCT_ID : APPLE_PRO_PRODUCT_ID;
 export const PRO_PRICE_STRING = 'R$ 34,90';
+export const PRO_TRIAL_DAYS = 7;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -124,7 +132,11 @@ interface AppleSubscriptionStatusOptions {
     refreshServerStatus?: boolean;
 }
 
+export type StoreSubscriptionStatusResult = AppleSubscriptionStatusResult;
+export type StoreSubscriptionStatusOptions = AppleSubscriptionStatusOptions;
+
 let connectionPromise: Promise<void> | null = null;
+let googlePlayOfferToken: string | null = null;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -139,6 +151,15 @@ const toFiniteNumber = (value: any): number | null => {
         return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
+};
+
+const getFirebaseAuthorizationHeaders = async (): Promise<Record<string, string>> => {
+    const idToken = await auth.currentUser?.getIdToken();
+    return idToken ? { Authorization: `Bearer ${idToken}` } : {};
+};
+
+const getGooglePlayAccountId = async (firebaseUid: string): Promise<string> => {
+    return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
 };
 
 const getPurchaseTransactionId = (purchase?: any): string | null => {
@@ -164,7 +185,7 @@ const normalizeStoreKitPurchaseForBackend = (
     const rawPurchase = (purchase || {}) as Record<string, any>;
 
     return {
-        productId: rawPurchase.productId || PRO_PRODUCT_ID,
+        productId: rawPurchase.productId || APPLE_PRO_PRODUCT_ID,
         transactionId: getPurchaseTransactionId(rawPurchase),
         originalTransactionId: getPurchaseOriginalTransactionId(rawPurchase),
         purchaseToken: isJws(rawPurchase.purchaseToken) ? rawPurchase.purchaseToken : null,
@@ -196,6 +217,35 @@ function getTrustedDisplayPrice(product: ProductSubscription): string {
     }
 
     return displayPrice;
+}
+
+function getGooglePlaySubscriptionOfferToken(product?: ProductSubscription | null): string | null {
+    if (!product || product.platform !== 'android') return null;
+
+    const legacyOffers = Array.isArray((product as any).subscriptionOfferDetailsAndroid)
+        ? (product as any).subscriptionOfferDetailsAndroid
+        : [];
+    const standardizedOffers = Array.isArray((product as any).subscriptionOffers)
+        ? (product as any).subscriptionOffers
+        : [];
+    const hasFreePhase = (offer: any) => {
+        const pricingPhases =
+            offer?.pricingPhases?.pricingPhaseList ||
+            offer?.pricingPhasesAndroid?.pricingPhaseList ||
+            [];
+        return Array.isArray(pricingPhases) && pricingPhases.some((phase: any) => {
+            return String(phase?.priceAmountMicros ?? '') === '0' || Number(phase?.price) === 0;
+        });
+    };
+    const trialOffer =
+        legacyOffers.find((offer: any) => offer?.offerId === GOOGLE_PLAY_TRIAL_OFFER_ID) ||
+        standardizedOffers.find((offer: any) => offer?.id === GOOGLE_PLAY_TRIAL_OFFER_ID) ||
+        legacyOffers.find(hasFreePhase) ||
+        standardizedOffers.find(hasFreePhase);
+    const fallbackOffer = legacyOffers[0] || standardizedOffers[0] || null;
+    const selectedOffer = trialOffer || fallbackOffer;
+
+    return selectedOffer?.offerToken || selectedOffer?.offerTokenAndroid || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +287,7 @@ export async function finishTransaction(opts: {
 // ---------------------------------------------------------------------------
 
 export async function initializePurchases(_userId?: string): Promise<void> {
-    if (Platform.OS !== 'ios') return;
+    if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
     if (isExpoGo) {
         console.log('[IAP] Skipping — running in Expo Go');
         return;
@@ -260,7 +310,9 @@ export async function initializePurchases(_userId?: string): Promise<void> {
 }
 
 export async function getProOffering(): Promise<OfferingsResult> {
-    if (Platform.OS !== 'ios' || isExpoGo) return { priceString: PRO_PRICE_STRING };
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) {
+        return { priceString: PRO_PRICE_STRING };
+    }
 
     const iap = getIAP();
     if (!iap) return { priceString: PRO_PRICE_STRING };
@@ -273,6 +325,9 @@ export async function getProOffering(): Promise<OfferingsResult> {
         }) as ProductSubscription[];
         const product = products.find((item) => item.id === PRO_PRODUCT_ID) || products[0];
         if (product) {
+            if (Platform.OS === 'android') {
+                googlePlayOfferToken = getGooglePlaySubscriptionOfferToken(product);
+            }
             return { priceString: getTrustedDisplayPrice(product) };
         }
     } catch (e) {
@@ -326,6 +381,49 @@ export async function getAppleSubscriptionStatus(
     }
 }
 
+export async function getGooglePlaySubscriptionStatus(
+    firebaseUid: string,
+    options: StoreSubscriptionStatusOptions = {}
+): Promise<StoreSubscriptionStatusResult> {
+    try {
+        const refreshParam = options.refreshServerStatus ? '&refresh=true' : '';
+        const authorizationHeaders = await getFirebaseAuthorizationHeaders();
+        const response = await fetch(
+            `${BACKEND_URL}/api/google/subscription-status?firebaseUid=${encodeURIComponent(firebaseUid)}${refreshParam}`,
+            { headers: authorizationHeaders }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Erro ao consultar assinatura Google Play');
+        }
+
+        return {
+            success: true,
+            hasPro: data.hasPro === true,
+            plan: String(data.plan || data.subscription?.plan || 'free').trim().toLowerCase(),
+            status: String(data.status || data.subscription?.status || 'inactive').trim().toLowerCase(),
+            provider: data.provider || data.subscription?.provider || null,
+            expiresAt: data.expiresAt || data.subscription?.expiresAt || null,
+            cancelAtPeriodEnd: data.cancelAtPeriodEnd === true || data.subscription?.cancelAtPeriodEnd === true,
+            autoRenewStatus: data.autoRenewStatus || data.subscription?.autoRenewStatus || null,
+            subscription: data.subscription || null,
+        };
+    } catch (e: any) {
+        console.error('[IAP] google subscription-status error:', e);
+        return createFallbackStatus(e?.message || 'Erro ao consultar assinatura Google Play');
+    }
+}
+
+export async function getStoreSubscriptionStatus(
+    firebaseUid: string,
+    options: StoreSubscriptionStatusOptions = {}
+): Promise<StoreSubscriptionStatusResult> {
+    if (Platform.OS === 'android') {
+        return getGooglePlaySubscriptionStatus(firebaseUid, options);
+    }
+    return getAppleSubscriptionStatus(firebaseUid, options);
+}
+
 async function getStoreKitSignedTransaction(purchase?: Partial<StorePurchase> | Record<string, any> | null): Promise<string | null> {
     const purchaseToken = (purchase as any)?.purchaseToken;
     if (isJws(purchaseToken)) return purchaseToken;
@@ -335,7 +433,7 @@ async function getStoreKitSignedTransaction(purchase?: Partial<StorePurchase> | 
 
     try {
         await initializePurchases();
-        const signedTransaction = await (iap as any).getTransactionJwsIOS(PRO_PRODUCT_ID);
+        const signedTransaction = await (iap as any).getTransactionJwsIOS(APPLE_PRO_PRODUCT_ID);
         return isJws(signedTransaction) ? signedTransaction : null;
     } catch (e) {
         console.warn('[IAP] getTransactionJwsIOS unavailable:', e);
@@ -353,9 +451,9 @@ async function getActiveStoreKitPurchase(): Promise<Record<string, any> | null> 
 
     try {
         if (typeof (iap as any).getActiveSubscriptions === 'function') {
-            const subscriptions = await (iap as any).getActiveSubscriptions([PRO_PRODUCT_ID]);
+            const subscriptions = await (iap as any).getActiveSubscriptions([APPLE_PRO_PRODUCT_ID]);
             const activeSubscription = Array.isArray(subscriptions)
-                ? subscriptions.find((item: any) => item?.productId === PRO_PRODUCT_ID && item?.isActive !== false)
+                ? subscriptions.find((item: any) => item?.productId === APPLE_PRO_PRODUCT_ID && item?.isActive !== false)
                 : null;
 
             if (activeSubscription) return activeSubscription;
@@ -366,8 +464,8 @@ async function getActiveStoreKitPurchase(): Promise<Record<string, any> | null> 
 
     try {
         if (typeof (iap as any).currentEntitlementIOS === 'function') {
-            const entitlement = await (iap as any).currentEntitlementIOS(PRO_PRODUCT_ID);
-            if (entitlement?.productId === PRO_PRODUCT_ID) return entitlement;
+            const entitlement = await (iap as any).currentEntitlementIOS(APPLE_PRO_PRODUCT_ID);
+            if (entitlement?.productId === APPLE_PRO_PRODUCT_ID) return entitlement;
         }
     } catch (e) {
         console.warn('[IAP] currentEntitlementIOS unavailable:', e);
@@ -378,9 +476,50 @@ async function getActiveStoreKitPurchase(): Promise<Record<string, any> | null> 
             onlyIncludeActiveItemsIOS: true,
             alsoPublishToEventListenerIOS: false,
         });
-        return (purchases || []).find((item: StorePurchase) => item.productId === PRO_PRODUCT_ID) || null;
+        return (purchases || []).find((item: StorePurchase) => item.productId === APPLE_PRO_PRODUCT_ID) || null;
     } catch (e) {
         console.warn('[IAP] getAvailablePurchases unavailable:', e);
+        return null;
+    }
+}
+
+async function getActiveGooglePlayPurchase(): Promise<Record<string, any> | null> {
+    if (Platform.OS !== 'android' || isExpoGo) return null;
+
+    const iap = getIAP();
+    if (!iap) return null;
+
+    await initializePurchases();
+
+    try {
+        if (typeof (iap as any).getActiveSubscriptions === 'function') {
+            const subscriptions = await (iap as any).getActiveSubscriptions([GOOGLE_PLAY_PRO_PRODUCT_ID]);
+            const activeSubscription = Array.isArray(subscriptions)
+                ? subscriptions.find((item: any) =>
+                    item?.productId === GOOGLE_PLAY_PRO_PRODUCT_ID &&
+                    item?.isActive !== false &&
+                    (item?.purchaseToken || item?.purchaseTokenAndroid)
+                )
+                : null;
+
+            if (activeSubscription) {
+                return {
+                    ...activeSubscription,
+                    purchaseToken: activeSubscription.purchaseToken || activeSubscription.purchaseTokenAndroid,
+                };
+            }
+        }
+    } catch (e) {
+        console.warn('[IAP] getActiveSubscriptions unavailable on Google Play:', e);
+    }
+
+    try {
+        const purchases = await iap.getAvailablePurchases();
+        return (purchases || []).find((item: StorePurchase) => {
+            return item.productId === GOOGLE_PLAY_PRO_PRODUCT_ID && item.purchaseState === 'purchased';
+        }) || null;
+    } catch (e) {
+        console.warn('[IAP] getAvailablePurchases unavailable on Google Play:', e);
         return null;
     }
 }
@@ -447,6 +586,80 @@ export async function syncActiveStoreKitPurchaseWithBackend(firebaseUid: string)
     return syncStoreKitPurchaseWithBackend(firebaseUid, activePurchase);
 }
 
+export async function syncGooglePlayPurchaseWithBackend(
+    firebaseUid: string,
+    purchase?: Partial<StorePurchase> | Record<string, any> | null
+): Promise<PurchaseResult> {
+    if (Platform.OS !== 'android' || isExpoGo) {
+        return { success: false, hasPro: false, error: 'Google Play Billing indisponivel neste ambiente' };
+    }
+
+    const purchaseToken = (purchase as any)?.purchaseToken || (purchase as any)?.purchaseTokenAndroid;
+    if (!purchaseToken) {
+        return { success: false, hasPro: false, error: 'Token da compra Google Play nao encontrado.' };
+    }
+
+    try {
+        const authorizationHeaders = await getFirebaseAuthorizationHeaders();
+        const response = await fetch(`${BACKEND_URL}/api/google/validate-purchase`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...authorizationHeaders,
+            },
+            body: JSON.stringify({
+                firebaseUid,
+                productId: (purchase as any)?.productId || GOOGLE_PLAY_PRO_PRODUCT_ID,
+                purchaseToken,
+                purchase: {
+                    productId: (purchase as any)?.productId || GOOGLE_PLAY_PRO_PRODUCT_ID,
+                    purchaseState: (purchase as any)?.purchaseState || null,
+                    transactionId: (purchase as any)?.transactionId || (purchase as any)?.id || null,
+                    transactionDate: toFiniteNumber((purchase as any)?.transactionDate),
+                    currentPlanId: (purchase as any)?.currentPlanId || null,
+                    isAutoRenewing: typeof (purchase as any)?.isAutoRenewing === 'boolean'
+                        ? (purchase as any).isAutoRenewing
+                        : null,
+                },
+            }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Erro ao validar assinatura Google Play');
+
+        return {
+            success: data.hasPro === true,
+            hasPro: data.hasPro === true,
+            status: data.status,
+            expiresAt: data.expiresAt || null,
+            cancelAtPeriodEnd: data.cancelAtPeriodEnd === true,
+            autoRenewStatus: data.autoRenewStatus || null,
+        };
+    } catch (e: any) {
+        console.error('[IAP] google validate-purchase error:', e);
+        return {
+            success: false,
+            hasPro: false,
+            error: e?.message || 'Erro ao validar assinatura Google Play',
+        };
+    }
+}
+
+export async function syncActiveGooglePlayPurchaseWithBackend(firebaseUid: string): Promise<PurchaseResult> {
+    const activePurchase = await getActiveGooglePlayPurchase();
+    if (!activePurchase) {
+        return { success: false, hasPro: false, error: 'Nenhuma assinatura Pro ativa encontrada na Google Play.' };
+    }
+
+    return syncGooglePlayPurchaseWithBackend(firebaseUid, activePurchase);
+}
+
+export async function syncActiveStorePurchaseWithBackend(firebaseUid: string): Promise<PurchaseResult> {
+    if (Platform.OS === 'android') {
+        return syncActiveGooglePlayPurchaseWithBackend(firebaseUid);
+    }
+    return syncActiveStoreKitPurchaseWithBackend(firebaseUid);
+}
+
 export async function syncAppleSubscriptionStatus(
     firebaseUid: string,
     options: AppleSubscriptionStatusOptions = {}
@@ -469,8 +682,36 @@ export async function syncAppleSubscriptionStatus(
     return currentStatus;
 }
 
+export async function syncGooglePlaySubscriptionStatus(
+    firebaseUid: string,
+    options: StoreSubscriptionStatusOptions = {}
+): Promise<StoreSubscriptionStatusResult> {
+    const currentStatus = await getGooglePlaySubscriptionStatus(firebaseUid, options);
+
+    if (Platform.OS !== 'android' || isExpoGo || currentStatus.hasPro) {
+        return currentStatus;
+    }
+
+    const playSync = await syncActiveGooglePlayPurchaseWithBackend(firebaseUid);
+    if (playSync.success || playSync.hasPro) {
+        return getGooglePlaySubscriptionStatus(firebaseUid);
+    }
+
+    return currentStatus;
+}
+
+export async function syncStoreSubscriptionStatus(
+    firebaseUid: string,
+    options: StoreSubscriptionStatusOptions = {}
+): Promise<StoreSubscriptionStatusResult> {
+    if (Platform.OS === 'android') {
+        return syncGooglePlaySubscriptionStatus(firebaseUid, options);
+    }
+    return syncAppleSubscriptionStatus(firebaseUid, options);
+}
+
 export async function checkProStatus(firebaseUid: string): Promise<boolean> {
-    const status = await syncAppleSubscriptionStatus(firebaseUid);
+    const status = await syncStoreSubscriptionStatus(firebaseUid);
     return status.hasPro === true;
 }
 
@@ -558,6 +799,10 @@ export async function validatePurchaseWithBackend(
     firebaseUid: string,
     purchase: StorePurchase
 ): Promise<PurchaseResult> {
+    if (Platform.OS === 'android') {
+        return syncGooglePlayPurchaseWithBackend(firebaseUid, purchase);
+    }
+
     const storeKitResult = await syncStoreKitPurchaseWithBackend(firebaseUid, purchase);
     if (storeKitResult.success) {
         return storeKitResult;
@@ -584,12 +829,12 @@ export async function validatePurchaseWithBackend(
 }
 
 export async function restorePurchases(firebaseUid: string): Promise<RestoreResult> {
-    const accountStatus = await getAppleSubscriptionStatus(firebaseUid, { refreshServerStatus: true });
+    const accountStatus = await getStoreSubscriptionStatus(firebaseUid, { refreshServerStatus: true });
     if (accountStatus.hasPro) {
         return { success: true, hasPro: true };
     }
 
-    if (Platform.OS !== 'ios' || isExpoGo) {
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) {
         return {
             success: accountStatus.success,
             hasPro: false,
@@ -609,19 +854,23 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
     try {
         await initializePurchases();
 
-        const activeSync = await syncActiveStoreKitPurchaseWithBackend(firebaseUid);
+        const activeSync = await syncActiveStorePurchaseWithBackend(firebaseUid);
         if (activeSync.success || activeSync.hasPro) {
             return { success: true, hasPro: true };
         }
 
         await iap.restorePurchases();
-        const purchases = await iap.getAvailablePurchases({
-            onlyIncludeActiveItemsIOS: true,
-            alsoPublishToEventListenerIOS: false,
-        });
+        const purchases = await iap.getAvailablePurchases(
+            Platform.OS === 'ios'
+                ? {
+                    onlyIncludeActiveItemsIOS: true,
+                    alsoPublishToEventListenerIOS: false,
+                }
+                : undefined
+        );
         const proPurchase = purchases.find(p => p.productId === PRO_PRODUCT_ID);
         if (!proPurchase) {
-            const refreshedAccountStatus = await getAppleSubscriptionStatus(firebaseUid, { refreshServerStatus: true });
+            const refreshedAccountStatus = await getStoreSubscriptionStatus(firebaseUid, { refreshServerStatus: true });
             return { success: true, hasPro: refreshedAccountStatus.hasPro };
         }
         const result = await validatePurchaseWithBackend(firebaseUid, proPurchase);
@@ -635,9 +884,9 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
     }
 }
 
-export async function purchaseProSubscription(): Promise<void> {
-    if (Platform.OS !== 'ios') {
-        throw new Error('Assinaturas no iOS devem ser feitas pela App Store.');
+export async function purchaseProSubscription(firebaseUid?: string): Promise<void> {
+    if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
+        throw new Error('Assinaturas nativas nao sao suportadas nesta plataforma.');
     }
     if (isExpoGo) {
         throw new Error('Compras não são suportadas no Expo Go. Use um build nativo (EAS).');
@@ -645,20 +894,53 @@ export async function purchaseProSubscription(): Promise<void> {
     const iap = getIAP();
     if (!iap) throw new Error('IAP não disponível neste ambiente');
     await initializePurchases();
+
+    if (Platform.OS === 'android') {
+        if (!firebaseUid) throw new Error('Entre na sua conta antes de assinar.');
+        if (!googlePlayOfferToken) {
+            await getProOffering();
+        }
+        if (!googlePlayOfferToken) {
+            throw new Error('Oferta mensal do Google Play nao encontrada. Confira a configuracao no Play Console.');
+        }
+
+        await iap.requestPurchase({
+            request: {
+                google: {
+                    skus: [GOOGLE_PLAY_PRO_PRODUCT_ID],
+                    obfuscatedAccountId: await getGooglePlayAccountId(firebaseUid),
+                    subscriptionOffers: [{
+                        sku: GOOGLE_PLAY_PRO_PRODUCT_ID,
+                        offerToken: googlePlayOfferToken,
+                    }],
+                },
+            },
+            type: 'subs',
+        });
+        return;
+    }
+
     await iap.requestPurchase({
         request: {
-            apple: { sku: PRO_PRODUCT_ID },
+            apple: { sku: APPLE_PRO_PRODUCT_ID },
         },
         type: 'subs',
     });
 }
 
 export async function openSubscriptionManagement(): Promise<void> {
-    if (Platform.OS !== 'ios' || isExpoGo) return;
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) return;
 
     const iap = getIAP();
     if (!iap) throw new Error('IAP nao disponivel neste ambiente');
 
     await initializePurchases();
-    await iap.deepLinkToSubscriptions();
+    await iap.deepLinkToSubscriptions(
+        Platform.OS === 'android'
+            ? {
+                skuAndroid: GOOGLE_PLAY_PRO_PRODUCT_ID,
+                packageNameAndroid: GOOGLE_PLAY_PACKAGE_NAME,
+            }
+            : undefined
+    );
 }

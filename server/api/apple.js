@@ -11,6 +11,7 @@ const APP_BUNDLE_ID = process.env.APPLE_BUNDLE_ID || 'com.gustavodev25.controlar
 const PRO_PRICE = 34.90;
 const PRO_CURRENCY = 'BRL';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const APPLE_TRIAL_DAYS = 7;
 const APPLE_MONTHLY_FALLBACK_DAYS = 29;
 const APPLE_MONTHLY_FALLBACK_MS = APPLE_MONTHLY_FALLBACK_DAYS * DAY_MS;
 const APPLE_PRODUCTION_VERIFY_URL = 'https://buy.itunes.apple.com/verifyReceipt';
@@ -34,6 +35,20 @@ const APPLE_SERVER_STATUS = Object.freeze({
 function parseAppleMillis(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isAppleFreeTrial({ receipt, transactionPayload, purchase } = {}) {
+    if (String(receipt?.is_trial_period || '').trim().toLowerCase() === 'true') {
+        return true;
+    }
+
+    const discountType = String(
+        transactionPayload?.offerDiscountType ||
+        purchase?.offerIOS?.paymentMode ||
+        ''
+    ).trim().toLowerCase().replace(/_/g, '-');
+
+    return discountType === 'free-trial';
 }
 
 function dateValueToMillis(value) {
@@ -579,9 +594,13 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
         requestBody.originalTransactionId ||
         latestReceipt.original_transaction_id ||
         null;
+    const trialEndsMs = isAppleFreeTrial({ receipt: latestReceipt }) && purchaseMs
+        ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
+        : null;
+    const isTrialing = hasPro && trialEndsMs && trialEndsMs > now;
 
     const status = hasPro
-        ? 'active'
+        ? isTrialing ? 'trialing' : 'active'
         : cancellationMs
             ? 'cancelled'
             : 'expired';
@@ -606,6 +625,11 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
     mirrorSubscriptionField(update, 'cancelAtPeriodEnd', hasPro && autoRenewStatus === 'disabled');
     mirrorSubscriptionField(update, 'appleExpirationFallbackApplied', entitlementPeriod.usedFallbackExpiration);
     mirrorSubscriptionField(update, 'startedAt', new Date(startedMs));
+    if (trialEndsMs) {
+        mirrorSubscriptionField(update, 'trialEndsAt', new Date(trialEndsMs));
+    } else {
+        mirrorSubscriptionField(update, 'trialEndsAt', deleteField);
+    }
     if (expiresMs) {
         const expiresAt = new Date(expiresMs);
         mirrorSubscriptionField(update, 'expiresAt', expiresAt);
@@ -635,7 +659,7 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
             originalTransactionId,
             amount: PRO_PRICE,
             currency: PRO_CURRENCY,
-            status: 'paid',
+            status: isTrialing ? 'trialing' : 'paid',
             createdAt: purchaseMs ? new Date(purchaseMs) : serverTimestamp,
             paidAt: purchaseMs ? new Date(purchaseMs) : serverTimestamp,
             expiresAt: expiresMs ? new Date(expiresMs) : null,
@@ -706,9 +730,13 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
         transactionId ||
         null;
     const autoRenewStatus = getStoreKitAutoRenewStatus(purchase);
+    const trialEndsMs = isAppleFreeTrial({ transactionPayload, purchase })
+        ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
+        : null;
+    const isTrialing = hasPro && trialEndsMs && trialEndsMs > now;
 
     const status = hasPro
-        ? 'active'
+        ? isTrialing ? 'trialing' : 'active'
         : cancellationMs
             ? 'cancelled'
             : 'expired';
@@ -736,6 +764,11 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
     }
     mirrorSubscriptionField(update, 'cancelAtPeriodEnd', hasPro && autoRenewStatus === 'disabled');
     mirrorSubscriptionField(update, 'startedAt', new Date(startedMs));
+    if (trialEndsMs) {
+        mirrorSubscriptionField(update, 'trialEndsAt', new Date(trialEndsMs));
+    } else {
+        mirrorSubscriptionField(update, 'trialEndsAt', deleteField);
+    }
 
     if (expiresMs) {
         const expiresAt = new Date(expiresMs);
@@ -767,7 +800,7 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
             originalTransactionId,
             amount: PRO_PRICE,
             currency: PRO_CURRENCY,
-            status: 'paid',
+            status: isTrialing ? 'trialing' : 'paid',
             createdAt: new Date(purchaseMs),
             paidAt: new Date(purchaseMs),
             expiresAt: expiresMs ? new Date(expiresMs) : null,
@@ -836,7 +869,11 @@ async function persistAppStoreServerSubscription({
         renewalPayload?.originalTransactionId ||
         transactionId ||
         null;
-    const status = mapAppleServerStatus(statusCode, cancellationMs);
+    const trialEndsMs = isAppleFreeTrial({ transactionPayload })
+        ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
+        : null;
+    const isTrialing = hasPro && trialEndsMs && trialEndsMs > now;
+    const status = isTrialing ? 'trialing' : mapAppleServerStatus(statusCode, cancellationMs);
 
     const update = {};
     mirrorSubscriptionField(update, 'plan', 'pro');
@@ -864,6 +901,11 @@ async function persistAppStoreServerSubscription({
     }
     mirrorSubscriptionField(update, 'cancelAtPeriodEnd', hasPro && autoRenewStatus === 'disabled');
     mirrorSubscriptionField(update, 'startedAt', new Date(startedMs));
+    if (trialEndsMs) {
+        mirrorSubscriptionField(update, 'trialEndsAt', new Date(trialEndsMs));
+    } else {
+        mirrorSubscriptionField(update, 'trialEndsAt', deleteField);
+    }
 
     if (expiresMs) {
         const expiresAt = new Date(expiresMs);
@@ -895,7 +937,7 @@ async function persistAppStoreServerSubscription({
             originalTransactionId,
             amount: PRO_PRICE,
             currency: PRO_CURRENCY,
-            status: 'paid',
+            status: isTrialing ? 'trialing' : 'paid',
             createdAt: new Date(purchaseMs),
             paidAt: new Date(purchaseMs),
             expiresAt: expiresMs ? new Date(expiresMs) : null,
@@ -1103,8 +1145,10 @@ router.get('/subscription-status', async (req, res) => {
 
 module.exports = router;
 module.exports._test = {
+    APPLE_TRIAL_DAYS,
     APPLE_MONTHLY_FALLBACK_DAYS,
     APPLE_MONTHLY_FALLBACK_MS,
+    isAppleFreeTrial,
     resolveMonthlyEntitlementPeriod,
     mapAppleServerStatus,
     getAppleServerAutoRenewStatus,

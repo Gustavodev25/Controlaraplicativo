@@ -68,12 +68,7 @@
       ],
       "expo-secure-store",
       "expo-notifications",
-      [
-        "react-native-iap",
-        {
-          "paymentProvider": "Apple"
-        }
-      ]
+      "react-native-iap"
     ],
     "experiments": {
       "typedRoutes": true,

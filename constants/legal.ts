@@ -10,6 +10,7 @@ export const APP_LEGAL = {
 export const PRO_SUBSCRIPTION_DISCLOSURE = {
     title: 'Plano Pro',
     duration: 'Mensal',
+    trial: '7 dias gratis',
     renewal: 'Renovacao automatica mensal',
     productId: 'com.gustavodev25.controlarapp.pro.monthly',
 };

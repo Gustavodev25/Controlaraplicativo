@@ -592,12 +592,12 @@ router.get('/connectors/health', async (req, res) => {
 
         // Extract only connectors that have health issues
         const unhealthy = connectors
-            .filter((c: any) => {
+            .filter((c) => {
                 const health = c.health || {};
                 const status = (health.status || '').toUpperCase();
                 return status !== 'ONLINE' && status !== 'OPERATIONAL';
             })
-            .map((c: any) => ({
+            .map((c) => ({
                 id: c.id,
                 name: c.name,
                 health: c.health || { status: 'UNKNOWN' },
@@ -609,7 +609,7 @@ router.get('/connectors/health', async (req, res) => {
             totalChecked: connectors.length,
             timestamp: new Date().toISOString(),
         });
-    } catch (err: any) {
+    } catch (err) {
         res.status(502).json({
             success: false,
             error: err?.message || 'Falha ao verificar status dos bancos',

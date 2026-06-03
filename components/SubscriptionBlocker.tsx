@@ -2,7 +2,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 
-const ACTIVE_PRO_STATUSES = new Set(['active', 'trialing']);
+const ACTIVE_PRO_STATUSES = new Set(['active', 'trial', 'trialing']);
 
 /**
  * SubscriptionBlocker — Redirects non-Pro users to the subscription screen

@@ -1,85 +1,125 @@
 #!/usr/bin/env node
 /**
- * Script de teste de configuração
- * Verifica se todas as variáveis de ambiente necessárias estão configuradas
+ * Server configuration check.
+ * Prints only whether sensitive env vars are present and parseable.
  */
 
 require('dotenv').config();
 
-console.log('🔍 Verificando configuração do servidor...\n');
+function parseJsonOrBase64Json(value) {
+    const rawValue = String(value || '').trim();
+    if (!rawValue) return null;
+
+    try {
+        return JSON.parse(rawValue);
+    } catch {
+        return JSON.parse(Buffer.from(rawValue, 'base64').toString('utf8'));
+    }
+}
+
+function checkServiceAccount(label, value) {
+    if (!value) {
+        console.log(`  ${label}: missing`);
+        return false;
+    }
+
+    try {
+        const parsed = parseJsonOrBase64Json(value);
+        console.log(`  ${label}: configured`);
+        console.log(`    Project ID: ${parsed.project_id || 'not found'}`);
+        console.log(`    Client Email: ${parsed.client_email || 'not found'}`);
+        console.log(`    Private Key: ${parsed.private_key ? 'configured' : 'missing'}`);
+        return Boolean(parsed.client_email && parsed.private_key);
+    } catch (error) {
+        console.log(`  ${label}: invalid (${error.message})`);
+        return false;
+    }
+}
+
+console.log('Checking server configuration...\n');
 
 const checks = {
     pluggy: {
-        clientId: !!process.env.PLUGGY_CLIENT_ID,
-        clientSecret: !!process.env.PLUGGY_CLIENT_SECRET,
-        sandbox: process.env.PLUGGY_SANDBOX
+        clientId: Boolean(process.env.PLUGGY_CLIENT_ID),
+        clientSecret: Boolean(process.env.PLUGGY_CLIENT_SECRET),
+        sandbox: process.env.PLUGGY_SANDBOX || 'not set (default: false)',
     },
     firebase: {
-        serviceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
-        projectId: !!process.env.FIREBASE_PROJECT_ID,
-        privateKey: !!process.env.FIREBASE_PRIVATE_KEY,
-        clientEmail: !!process.env.FIREBASE_CLIENT_EMAIL
+        serviceAccount: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT),
+        projectId: Boolean(process.env.FIREBASE_PROJECT_ID),
+        privateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
+        clientEmail: Boolean(process.env.FIREBASE_CLIENT_EMAIL),
+    },
+    googlePlay: {
+        serviceAccount: Boolean(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT),
+        clientEmail: Boolean(process.env.GOOGLE_PLAY_CLIENT_EMAIL),
+        privateKey: Boolean(process.env.GOOGLE_PLAY_PRIVATE_KEY),
+        packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.gustavodev25.controlarapp',
+        productId: process.env.GOOGLE_PLAY_PRO_PRODUCT_ID || 'controlarapp_pro_monthly',
+        trialOfferId: process.env.GOOGLE_PLAY_TRIAL_OFFER_ID || 'pro-monthly-trial-7d',
+        rtdnToken: Boolean(process.env.GOOGLE_PLAY_RTDN_TOKEN),
     },
     server: {
-        port: process.env.PORT || '3001'
-    }
+        port: process.env.PORT || '3001',
+    },
 };
 
-// Verificar Pluggy
-console.log('📦 Pluggy Configuration:');
-console.log(`  Client ID: ${checks.pluggy.clientId ? '✅' : '❌'}`);
-console.log(`  Client Secret: ${checks.pluggy.clientSecret ? '✅' : '❌'}`);
-console.log(`  Sandbox Mode: ${checks.pluggy.sandbox || 'não definido (padrão: false)'}`);
+console.log('Pluggy Configuration:');
+console.log(`  Client ID: ${checks.pluggy.clientId ? 'configured' : 'missing'}`);
+console.log(`  Client Secret: ${checks.pluggy.clientSecret ? 'configured' : 'missing'}`);
+console.log(`  Sandbox Mode: ${checks.pluggy.sandbox}`);
 
-// Verificar Firebase
-console.log('\n🔥 Firebase Configuration:');
-const firebaseConfigured = checks.firebase.serviceAccount || 
-    (checks.firebase.projectId && checks.firebase.privateKey && checks.firebase.clientEmail);
-
+console.log('\nFirebase Admin Configuration:');
+let firebaseConfigured = false;
 if (checks.firebase.serviceAccount) {
-    console.log('  Service Account (Base64): ✅');
-    
-    // Tentar decodificar para verificar se é válido
-    try {
-        const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('ascii');
-        const parsed = JSON.parse(decoded);
-        console.log(`  ├─ Project ID: ${parsed.project_id || 'não encontrado'}`);
-        console.log(`  ├─ Client Email: ${parsed.client_email || 'não encontrado'}`);
-        console.log(`  └─ Private Key: ${parsed.private_key ? '✅' : '❌'}`);
-    } catch (e) {
-        console.log('  └─ ⚠️  Erro ao decodificar: ' + e.message);
-    }
+    firebaseConfigured = checkServiceAccount('FIREBASE_SERVICE_ACCOUNT', process.env.FIREBASE_SERVICE_ACCOUNT);
 } else if (checks.firebase.projectId && checks.firebase.privateKey && checks.firebase.clientEmail) {
-    console.log('  Individual Variables:');
-    console.log(`  ├─ Project ID: ✅`);
-    console.log(`  ├─ Private Key: ✅`);
-    console.log(`  └─ Client Email: ✅`);
+    firebaseConfigured = true;
+    console.log('  Individual variables: configured');
 } else {
-    console.log('  ❌ Firebase não configurado');
-    console.log('  Configure FIREBASE_SERVICE_ACCOUNT ou as variáveis individuais');
+    console.log('  Firebase Admin: missing');
+    console.log('  Configure FIREBASE_SERVICE_ACCOUNT or FIREBASE_PROJECT_ID + FIREBASE_PRIVATE_KEY + FIREBASE_CLIENT_EMAIL.');
 }
 
-// Verificar Server
-console.log('\n🖥️  Server Configuration:');
+console.log('\nGoogle Play Billing Configuration:');
+let googlePlayConfigured = false;
+if (checks.googlePlay.serviceAccount) {
+    googlePlayConfigured = checkServiceAccount('GOOGLE_PLAY_SERVICE_ACCOUNT', process.env.GOOGLE_PLAY_SERVICE_ACCOUNT);
+} else if (checks.googlePlay.clientEmail && checks.googlePlay.privateKey) {
+    googlePlayConfigured = true;
+    console.log('  Individual variables: configured');
+} else {
+    console.log('  Google Play Billing: missing');
+    console.log('  Configure GOOGLE_PLAY_SERVICE_ACCOUNT or GOOGLE_PLAY_CLIENT_EMAIL + GOOGLE_PLAY_PRIVATE_KEY.');
+}
+console.log(`  Package Name: ${checks.googlePlay.packageName}`);
+console.log(`  Product ID: ${checks.googlePlay.productId}`);
+console.log(`  Trial Offer ID: ${checks.googlePlay.trialOfferId}`);
+console.log(`  RTDN Token: ${checks.googlePlay.rtdnToken ? 'configured' : 'not set'}`);
+
+console.log('\nServer Configuration:');
 console.log(`  Port: ${checks.server.port}`);
 
-// Resumo
 console.log('\n' + '='.repeat(50));
-const allPluggyOk = checks.pluggy.clientId && checks.pluggy.clientSecret;
-const allFirebaseOk = firebaseConfigured;
 
-if (allPluggyOk && allFirebaseOk) {
-    console.log('✅ Todas as configurações estão OK!');
-    console.log('Você pode iniciar o servidor com: npm start');
+const pluggyConfigured = checks.pluggy.clientId && checks.pluggy.clientSecret;
+const allRequiredConfigured = pluggyConfigured && firebaseConfigured && googlePlayConfigured;
+
+if (allRequiredConfigured) {
+    console.log('All required configuration is present.');
+    console.log('You can start the server with: npm start');
     process.exit(0);
-} else {
-    console.log('❌ Algumas configurações estão faltando:');
-    if (!allPluggyOk) {
-        console.log('  - Configure PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET');
-    }
-    if (!allFirebaseOk) {
-        console.log('  - Configure as variáveis do Firebase');
-    }
-    console.log('\nConsulte o arquivo RAILWAY_SETUP.md para mais informações.');
-    process.exit(1);
 }
+
+console.log('Some required configuration is missing:');
+if (!pluggyConfigured) {
+    console.log('  - Configure PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET.');
+}
+if (!firebaseConfigured) {
+    console.log('  - Configure Firebase Admin variables.');
+}
+if (!googlePlayConfigured) {
+    console.log('  - Configure Google Play Billing variables.');
+}
+console.log('\nSee server/.env.example and docs/CONFIGURAR_ASSINATURAS_APPLE_GOOGLE.md.');
+process.exit(1);

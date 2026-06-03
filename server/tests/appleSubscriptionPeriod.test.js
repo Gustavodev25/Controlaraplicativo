@@ -15,7 +15,7 @@ jest.mock('firebase-admin', () => ({
 
 const appleRouter = require('../api/apple');
 
-const { APPLE_MONTHLY_FALLBACK_MS, resolveMonthlyEntitlementPeriod } = appleRouter._test;
+const { APPLE_MONTHLY_FALLBACK_MS, isAppleFreeTrial, resolveMonthlyEntitlementPeriod } = appleRouter._test;
 
 describe('Apple subscription entitlement period', () => {
   test('uses the App Store expiration when it is present', () => {
@@ -60,5 +60,11 @@ describe('Apple subscription entitlement period', () => {
     expect(period.expiresMs).toBe(signedMs + APPLE_MONTHLY_FALLBACK_MS);
     expect(period.periodStartMs).toBe(signedMs);
     expect(period.usedFallbackExpiration).toBe(true);
+  });
+
+  test('recognizes App Store free trials from receipts and StoreKit transactions', () => {
+    expect(isAppleFreeTrial({ receipt: { is_trial_period: 'true' } })).toBe(true);
+    expect(isAppleFreeTrial({ transactionPayload: { offerDiscountType: 'FREE_TRIAL' } })).toBe(true);
+    expect(isAppleFreeTrial({ transactionPayload: { offerDiscountType: 'PAY_AS_YOU_GO' } })).toBe(false);
   });
 });

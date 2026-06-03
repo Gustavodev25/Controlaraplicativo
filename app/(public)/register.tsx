@@ -141,7 +141,7 @@ export default function RegisterScreen() {
                             </TouchableOpacity>
 
                             <AuthButton
-                                title={Platform.OS === 'ios' ? 'Continuar para o Plano' : 'Criar Conta'}
+                                title="Continuar para o Plano"
                                 onPress={handleRegister}
                                 isLoading={isLoading}
                                 style={styles.button}

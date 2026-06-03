@@ -148,7 +148,8 @@ const OAUTH_POLL_INITIAL_DELAY_MS = 3000;
 const OAUTH_POLL_MAX_DELAY_MS = 12000;
 const SYNC_REQUEST_TIMEOUT_MS = 240000;
 const MANUAL_REFRESH_MAX_DURATION_MS = 5 * 60 * 1000;
-const CPF_MODAL_IOS_PRESENT_DELAY_MS = 450;
+const CPF_MODAL_IOS_PRESENT_DELAY_MS = 90;
+const CPF_MODAL_IOS_DISMISS_FALLBACK_MS = 900;
 
 const triggerBankCardMorph = () => {
     LayoutAnimation.configureNext({
@@ -468,6 +469,8 @@ export default function OpenFinanceScreen() {
     const activeManualSyncsRef = useRef<Set<string>>(new Set());
     const pendingCpfAfterBankDismissRef = useRef(false);
     const cpfModalOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastOAuthCallbackRef = useRef<{ url: string; receivedAt: number } | null>(null);
+    const handleOAuthCallbackRef = useRef<((url: string) => Promise<void>) | null>(null);
 
     useEffect(() => {
         pendingItemIdRef.current = pendingItemId;
@@ -496,14 +499,27 @@ export default function OpenFinanceScreen() {
 
         pendingCpfAfterBankDismissRef.current = false;
         clearCpfModalOpenTimer();
-        setShowCpfModal(true);
+        setTimeout(() => {
+            setShowCpfModal(true);
+        }, 0);
     }, [clearCpfModalOpenTimer]);
+
+    const schedulePendingCpfModal = useCallback((delayMs = 0) => {
+        if (!pendingCpfAfterBankDismissRef.current) return;
+
+        clearCpfModalOpenTimer();
+
+        cpfModalOpenTimerRef.current = setTimeout(
+            showPendingCpfModal,
+            delayMs
+        );
+    }, [clearCpfModalOpenTimer, showPendingCpfModal]);
 
     const handleConnectAccountModalDismiss = useCallback(() => {
         if (Platform.OS === 'ios') {
-            showPendingCpfModal();
+            schedulePendingCpfModal(CPF_MODAL_IOS_PRESENT_DELAY_MS);
         }
-    }, [showPendingCpfModal]);
+    }, [schedulePendingCpfModal]);
 
     const handleCloseCpfModal = useCallback(() => {
         pendingCpfAfterBankDismissRef.current = false;
@@ -610,7 +626,23 @@ export default function OpenFinanceScreen() {
             throw new Error('Não foi possível abrir o link de autorização do banco.');
         }
 
-        await WebBrowser.openBrowserAsync(url);
+        if (Platform.OS !== 'ios') {
+            await WebBrowser.openBrowserAsync(url);
+            return;
+        }
+
+        const authResult = await WebBrowser.openAuthSessionAsync(
+            url,
+            OAUTH_REDIRECT_URI,
+            { preferEphemeralSession: false }
+        );
+
+        if (authResult.type === 'success') {
+            await handleOAuthCallbackRef.current?.(authResult.url);
+            return;
+        }
+
+        throw new Error('Autorizacao cancelada antes do retorno do banco.');
     }, []);
 
     const extractItemIdFromDeepLink = useCallback((url: string): string | null => {
@@ -885,6 +917,15 @@ export default function OpenFinanceScreen() {
     };
 
     const handleOAuthCallback = useCallback(async (url: string) => {
+        const now = Date.now();
+        const lastCallback = lastOAuthCallbackRef.current;
+
+        if (lastCallback?.url === url && now - lastCallback.receivedAt < 2000) {
+            return;
+        }
+
+        lastOAuthCallbackRef.current = { url, receivedAt: now };
+
         const parsedItemId = extractItemIdFromDeepLink(url);
         const fallbackItemId = pendingItemIdRef.current;
 
@@ -935,6 +976,10 @@ export default function OpenFinanceScreen() {
         selectedConnector,
         user
     ]);
+
+    useEffect(() => {
+        handleOAuthCallbackRef.current = handleOAuthCallback;
+    }, [handleOAuthCallback]);
 
     useEffect(() => {
         const subscription = Linking.addEventListener('url', (event) => {
@@ -1704,10 +1749,7 @@ export default function OpenFinanceScreen() {
             pendingCpfAfterBankDismissRef.current = true;
             setIsModalVisible(false);
 
-            cpfModalOpenTimerRef.current = setTimeout(
-                showPendingCpfModal,
-                CPF_MODAL_IOS_PRESENT_DELAY_MS
-            );
+            schedulePendingCpfModal(CPF_MODAL_IOS_DISMISS_FALLBACK_MS);
 
             return;
         }
@@ -2121,9 +2163,8 @@ export default function OpenFinanceScreen() {
                     setConnectionStep('oauth_pending');
                     setConnectionStatusText('Redirecionando para o banco...');
 
-                    setTimeout(async () => {
-                        await openOAuthUrlSafely(createItemOAuthUrl);
-                    }, 1000);
+                    await sleep(Platform.OS === 'ios' ? 250 : 1000);
+                    await openOAuthUrlSafely(createItemOAuthUrl);
                 } catch (openError: any) {
                     setConnectionError(openError?.message || 'Não foi possível abrir o app do banco.');
                     setConnectionStep('error');

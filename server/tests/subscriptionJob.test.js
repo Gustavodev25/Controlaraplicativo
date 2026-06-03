@@ -4,7 +4,7 @@ const mockSet = jest.fn();
 const mockDocs = [];
 
 jest.mock('firebase-admin', () => ({
-  apps: [],
+  apps: [{}],
   initializeApp: jest.fn(),
   credential: {
     cert: jest.fn()
@@ -17,7 +17,7 @@ jest.mock('firebase-admin', () => ({
       }))
     })
   })
-}));
+}), { virtual: true });
 
 const checkSubscriptions = require('../jobs/checkSubscriptions');
 

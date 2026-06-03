@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Eye, EyeOff, Lock, Mail } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
-import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { KeyboardAvoidingViewProps } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -16,7 +16,7 @@ const KEYBOARD_BEHAVIOR: KeyboardAvoidingViewProps['behavior'] = Platform.select
 
 export default function LoginScreen() {
     const router = useRouter();
-    const { signIn, profile } = useAuthContext();
+    const { signIn } = useAuthContext();
     const { showError } = useToast();
 
     const [email, setEmail] = useState('');
@@ -25,11 +25,7 @@ export default function LoginScreen() {
     const [isLoading, setIsLoading] = useState(false);
 
     const handleNewAccount = useCallback(() => {
-        if (Platform.OS === 'android') {
-            Linking.openURL('https://www.controlarmais.com.br/');
-        } else {
-            router.push('/(public)/register');
-        }
+        router.push('/(public)/register');
     }, [router]);
 
     const handleLogin = useCallback(async () => {
@@ -117,7 +113,7 @@ export default function LoginScreen() {
 
                             <TouchableOpacity onPress={handleNewAccount} style={styles.registerLink}>
                                 <Text style={styles.registerLinkText}>
-                                    {Platform.OS === 'android' ? 'Assinar no site' : 'Não tem uma conta? Cadastre-se'}
+                                    Não tem uma conta? Cadastre-se
                                 </Text>
                             </TouchableOpacity>
                         </View>

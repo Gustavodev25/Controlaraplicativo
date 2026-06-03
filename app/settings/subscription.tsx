@@ -2,7 +2,7 @@ import { UniversalBackground } from '@/components/UniversalBackground';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
-import { openSubscriptionManagement, syncAppleSubscriptionStatus } from '@/services/iapService';
+import { openSubscriptionManagement, syncStoreSubscriptionStatus } from '@/services/iapService';
 import { safeBack } from '@/utils/navigation';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -170,7 +170,7 @@ export default function SubscriptionSettingsScreen() {
     }, [refreshProfile]);
 
     // Load subscription data from Firebase
-    const loadSubscriptionData = useCallback(async (options: { syncAppleStatus?: boolean } = {}) => {
+    const loadSubscriptionData = useCallback(async (options: { syncStoreStatus?: boolean } = {}) => {
         if (!user?.uid) {
             setIsLoading(false);
             setIsRefreshing(false);
@@ -178,8 +178,8 @@ export default function SubscriptionSettingsScreen() {
         }
 
         try {
-            if (options.syncAppleStatus !== false) {
-                const statusResult = await syncAppleSubscriptionStatus(user.uid);
+            if (options.syncStoreStatus !== false) {
+                const statusResult = await syncStoreSubscriptionStatus(user.uid);
                 if (statusResult.success) {
                     await refreshProfileRef.current();
                 }
@@ -287,6 +287,11 @@ export default function SubscriptionSettingsScreen() {
     const isAppleSubscription =
         Platform.OS === 'ios' &&
         ['apple', 'app_store', 'storekit'].includes(subscriptionProvider);
+    const isGooglePlaySubscription =
+        Platform.OS === 'android' &&
+        ['google', 'google_play', 'play_store'].includes(subscriptionProvider);
+    const isNativeStoreSubscription = isAppleSubscription || isGooglePlaySubscription;
+    const nativeStoreName = isGooglePlaySubscription ? 'Google Play' : 'App Store';
     const isManualSubscription =
         subscriptionProvider === 'manual' ||
         subscriptionProvider === 'admin' ||
@@ -310,17 +315,17 @@ export default function SubscriptionSettingsScreen() {
         } as any);
     };
 
-    const handleManageAppleSubscription = async () => {
+    const handleManageNativeSubscription = async () => {
         try {
             await openSubscriptionManagement();
             if (user?.uid) {
-                const statusResult = await syncAppleSubscriptionStatus(user.uid);
+                const statusResult = await syncStoreSubscriptionStatus(user.uid);
                 if (statusResult.success) await refreshProfile();
-                await loadSubscriptionData({ syncAppleStatus: false });
+                await loadSubscriptionData({ syncStoreStatus: false });
             }
         } catch (error: any) {
             Alert.alert(
-                'Assinaturas da App Store',
+                `Assinaturas da ${nativeStoreName}`,
                 error?.message || 'Nao foi possivel abrir o gerenciamento de assinaturas.',
                 [{ text: 'OK' }]
             );
@@ -440,18 +445,18 @@ export default function SubscriptionSettingsScreen() {
                     {/* PAYMENT METHOD CARD */}
                     <SectionHeader title="PAGAMENTO" />
                     <View style={styles.paymentCard}>
-                        {isAppleSubscription ? (
+                        {isNativeStoreSubscription ? (
                             <View style={styles.paymentRow}>
                                 <View style={styles.paymentIconBox}>
                                     <Text style={styles.paymentIconEmoji}></Text>
                                 </View>
                                 <View style={styles.cardInfo}>
-                                    <Text style={styles.cardText}>App Store</Text>
-                                    <Text style={styles.cardSubtext}>Gerenciado pela Apple</Text>
+                                    <Text style={styles.cardText}>{nativeStoreName}</Text>
+                                    <Text style={styles.cardSubtext}>Gerenciado pela loja do dispositivo</Text>
                                 </View>
                                 <TouchableOpacity
                                     style={styles.editButton}
-                                    onPress={handleManageAppleSubscription}
+                                    onPress={handleManageNativeSubscription}
                                     activeOpacity={0.75}
                                 >
                                     <Text style={styles.editButtonText}>Gerenciar</Text>

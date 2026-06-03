@@ -8,11 +8,12 @@ import {
     openSubscriptionManagement,
     PRO_PRODUCT_ID,
     PRO_PRICE_STRING,
+    PRO_TRIAL_DAYS,
     purchaseErrorListener,
     purchaseProSubscription,
     purchaseUpdatedListener,
     restorePurchases,
-    syncAppleSubscriptionStatus,
+    syncStoreSubscriptionStatus,
     validatePurchaseWithBackend,
     type PurchaseError,
     type SubscriptionPurchase,
@@ -48,8 +49,9 @@ const isUserCancelledError = (error: any) => {
     return code === 'e_user_cancelled' || code === 'user-cancelled';
 };
 
-const isAppleProviderValue = (value?: string | null) => {
-    return ['apple', 'app_store', 'storekit'].includes(String(value || '').trim().toLowerCase());
+const isNativeStoreProviderValue = (value?: string | null) => {
+    return ['apple', 'app_store', 'storekit', 'google', 'google_play', 'play_store']
+        .includes(String(value || '').trim().toLowerCase());
 };
 
 export default function PlansScreen() {
@@ -75,6 +77,9 @@ export default function PlansScreen() {
     const purchaseFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const isIOS = Platform.OS === 'ios';
+    const isAndroid = Platform.OS === 'android';
+    const isMobileStore = isIOS || isAndroid;
+    const storeName = isAndroid ? 'Google Play' : 'App Store';
     const currentPlan = String(profile?.subscription?.plan ?? 'free').trim().toLowerCase();
     const currentStatus = String(profile?.subscription?.status ?? '').trim().toLowerCase();
     const currentProvider = String(
@@ -120,7 +125,7 @@ export default function PlansScreen() {
 
             await initializePurchases(user.uid);
             const [statusResult, offeringResult] = await Promise.all([
-                syncAppleSubscriptionStatus(user.uid),
+                syncStoreSubscriptionStatus(user.uid),
                 getProOffering(),
             ]);
 
@@ -141,7 +146,7 @@ export default function PlansScreen() {
 
     // Listeners nativos do StoreKit
     useEffect(() => {
-        if (!isIOS) return;
+        if (!isMobileStore) return;
 
         const purchaseSub = purchaseUpdatedListener(async (purchase: SubscriptionPurchase) => {
             if (purchase.productId !== PRO_PRODUCT_ID) return;
@@ -156,7 +161,7 @@ export default function PlansScreen() {
                     purchaseHandledRef.current = true;
                     clearPurchaseFallbackTimer();
                     await finishTransaction({ purchase, isConsumable: false });
-                    const statusResult = await syncAppleSubscriptionStatus(user.uid);
+                    const statusResult = await syncStoreSubscriptionStatus(user.uid);
                     setAlreadyPro(statusResult.hasPro || result.success);
                     await refreshProfileRef.current();
                     Alert.alert(
@@ -195,7 +200,7 @@ export default function PlansScreen() {
             purchaseSub.remove();
             errorSub.remove();
         };
-    }, [user?.uid, isForced, isIOS, router, clearPurchaseFallbackTimer]);
+    }, [user?.uid, isForced, isMobileStore, router, clearPurchaseFallbackTimer]);
 
     // Bloqueia botão voltar no Android se forçado
     useEffect(() => {
@@ -218,14 +223,14 @@ export default function PlansScreen() {
         purchaseHandledRef.current = false;
         clearPurchaseFallbackTimer();
         try {
-            await purchaseProSubscription();
+            await purchaseProSubscription(user.uid);
             // O resultado normalmente chega pelo listener. Este fallback cobre casos
             // em que o StoreKit ja ativou a compra, mas o evento nao voltou para a tela.
             purchaseFallbackTimerRef.current = setTimeout(async () => {
                 if (purchaseHandledRef.current || !user?.uid) return;
 
-                const statusResult = await syncAppleSubscriptionStatus(user.uid);
-                if (statusResult.hasPro && isAppleProviderValue(statusResult.provider)) {
+                const statusResult = await syncStoreSubscriptionStatus(user.uid);
+                if (statusResult.hasPro && isNativeStoreProviderValue(statusResult.provider)) {
                     purchaseHandledRef.current = true;
                     setAlreadyPro(true);
                     await refreshProfileRef.current();
@@ -256,13 +261,13 @@ export default function PlansScreen() {
         setRestoring(true);
         try {
             const result = await restorePurchases(user.uid);
-            const statusResult = await syncAppleSubscriptionStatus(user.uid, { refreshServerStatus: true });
-            const hasAppleRestored =
+            const statusResult = await syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true });
+            const hasStorePurchaseRestored =
                 result.hasPro ||
-                (statusResult.hasPro && isAppleProviderValue(statusResult.provider));
-            setAlreadyPro(hasAppleRestored || (!shouldSetupPayment && statusResult.hasPro));
+                (statusResult.hasPro && isNativeStoreProviderValue(statusResult.provider));
+            setAlreadyPro(hasStorePurchaseRestored || (!shouldSetupPayment && statusResult.hasPro));
 
-            if (hasAppleRestored) {
+            if (hasStorePurchaseRestored) {
                 await refreshProfile();
                 Alert.alert(
                     'Compra restaurada!',
@@ -272,7 +277,7 @@ export default function PlansScreen() {
             } else {
                 Alert.alert(
                     'Nenhuma compra encontrada',
-                    'Nao encontramos uma assinatura Pro ativa nesta conta ou no Apple ID deste dispositivo.',
+                    `Nao encontramos uma assinatura Pro ativa nesta conta ou na ${storeName} deste dispositivo.`,
                     [{ text: 'OK' }]
                 );
             }
@@ -291,13 +296,13 @@ export default function PlansScreen() {
         try {
             await openSubscriptionManagement();
             if (user?.uid) {
-                const statusResult = await syncAppleSubscriptionStatus(user.uid);
+                const statusResult = await syncStoreSubscriptionStatus(user.uid);
                 setAlreadyPro(statusResult.hasPro);
                 if (statusResult.success) await refreshProfile();
             }
         } catch (error: any) {
             Alert.alert(
-                'Assinaturas da App Store',
+                `Assinaturas da ${storeName}`,
                 error?.message || 'Nao foi possivel abrir o gerenciamento de assinaturas.',
                 [{ text: 'OK' }]
             );
@@ -401,7 +406,7 @@ export default function PlansScreen() {
                 <Animated.View style={[styles.heroSection, heroStyle]}>
                     <Text style={styles.heroTitle}>Conheça o Plano Pro</Text>
                     <Text style={styles.heroDescription}>
-                        Recursos avançados para sua gestão financeira.
+                        Teste gratis por {PRO_TRIAL_DAYS} dias. Cancele quando quiser.
                     </Text>
                 </Animated.View>
 
@@ -437,6 +442,11 @@ export default function PlansScreen() {
                     </View>
                     <View style={styles.disclosureDivider} />
                     <View style={styles.disclosureRow}>
+                        <Text style={styles.disclosureLabel}>Teste gratis</Text>
+                        <Text style={styles.disclosureValue}>{PRO_TRIAL_DAYS} dias sem cobranca</Text>
+                    </View>
+                    <View style={styles.disclosureDivider} />
+                    <View style={styles.disclosureRow}>
                         <Text style={styles.disclosureLabel}>Renovacao</Text>
                         <Text style={styles.disclosureValue}>{PRO_SUBSCRIPTION_DISCLOSURE.renewal}</Text>
                     </View>
@@ -446,13 +456,13 @@ export default function PlansScreen() {
                     <View style={styles.guaranteeRow}>
                         <Shield size={16} color="#8E8E93" />
                         <Text style={styles.guaranteeText}>
-                            Compra segura e gerenciada pela App Store
+                            Compra segura e gerenciada pela {storeName}
                         </Text>
                     </View>
                 </Animated.View>
 
                 {/* Botão de Compra */}
-                {isIOS && (
+                {isMobileStore && (
                     <Animated.View style={[styles.purchaseSection, buttonStyle]}>
                         {hasActivePro ? (
                             <View>
@@ -467,7 +477,7 @@ export default function PlansScreen() {
                                     onPress={handleManageSubscription}
                                     activeOpacity={0.7}
                                 >
-                                    <Text style={styles.restoreText}>Gerenciar assinatura na App Store</Text>
+                                    <Text style={styles.restoreText}>Gerenciar assinatura na {storeName}</Text>
                                 </TouchableOpacity>
                             </View>
                         ) : (
@@ -485,7 +495,7 @@ export default function PlansScreen() {
                                         <ActivityIndicator color="#000" />
                                     ) : (
                                         <Text style={styles.purchaseButtonText}>
-                                            {shouldSetupPayment ? 'Configurar pagamento' : 'Assinar Pro'}
+                                            {shouldSetupPayment ? 'Configurar pagamento' : `Comecar ${PRO_TRIAL_DAYS} dias gratis`}
                                         </Text>
                                     )}
                                 </TouchableOpacity>
@@ -515,9 +525,9 @@ export default function PlansScreen() {
                                 </TouchableOpacity>
 
                                 <Text style={styles.legalText}>
-                                    Plano Pro mensal. A assinatura e renovada automaticamente pela App Store, salvo
-                                    cancelamento ate 24 horas antes do fim do periodo atual. Cancele a qualquer momento
-                                    em Ajustes, Apple ID, Assinaturas.
+                                    Teste gratis de {PRO_TRIAL_DAYS} dias. Depois, o Plano Pro mensal e renovado
+                                    automaticamente pela {storeName}, salvo cancelamento antes da renovacao.
+                                    Cancele a qualquer momento no gerenciamento de assinaturas da loja.
                                 </Text>
                             </>
                         )}

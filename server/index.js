@@ -42,6 +42,7 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         stripe: process.env.STRIPE_SECRET_KEY ? 'configured' : 'missing',
+        googlePlay: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT ? 'configured' : 'missing',
         firebase: require('./lib/firebaseAdmin').isFirebaseConfigured() ? 'connected' : 'missing',
     });
 });
@@ -59,6 +60,7 @@ app.get('/api/diagnostics', (req, res) => {
             pluggyClientSecret: !!process.env.PLUGGY_CLIENT_SECRET,
             pluggySandbox: process.env.PLUGGY_SANDBOX || 'false',
             pluggyAuthConfigured,
+            googlePlayConfigured: !!process.env.GOOGLE_PLAY_SERVICE_ACCOUNT,
             firebaseConfigured: isFirebaseConfigured(),
             firebaseInitError: firebaseStatus.error,
             oauthCallbackEnabled: true,
@@ -69,8 +71,9 @@ app.get('/api/diagnostics', (req, res) => {
 app.use('/api/pluggy', pluggyRoutes);
 app.use('/api/stripe', require('./api/stripe'));
 app.use('/api/apple', require('./api/apple'));
+app.use('/api/google', require('./api/google'));
 app.use('/api/admin', require('./api/admin'));
-console.log('[Server] Rotas Stripe e Apple IAP carregadas ✅');
+console.log('[Server] Rotas Stripe, Apple IAP e Google Play Billing carregadas ✅');
 
 app.use((err, req, res, next) => {
     const timestamp = new Date().toISOString();

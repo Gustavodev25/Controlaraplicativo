@@ -1,6 +1,8 @@
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { openFinanceConnectionState } from '@/services/openFinanceConnectionState';
+import * as Linking from 'expo-linking';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
 
@@ -12,6 +14,7 @@ const normalizeParam = (value: string | string[] | undefined): string | null => 
 
 export default function OpenFinanceCallbackScreen() {
     const router = useRouter();
+    const currentUrl = Linking.useLinkingURL();
     const params = useLocalSearchParams<{
         itemId?: string | string[];
         status?: string | string[];
@@ -20,6 +23,8 @@ export default function OpenFinanceCallbackScreen() {
 
     useEffect(() => {
         let mounted = true;
+
+        WebBrowser.maybeCompleteAuthSession({ skipRedirectCheck: true });
 
         const persistAndRedirect = async () => {
             const itemId = normalizeParam(params.itemId);
@@ -31,7 +36,7 @@ export default function OpenFinanceCallbackScreen() {
                 status,
                 error,
                 receivedAt: Date.now(),
-                rawUrl: null
+                rawUrl: currentUrl ?? null
             });
 
             if (!mounted) return;
@@ -45,7 +50,7 @@ export default function OpenFinanceCallbackScreen() {
         return () => {
             mounted = false;
         };
-    }, [params.error, params.itemId, params.status, router]);
+    }, [currentUrl, params.error, params.itemId, params.status, router]);
 
     return (
         <IosCoreLoader style={styles.container} />

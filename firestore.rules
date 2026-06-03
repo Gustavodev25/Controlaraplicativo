@@ -14,6 +14,32 @@ service cloud.firestore {
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
+
+    // Billing fields are controlled by verified store webhooks and backend routes.
+    function billingFieldsUnchanged() {
+      return request.resource.data.get('subscription', null) == resource.data.get('subscription', null)
+        && request.resource.data.get('paymentMethod', null) == resource.data.get('paymentMethod', null)
+        && request.resource.data.get('paymentMethodDetails', null) == resource.data.get('paymentMethodDetails', null)
+        && request.resource.data.get('profile', {}).get('subscription', null) == resource.data.get('profile', {}).get('subscription', null)
+        && request.resource.data.get('profile', {}).get('paymentMethod', null) == resource.data.get('profile', {}).get('paymentMethod', null)
+        && request.resource.data.get('profile', {}).get('paymentMethodDetails', null) == resource.data.get('profile', {}).get('paymentMethodDetails', null)
+        && request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false)
+        && request.resource.data.get('profile', {}).get('isAdmin', false) == resource.data.get('profile', {}).get('isAdmin', false);
+    }
+
+    function hasValidInitialBillingFields() {
+      let subscription = request.resource.data.get('subscription', {});
+      let profile = request.resource.data.get('profile', {});
+      let profileSubscription = profile.get('subscription', {});
+      return subscription.get('plan', 'starter') in ['starter', 'free']
+        && subscription.get('status', 'active') in ['active', 'inactive']
+        && profileSubscription.get('plan', 'starter') in ['starter', 'free']
+        && profileSubscription.get('status', 'active') in ['active', 'inactive']
+        && !request.resource.data.keys().hasAny(['paymentMethod', 'paymentMethodDetails'])
+        && !profile.keys().hasAny(['paymentMethod', 'paymentMethodDetails'])
+        && request.resource.data.get('isAdmin', false) == false
+        && profile.get('isAdmin', false) == false;
+    }
     
     // ========================================
     // ROOT COLLECTIONS
@@ -22,7 +48,9 @@ service cloud.firestore {
     // Users collection - own profile
     match /users/{userId} {
       allow read: if isAuthenticated() && isOwner(userId);
-      allow write: if isAuthenticated() && isOwner(userId);
+      allow create: if isAuthenticated() && isOwner(userId) && hasValidInitialBillingFields();
+      allow update: if isAuthenticated() && isOwner(userId) && billingFieldsUnchanged();
+      allow delete: if isAuthenticated() && isOwner(userId);
       
       // ========================================
       // USER SUBCOLLECTIONS
