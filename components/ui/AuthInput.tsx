@@ -7,16 +7,20 @@ import { ThemedText } from '@/components/themed-text';
 interface AuthInputProps extends TextInputProps {
     label: string;
     icon?: LucideIcon;
+    labelRight?: React.ReactNode;
     rightIcon?: React.ReactNode;
     error?: string;
 }
 
-export const AuthInput = ({ label, icon: Icon, rightIcon, error, style, ...props }: AuthInputProps) => {
+export const AuthInput = ({ label, icon: Icon, labelRight, rightIcon, error, style, ...props }: AuthInputProps) => {
     const [isFocused, setIsFocused] = useState(false);
 
     return (
         <View style={styles.container}>
-            <Text style={styles.label}>{label}</Text>
+            <View style={styles.labelRow}>
+                <Text style={styles.label}>{label}</Text>
+                {labelRight ? <View style={styles.labelRight}>{labelRight}</View> : null}
+            </View>
             <View style={[
                 styles.inputContainer,
                 isFocused && styles.focusedContainer,
@@ -54,12 +58,21 @@ const styles = StyleSheet.create({
     container: {
         marginBottom: 12,
     },
+    labelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        marginBottom: 8,
+        paddingLeft: 2,
+    },
     label: {
         fontSize: 13,
         fontWeight: '600',
         color: '#faf9f5',
-        marginBottom: 8,
-        paddingLeft: 2,
+    },
+    labelRight: {
+        flexShrink: 0,
     },
     inputContainer: {
         backgroundColor: '#1C1C1E', // iOS Dark Gray

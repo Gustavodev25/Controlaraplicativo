@@ -180,7 +180,6 @@ function ArrowSelector({ options, selectedValue, onChange }: {
                     onPress={handlePrev}
                     onPressIn={() => { leftPress.value = withSpring(1, AS_PRESS_SPRING); }}
                     onPressOut={() => { leftPress.value = withSpring(0, AS_PRESS_SPRING); }}
-                    onTouchCancel={() => { leftPress.value = withSpring(0, AS_PRESS_SPRING); }}
                     style={[styles.arrowSelectorBtn, leftBtnStyle]}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -202,7 +201,6 @@ function ArrowSelector({ options, selectedValue, onChange }: {
                     onPress={handleNext}
                     onPressIn={() => { rightPress.value = withSpring(1, AS_PRESS_SPRING); }}
                     onPressOut={() => { rightPress.value = withSpring(0, AS_PRESS_SPRING); }}
-                    onTouchCancel={() => { rightPress.value = withSpring(0, AS_PRESS_SPRING); }}
                     style={[styles.arrowSelectorBtn, rightBtnStyle]}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

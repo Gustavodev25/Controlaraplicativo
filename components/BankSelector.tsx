@@ -434,9 +434,6 @@ export default function BankSelector({
                     onPressOut={() => {
                         leftPress.value = withSpring(0, PRESS_SPRING);
                     }}
-                    onTouchCancel={() => {
-                        leftPress.value = withSpring(0, PRESS_SPRING);
-                    }}
                     style={[styles.navButton, leftButtonAnimatedStyle]}
                     activeOpacity={0.8}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -465,9 +462,6 @@ export default function BankSelector({
                         rightPress.value = withSpring(1, PRESS_SPRING);
                     }}
                     onPressOut={() => {
-                        rightPress.value = withSpring(0, PRESS_SPRING);
-                    }}
-                    onTouchCancel={() => {
                         rightPress.value = withSpring(0, PRESS_SPRING);
                     }}
                     style={[styles.navButton, rightButtonAnimatedStyle]}

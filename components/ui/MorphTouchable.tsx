@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  GestureResponderEvent,
   StyleProp,
   TouchableOpacity,
   TouchableOpacityProps,
@@ -50,7 +51,6 @@ export function MorphTouchable({
   activeOpacity = 1,
   onPressIn,
   onPressOut,
-  onTouchCancel,
   ...props
 }: MorphTouchableProps) {
   const press = useSharedValue(0);
@@ -76,20 +76,15 @@ export function MorphTouchable({
     <AnimatedTouchableOpacity
       {...props}
       activeOpacity={activeOpacity}
-      onPressIn={(event) => {
+      onPressIn={(event: GestureResponderEvent) => {
         press.value = withSpring(1, MORPH_PRESS_SPRING);
         morph.value = withSpring(1, MORPH_SHAPE_SPRING);
         onPressIn?.(event);
       }}
-      onPressOut={(event) => {
+      onPressOut={(event: GestureResponderEvent) => {
         press.value = withSpring(0, MORPH_RELEASE_PRESS_SPRING);
         morph.value = withSpring(0, MORPH_RELEASE_SHAPE_SPRING);
         onPressOut?.(event);
-      }}
-      onTouchCancel={(event) => {
-        press.value = withSpring(0, MORPH_RELEASE_PRESS_SPRING);
-        morph.value = withSpring(0, MORPH_RELEASE_SHAPE_SPRING);
-        onTouchCancel?.(event);
       }}
       style={[style, animatedStyle]}
     >

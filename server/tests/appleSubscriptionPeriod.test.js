@@ -15,7 +15,13 @@ jest.mock('firebase-admin', () => ({
 
 const appleRouter = require('../api/apple');
 
-const { APPLE_MONTHLY_FALLBACK_MS, isAppleFreeTrial, resolveMonthlyEntitlementPeriod } = appleRouter._test;
+const {
+  APPLE_MONTHLY_FALLBACK_MS,
+  assertAppleAppAccountTokenMatches,
+  getExpectedAppleAppAccountToken,
+  isAppleFreeTrial,
+  resolveMonthlyEntitlementPeriod,
+} = appleRouter._test;
 
 describe('Apple subscription entitlement period', () => {
   test('uses the App Store expiration when it is present', () => {
@@ -66,5 +72,17 @@ describe('Apple subscription entitlement period', () => {
     expect(isAppleFreeTrial({ receipt: { is_trial_period: 'true' } })).toBe(true);
     expect(isAppleFreeTrial({ transactionPayload: { offerDiscountType: 'FREE_TRIAL' } })).toBe(true);
     expect(isAppleFreeTrial({ transactionPayload: { offerDiscountType: 'PAY_AS_YOU_GO' } })).toBe(false);
+  });
+
+  test('validates deterministic Apple app account tokens when StoreKit provides one', () => {
+    const firebaseUid = 'firebase-user-123';
+    const token = getExpectedAppleAppAccountToken(firebaseUid);
+
+    expect(token).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(assertAppleAppAccountTokenMatches(firebaseUid, { appAccountToken: token })).toBe(true);
+    expect(assertAppleAppAccountTokenMatches(firebaseUid, {})).toBe(false);
+    expect(() => {
+      assertAppleAppAccountTokenMatches(firebaseUid, { appAccountToken: getExpectedAppleAppAccountToken('other-user') });
+    }).toThrow('Apple transaction account token does not match the signed-in user');
   });
 });

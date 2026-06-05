@@ -57,6 +57,28 @@ const isDuplicatePurchaseUpdateError = (error: any) => {
     );
 };
 
+const isStoreCatalogError = (error: any) => {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || error || '').toLowerCase();
+
+    return (
+        code === 'sku-not-found' ||
+        code === 'query-product' ||
+        code === 'item-unavailable' ||
+        message.includes('sku not found') ||
+        message.includes('product not found') ||
+        message.includes('item unavailable')
+    );
+};
+
+const showStoreCatalogUnavailableAlert = () => {
+    Alert.alert(
+        'Assinatura indisponivel',
+        'Nao encontramos o produto de assinatura na loja agora. Tente novamente em alguns instantes.',
+        [{ text: 'OK' }]
+    );
+};
+
 const isNativeStoreProviderValue = (value?: string | null) => {
     return ['apple', 'app_store', 'storekit', 'google', 'google_play', 'play_store']
         .includes(String(value || '').trim().toLowerCase());
@@ -82,6 +104,8 @@ export default function PlansScreen() {
     const [alreadyPro, setAlreadyPro] = useState(false);
     const refreshProfileRef = useRef(refreshProfile);
     const purchaseHandledRef = useRef(false);
+    const purchaseFlowActiveRef = useRef(false);
+    const purchaseErrorHandledRef = useRef(false);
     const purchaseFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const isIOS = Platform.OS === 'ios';
@@ -176,6 +200,56 @@ export default function PlansScreen() {
         return true;
     }, [clearPurchaseFallbackTimer, isForced, router, shouldSetupPayment, storeName, user?.uid]);
 
+    const activateStorePurchase = useCallback(async (
+        purchase: SubscriptionPurchase,
+        options: { showFailureAlert?: boolean } = {}
+    ) => {
+        if (purchase.productId !== PRO_PRODUCT_ID) return false;
+        if (!user?.uid) return false;
+        if (purchaseHandledRef.current) return true;
+
+        const showFailureAlert = options.showFailureAlert !== false;
+
+        try {
+            const result = await validatePurchaseWithBackend(user.uid, purchase);
+
+            if (result.success) {
+                purchaseHandledRef.current = true;
+                clearPurchaseFallbackTimer();
+                await finishTransaction({ purchase, isConsumable: false });
+                const statusResult = await syncStoreSubscriptionStatus(user.uid);
+                setAlreadyPro(statusResult.hasPro || result.success);
+                await refreshProfileRef.current();
+                Alert.alert(
+                    'Bem-vindo ao Pro!',
+                    'Sua assinatura foi ativada com sucesso. Aproveite todos os recursos ilimitados.',
+                    [{ text: 'Continuar', onPress: () => isForced ? router.replace('/(tabs)/dashboard') : safeBack(router) }]
+                );
+                return true;
+            }
+
+            if (showFailureAlert) {
+                Alert.alert(
+                    'Falha na ativaÃ§Ã£o',
+                    result.error ?? 'NÃ£o foi possÃ­vel ativar a assinatura. Tente novamente.',
+                    [{ text: 'OK' }]
+                );
+            }
+            purchaseFlowActiveRef.current = false;
+            return false;
+        } catch (error: any) {
+            if (showFailureAlert) {
+                Alert.alert(
+                    'Falha na ativacao',
+                    error?.message ?? 'Nao foi possivel ativar a assinatura. Tente novamente.',
+                    [{ text: 'OK' }]
+                );
+            }
+            purchaseFlowActiveRef.current = false;
+            return false;
+        }
+    }, [clearPurchaseFallbackTimer, isForced, router, user?.uid]);
+
     // Listeners nativos do StoreKit
     useEffect(() => {
         if (!isMobileStore) return;
@@ -201,6 +275,7 @@ export default function PlansScreen() {
                         'Sua assinatura foi ativada com sucesso. Aproveite todos os recursos ilimitados.',
                         [{ text: 'Continuar', onPress: () => isForced ? router.replace('/(tabs)/dashboard') : safeBack(router) }]
                     );
+                    purchaseFlowActiveRef.current = false;
                 } else {
                     Alert.alert(
                         'Falha na ativação',
@@ -215,16 +290,31 @@ export default function PlansScreen() {
                     [{ text: 'OK' }]
                 );
             } finally {
+                purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
             }
         });
 
         const errorSub = purchaseErrorListener((error: PurchaseError) => {
+            if (!purchaseFlowActiveRef.current) {
+                console.warn('[IAP] Background purchase error ignored:', error);
+                return;
+            }
+
             if (isUserCancelledError(error)) {
+                purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
                 return;
             }
+            if (isStoreCatalogError(error)) {
+                purchaseErrorHandledRef.current = true;
+                purchaseFlowActiveRef.current = false;
+                setIapLoading(false);
+                showStoreCatalogUnavailableAlert();
+                return;
+            }
             if (isDuplicatePurchaseUpdateError(error)) {
+                purchaseErrorHandledRef.current = true;
                 setIapLoading(true);
                 recoverExistingStorePurchase()
                     .then((recovered) => {
@@ -243,9 +333,14 @@ export default function PlansScreen() {
                             [{ text: 'OK' }]
                         );
                     })
-                    .finally(() => setIapLoading(false));
+                    .finally(() => {
+                        purchaseFlowActiveRef.current = false;
+                        setIapLoading(false);
+                    });
                 return;
             }
+            purchaseErrorHandledRef.current = true;
+            purchaseFlowActiveRef.current = false;
             setIapLoading(false);
             Alert.alert('Erro no pagamento', error.message || 'Não foi possível processar o pagamento.');
         });
@@ -275,13 +370,33 @@ export default function PlansScreen() {
 
         setIapLoading(true);
         purchaseHandledRef.current = false;
+        purchaseFlowActiveRef.current = true;
+        purchaseErrorHandledRef.current = false;
         clearPurchaseFallbackTimer();
         try {
-            await purchaseProSubscription(user.uid);
+            const purchase = await purchaseProSubscription(user.uid);
+            if (purchaseHandledRef.current) {
+                purchaseFlowActiveRef.current = false;
+                setIapLoading(false);
+                return;
+            }
+
+            if (purchase) {
+                const activated = await activateStorePurchase(purchase, { showFailureAlert: false });
+                if (activated) {
+                    purchaseFlowActiveRef.current = false;
+                    setIapLoading(false);
+                    return;
+                }
+            }
+
             // O resultado normalmente chega pelo listener. Este fallback cobre casos
             // em que o StoreKit ja ativou a compra, mas o evento nao voltou para a tela.
             purchaseFallbackTimerRef.current = setTimeout(async () => {
-                if (purchaseHandledRef.current || !user?.uid) return;
+                if (purchaseHandledRef.current || !user?.uid) {
+                    purchaseFlowActiveRef.current = false;
+                    return;
+                }
 
                 const statusResult = await syncStoreSubscriptionStatus(user.uid);
                 if (statusResult.hasPro && isNativeStoreProviderValue(statusResult.provider)) {
@@ -294,14 +409,36 @@ export default function PlansScreen() {
                         'Sua assinatura foi ativada com sucesso. Aproveite todos os recursos ilimitados.',
                         [{ text: 'Continuar', onPress: () => isForced ? router.replace('/(tabs)/dashboard') : safeBack(router) }]
                     );
+                    purchaseFlowActiveRef.current = false;
                     return;
                 }
 
+                purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
+                if (purchase) {
+                    Alert.alert(
+                        'Ativacao pendente',
+                        `A ${storeName} retornou a compra, mas ainda nao conseguimos sincronizar o Pro. Toque em "Restaurar compras anteriores" para tentar novamente.`,
+                        [{ text: 'OK' }]
+                    );
+                }
             }, 4500);
         } catch (e: any) {
-            if (isUserCancelledError(e)) {
+            if (purchaseErrorHandledRef.current) {
+                purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
+                return;
+            }
+            if (isUserCancelledError(e)) {
+                purchaseFlowActiveRef.current = false;
+                setIapLoading(false);
+                return;
+            }
+            if (isStoreCatalogError(e)) {
+                purchaseErrorHandledRef.current = true;
+                purchaseFlowActiveRef.current = false;
+                setIapLoading(false);
+                showStoreCatalogUnavailableAlert();
                 return;
             }
             if (isDuplicatePurchaseUpdateError(e)) {
@@ -321,10 +458,12 @@ export default function PlansScreen() {
                         [{ text: 'OK' }]
                     );
                 } finally {
+                    purchaseFlowActiveRef.current = false;
                     setIapLoading(false);
                 }
                 return;
             }
+            purchaseFlowActiveRef.current = false;
             setIapLoading(false);
             Alert.alert('Erro', e?.message || 'Ocorreu um erro inesperado. Tente novamente.');
         }

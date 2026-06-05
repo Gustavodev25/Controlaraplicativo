@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { Buffer } = require('buffer');
-const { getFirebaseAdmin } = require('../lib/firebaseAdmin');
+const { getFirebaseAdmin, isFirebaseConfigured } = require('../lib/firebaseAdmin');
 
 const router = express.Router();
 const fetch = global.fetch || require('node-fetch');
@@ -584,6 +584,10 @@ router.post('/validate-purchase', async (req, res) => {
 router.get('/subscription-status', async (req, res) => {
     const firebaseUid = String(req.query.firebaseUid || '').trim();
     if (!firebaseUid) return res.status(400).json({ error: 'Missing firebaseUid' });
+
+    if (!isFirebaseConfigured()) {
+        return res.json(buildStatusSnapshot(null));
+    }
 
     try {
         await verifyFirebaseUser(req, firebaseUid);

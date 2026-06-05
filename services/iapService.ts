@@ -158,6 +158,11 @@ const toFiniteNumber = (value: any): number | null => {
     return null;
 };
 
+const getProPurchaseFromRequestResult = (result: any): StorePurchase | null => {
+    const purchases = Array.isArray(result) ? result : result ? [result] : [];
+    return purchases.find((item: StorePurchase) => item?.productId === PRO_PRODUCT_ID) || null;
+};
+
 const getFirebaseAuthorizationHeaders = async (): Promise<Record<string, string>> => {
     const idToken = await auth.currentUser?.getIdToken();
     return idToken ? { Authorization: `Bearer ${idToken}` } : {};
@@ -165,6 +170,20 @@ const getFirebaseAuthorizationHeaders = async (): Promise<Record<string, string>
 
 const getGooglePlayAccountId = async (firebaseUid: string): Promise<string> => {
     return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
+};
+
+const getAppleAppAccountToken = async (firebaseUid: string): Promise<string> => {
+    const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
+    const chars = hash.slice(0, 32).split('');
+    chars[12] = '5';
+    chars[16] = ((parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+    return [
+        chars.slice(0, 8).join(''),
+        chars.slice(8, 12).join(''),
+        chars.slice(12, 16).join(''),
+        chars.slice(16, 20).join(''),
+        chars.slice(20, 32).join(''),
+    ].join('-');
 };
 
 const getPurchaseTransactionId = (purchase?: any): string | null => {
@@ -199,6 +218,7 @@ const normalizeStoreKitPurchaseForBackend = (
         transactionDate: toFiniteNumber(rawPurchase.transactionDate),
         expirationDateIOS: toFiniteNumber(rawPurchase.expirationDateIOS),
         originalTransactionDateIOS: toFiniteNumber(rawPurchase.originalTransactionDateIOS),
+        appAccountToken: rawPurchase.appAccountToken || null,
         environmentIOS: rawPurchase.environmentIOS || null,
         isAutoRenewing: typeof rawPurchase.isAutoRenewing === 'boolean' ? rawPurchase.isAutoRenewing : null,
         renewalInfoIOS: rawPurchase.renewalInfoIOS || null,
@@ -378,8 +398,10 @@ export async function getAppleSubscriptionStatus(
 ): Promise<AppleSubscriptionStatusResult> {
     try {
         const refreshParam = options.refreshServerStatus ? '&refresh=true' : '';
+        const authorizationHeaders = await getFirebaseAuthorizationHeaders();
         const response = await fetch(
-            `${BACKEND_URL}/api/apple/subscription-status?firebaseUid=${encodeURIComponent(firebaseUid)}${refreshParam}`
+            `${BACKEND_URL}/api/apple/subscription-status?firebaseUid=${encodeURIComponent(firebaseUid)}${refreshParam}`,
+            { headers: authorizationHeaders }
         );
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -398,7 +420,7 @@ export async function getAppleSubscriptionStatus(
             subscription: data.subscription || null,
         };
     } catch (e: any) {
-        console.error('[IAP] subscription-status error:', e);
+        console.warn('[IAP] subscription-status unavailable:', e);
         return createFallbackStatus(e?.message || 'Erro ao consultar assinatura Apple');
     }
 }
@@ -431,7 +453,7 @@ export async function getGooglePlaySubscriptionStatus(
             subscription: data.subscription || null,
         };
     } catch (e: any) {
-        console.error('[IAP] google subscription-status error:', e);
+        console.warn('[IAP] google subscription-status unavailable:', e);
         return createFallbackStatus(e?.message || 'Erro ao consultar assinatura Google Play');
     }
 }
@@ -491,6 +513,29 @@ async function getActiveStoreKitPurchase(): Promise<Record<string, any> | null> 
         }
     } catch (e) {
         console.warn('[IAP] currentEntitlementIOS unavailable:', e);
+    }
+
+    try {
+        if (typeof (iap as any).latestTransactionIOS === 'function') {
+            const latestTransaction = await (iap as any).latestTransactionIOS(APPLE_PRO_PRODUCT_ID);
+            const expiresMs = toFiniteNumber(latestTransaction?.expirationDateIOS);
+            const revokedMs = toFiniteNumber(latestTransaction?.revocationDateIOS);
+            const transactionMs = toFiniteNumber(latestTransaction?.transactionDate);
+            const recentTransactionWindowMs = 35 * 24 * 60 * 60 * 1000;
+            const isRecentOrExplicitlyActive =
+                (expiresMs && expiresMs > Date.now()) ||
+                (!expiresMs && (!transactionMs || transactionMs > Date.now() - recentTransactionWindowMs));
+
+            if (
+                latestTransaction?.productId === APPLE_PRO_PRODUCT_ID &&
+                !revokedMs &&
+                isRecentOrExplicitlyActive
+            ) {
+                return latestTransaction;
+            }
+        }
+    } catch (e) {
+        console.warn('[IAP] latestTransactionIOS unavailable:', e);
     }
 
     try {
@@ -568,7 +613,10 @@ export async function syncStoreKitPurchaseWithBackend(
 
         const response = await fetch(`${BACKEND_URL}/api/apple/sync-storekit-purchase`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                ...(await getFirebaseAuthorizationHeaders()),
+            },
             body: JSON.stringify({
                 firebaseUid,
                 signedTransactionInfo,
@@ -602,6 +650,14 @@ export async function syncStoreKitPurchaseWithBackend(
 export async function syncActiveStoreKitPurchaseWithBackend(firebaseUid: string): Promise<PurchaseResult> {
     const activePurchase = await getActiveStoreKitPurchase();
     if (!activePurchase) {
+        const signedTransactionInfo = await getStoreKitSignedTransaction({ productId: APPLE_PRO_PRODUCT_ID });
+        if (signedTransactionInfo) {
+            return syncStoreKitPurchaseWithBackend(firebaseUid, {
+                productId: APPLE_PRO_PRODUCT_ID,
+                purchaseToken: signedTransactionInfo,
+            });
+        }
+
         return { success: false, hasPro: false, error: 'Nenhuma assinatura Pro ativa encontrada na App Store.' };
     }
 
@@ -745,7 +801,10 @@ export async function validateReceiptWithBackend(
     try {
         const response = await fetch(`${BACKEND_URL}/api/apple/validate-receipt`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                ...(await getFirebaseAuthorizationHeaders()),
+            },
             body: JSON.stringify({
                 firebaseUid,
                 receiptData,
@@ -906,7 +965,7 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
     }
 }
 
-export async function purchaseProSubscription(firebaseUid?: string): Promise<void> {
+export async function purchaseProSubscription(firebaseUid?: string): Promise<StorePurchase | null> {
     if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
         throw new Error('Assinaturas nativas nao sao suportadas nesta plataforma.');
     }
@@ -917,8 +976,9 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<voi
     if (!iap) throw new Error('IAP não disponível neste ambiente');
     await initializePurchases();
 
+    if (!firebaseUid) throw new Error('Entre na sua conta antes de assinar.');
+
     if (Platform.OS === 'android') {
-        if (!firebaseUid) throw new Error('Entre na sua conta antes de assinar.');
         if (!googlePlayOfferToken) {
             await getProOffering();
         }
@@ -926,7 +986,7 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<voi
             throw new Error('Oferta mensal do Google Play nao encontrada. Confira a configuracao no Play Console.');
         }
 
-        await iap.requestPurchase({
+        const purchase = await iap.requestPurchase({
             request: {
                 google: {
                     skus: [GOOGLE_PLAY_PRO_PRODUCT_ID],
@@ -939,15 +999,19 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<voi
             },
             type: 'subs',
         });
-        return;
+        return getProPurchaseFromRequestResult(purchase);
     }
 
-    await iap.requestPurchase({
+    const purchase = await iap.requestPurchase({
         request: {
-            apple: { sku: APPLE_PRO_PRODUCT_ID },
+            apple: {
+                sku: APPLE_PRO_PRODUCT_ID,
+                appAccountToken: await getAppleAppAccountToken(firebaseUid),
+            },
         },
         type: 'subs',
     });
+    return getProPurchaseFromRequestResult(purchase);
 }
 
 export async function openSubscriptionManagement(): Promise<void> {

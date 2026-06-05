@@ -4,6 +4,7 @@ export const APP_LEGAL = {
     lastUpdated: '07/05/2026',
     supportEmail: 'suporte@controlarmais.com.br',
     websiteUrl: 'https://www.controlarmais.com.br/',
+    passwordRecoveryUrl: 'https://www.controlarmais.com.br/',
     appleStandardEulaUrl: 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/',
 };
 

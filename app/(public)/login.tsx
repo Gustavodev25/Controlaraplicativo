@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Eye, EyeOff, Lock, Mail } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { KeyboardAvoidingViewProps } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -9,6 +9,7 @@ import { ThemedText } from '@/components/themed-text';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { AuthButton } from '@/components/ui/AuthButton';
 import { AuthInput } from '@/components/ui/AuthInput';
+import { APP_LEGAL } from '@/constants/legal';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 
@@ -27,6 +28,14 @@ export default function LoginScreen() {
     const handleNewAccount = useCallback(() => {
         router.push('/(public)/register');
     }, [router]);
+
+    const handleForgotPassword = useCallback(async () => {
+        try {
+            await Linking.openURL(APP_LEGAL.passwordRecoveryUrl);
+        } catch {
+            showError('Nao foi possivel abrir o site de recuperacao de senha.');
+        }
+    }, [showError]);
 
     const handleLogin = useCallback(async () => {
         if (!email || !password) {
@@ -97,6 +106,16 @@ export default function LoginScreen() {
                                 value={password}
                                 onChangeText={setPassword}
                                 secureTextEntry={!showPassword}
+                                labelRight={
+                                    <TouchableOpacity
+                                        onPress={handleForgotPassword}
+                                        activeOpacity={0.7}
+                                        accessibilityRole="link"
+                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    >
+                                        <Text style={styles.forgotPasswordText}>Esqueci minha senha</Text>
+                                    </TouchableOpacity>
+                                }
                                 rightIcon={
                                     <TouchableOpacity onPress={togglePasswordVisibility}>
                                         {showPassword ? <EyeOff size={20} color="#9ca3af" /> : <Eye size={20} color="#9ca3af" />}
@@ -181,6 +200,11 @@ const styles = StyleSheet.create({
     },
     button: {
         marginTop: 12,
+    },
+    forgotPasswordText: {
+        fontSize: 13,
+        color: '#d97757',
+        fontWeight: '600',
     },
     registerLink: {
         marginTop: 24,

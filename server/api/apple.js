@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getFirebaseAdmin } = require('../lib/firebaseAdmin');
+const { getFirebaseAdmin, isFirebaseConfigured } = require('../lib/firebaseAdmin');
 const crypto = require('crypto');
 const { Buffer } = require('buffer');
 
@@ -93,6 +93,31 @@ function base64UrlEncode(value) {
         .replace(/=/g, '')
         .replace(/\+/g, '-')
         .replace(/\//g, '_');
+}
+
+function hashValue(value) {
+    return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function hashToUuid(hash, version = '5') {
+    const chars = String(hash || '').slice(0, 32).padEnd(32, '0').split('');
+    chars[12] = version;
+    chars[16] = ((parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+    return [
+        chars.slice(0, 8).join(''),
+        chars.slice(8, 12).join(''),
+        chars.slice(12, 16).join(''),
+        chars.slice(16, 20).join(''),
+        chars.slice(20, 32).join(''),
+    ].join('-');
+}
+
+function getExpectedAppleAppAccountToken(firebaseUid) {
+    return hashToUuid(hashValue(firebaseUid)).toLowerCase();
+}
+
+function normalizeUuid(value) {
+    return String(value || '').trim().toLowerCase();
 }
 
 function parseJwsPart(value) {
@@ -547,6 +572,73 @@ function buildStatusSnapshot(sub) {
     };
 }
 
+async function verifyFirebaseUser(req, expectedUid) {
+    const authorization = String(req.headers.authorization || '');
+    const idToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    if (!idToken) {
+        const error = new Error('Missing Firebase authorization token');
+        error.statusCode = 401;
+        throw error;
+    }
+
+    const admin = getFirebaseAdmin();
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    if (!decoded?.uid || decoded.uid !== expectedUid) {
+        const error = new Error('Firebase user does not match subscription account');
+        error.statusCode = 403;
+        throw error;
+    }
+
+    return decoded;
+}
+
+function assertAppleAppAccountTokenMatches(firebaseUid, transactionPayload, purchase = {}) {
+    const appAccountToken = normalizeUuid(transactionPayload?.appAccountToken || purchase?.appAccountToken);
+    if (!appAccountToken) return false;
+
+    const expectedAppAccountToken = getExpectedAppleAppAccountToken(firebaseUid);
+    if (appAccountToken !== expectedAppAccountToken) {
+        throw new Error('Apple transaction account token does not match the signed-in user');
+    }
+
+    return true;
+}
+
+async function bindAppleTransactionToUser({ admin, firebaseUid, originalTransactionId, transactionId }) {
+    if (!originalTransactionId) {
+        throw new Error('Apple purchase is missing original transaction id');
+    }
+
+    const db = admin.firestore();
+    const originalTransactionIdHash = hashValue(originalTransactionId);
+    const mappingRef = db.collection('appleStorePurchases').doc(originalTransactionIdHash);
+    const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
+
+    await db.runTransaction(async (transaction) => {
+        const existing = await transaction.get(mappingRef);
+        const existingUid = existing.exists ? existing.data()?.firebaseUid : null;
+
+        if (existingUid && existingUid !== firebaseUid) {
+            throw new Error('Apple purchase is already linked to another account');
+        }
+
+        const mappingData = {
+            firebaseUid,
+            originalTransactionId,
+            productId: PRO_PRODUCT_ID,
+            updatedAt: serverTimestamp,
+        };
+
+        if (transactionId) {
+            mappingData.latestTransactionId = transactionId;
+        }
+
+        transaction.set(mappingRef, mappingData, { merge: true });
+    });
+
+    return originalTransactionIdHash;
+}
+
 async function persistComputedAppleStatus({ admin, userRef, sub, snapshot }) {
     const provider = resolveProvider(sub);
     if (!sub || (!APPLE_PROVIDER_VALUES.has(provider) && !MANUAL_PROVIDER_VALUES.has(provider))) return false;
@@ -594,6 +686,12 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
         requestBody.originalTransactionId ||
         latestReceipt.original_transaction_id ||
         null;
+    const originalTransactionIdHash = await bindAppleTransactionToUser({
+        admin,
+        firebaseUid,
+        originalTransactionId,
+        transactionId,
+    });
     const trialEndsMs = isAppleFreeTrial({ receipt: latestReceipt }) && purchaseMs
         ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
         : null;
@@ -619,6 +717,7 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
     mirrorSubscriptionField(update, 'storeEnvironment', result.environment || null);
     mirrorSubscriptionField(update, 'transactionId', transactionId);
     mirrorSubscriptionField(update, 'originalTransactionId', originalTransactionId);
+    mirrorSubscriptionField(update, 'appleOriginalTransactionIdHash', originalTransactionIdHash);
     mirrorSubscriptionField(update, 'appleTransactionId', latestReceipt.transaction_id || null);
     mirrorSubscriptionField(update, 'appleOriginalTransactionId', latestReceipt.original_transaction_id || null);
     mirrorSubscriptionField(update, 'autoRenewStatus', autoRenewStatus);
@@ -729,6 +828,12 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
         purchase?.originalTransactionIdentifierIOS ||
         transactionId ||
         null;
+    const originalTransactionIdHash = await bindAppleTransactionToUser({
+        admin,
+        firebaseUid,
+        originalTransactionId,
+        transactionId,
+    });
     const autoRenewStatus = getStoreKitAutoRenewStatus(purchase);
     const trialEndsMs = isAppleFreeTrial({ transactionPayload, purchase })
         ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
@@ -755,8 +860,10 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
     mirrorSubscriptionField(update, 'storeEnvironment', transactionPayload.environment || purchase?.environmentIOS || null);
     mirrorSubscriptionField(update, 'transactionId', transactionId);
     mirrorSubscriptionField(update, 'originalTransactionId', originalTransactionId);
+    mirrorSubscriptionField(update, 'appleOriginalTransactionIdHash', originalTransactionIdHash);
     mirrorSubscriptionField(update, 'appleTransactionId', transactionId);
     mirrorSubscriptionField(update, 'appleOriginalTransactionId', originalTransactionId);
+    mirrorSubscriptionField(update, 'appAccountToken', transactionPayload.appAccountToken || purchase?.appAccountToken || null);
     mirrorSubscriptionField(update, 'storeKitVerified', true);
     mirrorSubscriptionField(update, 'appleExpirationFallbackApplied', entitlementPeriod.usedFallbackExpiration);
     if (autoRenewStatus) {
@@ -869,6 +976,12 @@ async function persistAppStoreServerSubscription({
         renewalPayload?.originalTransactionId ||
         transactionId ||
         null;
+    const originalTransactionIdHash = await bindAppleTransactionToUser({
+        admin,
+        firebaseUid,
+        originalTransactionId,
+        transactionId,
+    });
     const trialEndsMs = isAppleFreeTrial({ transactionPayload })
         ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
         : null;
@@ -891,8 +1004,10 @@ async function persistAppStoreServerSubscription({
     mirrorSubscriptionField(update, 'storeEnvironment', transactionPayload.environment || serverEnvironment || null);
     mirrorSubscriptionField(update, 'transactionId', transactionId);
     mirrorSubscriptionField(update, 'originalTransactionId', originalTransactionId);
+    mirrorSubscriptionField(update, 'appleOriginalTransactionIdHash', originalTransactionIdHash);
     mirrorSubscriptionField(update, 'appleTransactionId', transactionId);
     mirrorSubscriptionField(update, 'appleOriginalTransactionId', originalTransactionId);
+    mirrorSubscriptionField(update, 'appAccountToken', transactionPayload.appAccountToken || null);
     mirrorSubscriptionField(update, 'appStoreServerVerified', true);
     mirrorSubscriptionField(update, 'appleExpirationFallbackApplied', entitlementPeriod.usedFallbackExpiration);
     mirrorSubscriptionField(update, 'appleGracePeriodFallbackApplied', hasPro && !gracePeriodExpiresMs && explicitExpiresMs && explicitExpiresMs <= now);
@@ -1010,8 +1125,12 @@ router.post('/validate-receipt', async (req, res) => {
         console.error('[Apple IAP] APPLE_SHARED_SECRET not configured');
         return res.status(500).json({ error: 'Apple IAP not configured on server' });
     }
+    if (!isFirebaseConfigured()) {
+        return res.status(503).json({ error: 'Firebase Admin not configured on server' });
+    }
 
     try {
+        await verifyFirebaseUser(req, firebaseUid);
         let result = await validateAppleReceipt(receiptData, false);
 
         // 21007 = sandbox receipt sent to production. App Review also uses sandbox.
@@ -1055,7 +1174,7 @@ router.post('/validate-receipt', async (req, res) => {
         });
     } catch (e) {
         console.error('[Apple IAP] validate-receipt error:', e);
-        return res.status(500).json({ error: e.message });
+        return res.status(e.statusCode || 500).json({ error: e.message });
     }
 });
 
@@ -1065,8 +1184,12 @@ router.post('/sync-storekit-purchase', async (req, res) => {
     if (!firebaseUid || !signedTransactionInfo) {
         return res.status(400).json({ error: 'Missing firebaseUid or signedTransactionInfo' });
     }
+    if (!isFirebaseConfigured()) {
+        return res.status(503).json({ error: 'Firebase Admin not configured on server' });
+    }
 
     try {
+        await verifyFirebaseUser(req, firebaseUid);
         const transactionPayload = decodeAppleTransactionJws(signedTransactionInfo);
         const productId = transactionPayload.productId || purchase.productId;
         const bundleId = transactionPayload.bundleId;
@@ -1078,6 +1201,7 @@ router.post('/sync-storekit-purchase', async (req, res) => {
         if (productId !== PRO_PRODUCT_ID) {
             return res.status(400).json({ hasPro: false, error: 'Apple transaction product mismatch' });
         }
+        assertAppleAppAccountTokenMatches(firebaseUid, transactionPayload, purchase);
 
         const persisted = await persistStoreKitSubscription({
             firebaseUid,
@@ -1096,7 +1220,7 @@ router.post('/sync-storekit-purchase', async (req, res) => {
         });
     } catch (e) {
         console.error('[Apple IAP] sync-storekit-purchase error:', e);
-        return res.status(400).json({ hasPro: false, error: e.message });
+        return res.status(e.statusCode || 400).json({ hasPro: false, error: e.message });
     }
 });
 
@@ -1104,7 +1228,12 @@ router.get('/subscription-status', async (req, res) => {
     const { firebaseUid } = req.query;
     if (!firebaseUid) return res.status(400).json({ error: 'Missing firebaseUid' });
 
+    if (!isFirebaseConfigured()) {
+        return res.json(buildStatusSnapshot(null));
+    }
+
     try {
+        await verifyFirebaseUser(req, firebaseUid);
         const admin = getFirebaseAdmin();
         const db = admin.firestore();
         const userRef = db.collection('users').doc(firebaseUid);
@@ -1139,7 +1268,7 @@ router.get('/subscription-status', async (req, res) => {
         return res.json(snapshot);
     } catch (e) {
         console.error('[Apple IAP] subscription-status error:', e);
-        return res.status(500).json({ error: e.message });
+        return res.status(e.statusCode || 500).json({ error: e.message });
     }
 });
 
@@ -1153,4 +1282,6 @@ module.exports._test = {
     mapAppleServerStatus,
     getAppleServerAutoRenewStatus,
     shouldRefreshAppleSubscriptionFromServerApi,
+    getExpectedAppleAppAccountToken,
+    assertAppleAppAccountTokenMatches,
 };

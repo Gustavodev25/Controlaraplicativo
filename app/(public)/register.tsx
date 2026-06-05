@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, User as UserIcon } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -53,7 +53,7 @@ export default function RegisterScreen() {
                 showError(result.error || 'Erro ao criar conta.');
                 setIsLoading(false);
             }
-        } catch (error) {
+        } catch {
             showError('Ocorreu um erro inesperado.');
             setIsLoading(false);
         }
@@ -61,6 +61,9 @@ export default function RegisterScreen() {
 
     const goBack = () => router.back();
     const togglePasswordVisibility = () => setShowPassword(prev => !prev);
+    const handleOpenTerms = useCallback(() => {
+        router.push('/settings/legal/terms' as Href);
+    }, [router]);
 
     return (
         <UniversalBackground>
@@ -126,19 +129,29 @@ export default function RegisterScreen() {
                                 }
                             />
 
-                            <TouchableOpacity
-                                style={styles.termsRow}
-                                onPress={() => setTermsAccepted(prev => !prev)}
-                                activeOpacity={0.7}
-                            >
+                            <View style={styles.termsRow}>
+                                <TouchableOpacity
+                                    onPress={() => setTermsAccepted(prev => !prev)}
+                                    activeOpacity={0.7}
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: termsAccepted }}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                >
                                 <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
                                     {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
                                 </View>
+                                </TouchableOpacity>
                                 <Text style={styles.termsText}>
                                     Eu li e concordo com os{' '}
-                                    <Text style={styles.termsLink}>Termos de Uso</Text>
+                                    <Text
+                                        style={styles.termsLink}
+                                        onPress={handleOpenTerms}
+                                        accessibilityRole="link"
+                                    >
+                                        Termos de Uso
+                                    </Text>
                                 </Text>
-                            </TouchableOpacity>
+                            </View>
 
                             <AuthButton
                                 title="Continuar para o Plano"

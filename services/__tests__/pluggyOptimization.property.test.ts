@@ -8,7 +8,23 @@
 import * as fc from 'fast-check';
 import { categorizeError, RetryHandler, splitIntoBatches, validateTransaction } from '../pluggyOptimization';
 
+type RetryHandlerInternals = {
+  sleep: (ms: number) => Promise<void>;
+};
+
 describe('Property-Based Tests: Pluggy Optimization', () => {
+  let retrySleepSpy: jest.SpyInstance<Promise<void>, [number]>;
+
+  beforeEach(() => {
+    retrySleepSpy = jest
+      .spyOn(RetryHandler.prototype as unknown as RetryHandlerInternals, 'sleep')
+      .mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    retrySleepSpy.mockRestore();
+  });
+
   describe('Property 1: Batch Processing Preserves Transaction Accounting', () => {
     /**
      * **Validates: Requirements 2.1**
@@ -17,8 +33,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
      * savedCount + skippedCount + errorCount = total transaction count, with the same
      * final database state as sequential processing.
      */
-    it('should preserve total count when splitting into batches', () => {
-      fc.assert(
+    it('should preserve total count when splitting into batches', async () => {
+      await fc.assert(
         fc.property(
           // Generate arrays of transactions with varying lengths
           fc.array(
@@ -67,8 +83,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle edge cases: empty arrays and single items', () => {
-      fc.assert(
+    it('should handle edge cases: empty arrays and single items', async () => {
+      await fc.assert(
         fc.property(
           fc.oneof(
             fc.constant([]), // Empty array
@@ -92,8 +108,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should maintain transaction identity across batches', () => {
-      fc.assert(
+    it('should maintain transaction identity across batches', async () => {
+      await fc.assert(
         fc.property(
           fc.array(
             fc.record({
@@ -131,8 +147,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should work with different batch sizes', () => {
-      fc.assert(
+    it('should work with different batch sizes', async () => {
+      await fc.assert(
         fc.property(
           fc.array(fc.anything(), { minLength: 0, maxLength: 200 }),
           fc.integer({ min: 1, max: 100 }),
@@ -160,8 +176,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should calculate correct number of batches', () => {
-      fc.assert(
+    it('should calculate correct number of batches', async () => {
+      await fc.assert(
         fc.property(
           fc.integer({ min: 0, max: 500 }),
           fc.integer({ min: 1, max: 100 }),
@@ -199,8 +215,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
         }
       });
 
-    it('should reject transactions missing required id field', () => {
-      fc.assert(
+    it('should reject transactions missing required id field', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             amount: fc.integer({ min: -10000, max: 10000 }).map(n => n / 100), // Generate valid floats
@@ -220,8 +236,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reject transactions with invalid amount', () => {
-      fc.assert(
+    it('should reject transactions with invalid amount', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             id: fc.string({ minLength: 1 }),
@@ -249,8 +265,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reject transactions with missing or invalid date', () => {
-      fc.assert(
+    it('should reject transactions with missing or invalid date', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             id: fc.string({ minLength: 1 }),
@@ -279,8 +295,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reject transactions missing accountId', () => {
-      fc.assert(
+    it('should reject transactions missing accountId', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             id: fc.string({ minLength: 1 }),
@@ -300,8 +316,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should accept valid transactions with all required fields', () => {
-      fc.assert(
+    it('should accept valid transactions with all required fields', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             id: fc.string({ minLength: 1 }),
@@ -324,8 +340,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reject transactions with multiple validation errors', () => {
-      fc.assert(
+    it('should reject transactions with multiple validation errors', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             // Missing id
@@ -345,8 +361,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should validate ISO 8601 date formats correctly', () => {
-      fc.assert(
+    it('should validate ISO 8601 date formats correctly', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             id: fc.string({ minLength: 1 }),
@@ -373,8 +389,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle edge case amounts correctly', () => {
-      fc.assert(
+    it('should handle edge case amounts correctly', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             id: fc.string({ minLength: 1 }),
@@ -399,8 +415,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reject null or undefined transaction objects', () => {
-      fc.assert(
+    it('should reject null or undefined transaction objects', async () => {
+      await fc.assert(
         fc.property(
           fc.oneof(
             fc.constant(null),
@@ -418,8 +434,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should validate all required fields independently', () => {
-      fc.assert(
+    it('should validate all required fields independently', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             hasId: fc.boolean(),
@@ -505,8 +521,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       })
     );
 
-    it('should categorize all error types correctly', () => {
-      fc.assert(
+    it('should categorize all error types correctly', async () => {
+      await fc.assert(
         fc.property(
           fc.array(errorGenerator, { minLength: 1, maxLength: 100 }),
           (errors) => {
@@ -529,8 +545,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should correctly identify retryable vs non-retryable errors', () => {
-      fc.assert(
+    it('should correctly identify retryable vs non-retryable errors', async () => {
+      await fc.assert(
         fc.property(
           errorGenerator,
           (error) => {
@@ -578,8 +594,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should preserve original error information', () => {
-      fc.assert(
+    it('should preserve original error information', async () => {
+      await fc.assert(
         fc.property(
           errorGenerator,
           (error) => {
@@ -597,8 +613,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle mixed batches of errors with different categories', () => {
-      fc.assert(
+    it('should handle mixed batches of errors with different categories', async () => {
+      await fc.assert(
         fc.property(
           fc.array(errorGenerator, { minLength: 5, maxLength: 50 }),
           (errors) => {
@@ -634,8 +650,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should categorize errors consistently across multiple calls', () => {
-      fc.assert(
+    it('should categorize errors consistently across multiple calls', async () => {
+      await fc.assert(
         fc.property(
           errorGenerator,
           (error) => {
@@ -656,8 +672,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle string errors correctly', () => {
-      fc.assert(
+    it('should handle string errors correctly', async () => {
+      await fc.assert(
         fc.property(
           fc.string({ minLength: 1 }),
           (errorString) => {
@@ -674,8 +690,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle errors without code property', () => {
-      fc.assert(
+    it('should handle errors without code property', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             message: fc.string({ minLength: 1 })
@@ -693,8 +709,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle errors without message property', () => {
-      fc.assert(
+    it('should handle errors without message property', async () => {
+      await fc.assert(
         fc.property(
           fc.record({
             code: fc.constantFrom('429', '500', '401', 'unavailable', 'NETWORK_ERROR')
@@ -712,8 +728,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should simulate batch processing with error isolation', () => {
-      fc.assert(
+    it('should simulate batch processing with error isolation', async () => {
+      await fc.assert(
         fc.property(
           fc.array(
             fc.record({
@@ -765,8 +781,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should collect all errors from a batch without stopping', () => {
-      fc.assert(
+    it('should collect all errors from a batch without stopping', async () => {
+      await fc.assert(
         fc.property(
           fc.array(errorGenerator, { minLength: 1, maxLength: 50 }),
           (errors) => {
@@ -799,8 +815,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should maintain error categorization accuracy under high volume', () => {
-      fc.assert(
+    it('should maintain error categorization accuracy under high volume', async () => {
+      await fc.assert(
         fc.property(
           fc.array(errorGenerator, { minLength: 100, maxLength: 500 }),
           (errors) => {
@@ -831,8 +847,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
      * succeed or fail definitively after exhausting retries.
      */
 
-    it('should retry up to maxRetries times for retryable errors', () => {
-      fc.assert(
+    it('should retry up to maxRetries times for retryable errors', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 0, max: 5 }), // maxRetries
           fc.integer({ min: 1, max: 10 }), // Number of failures before success
@@ -874,49 +890,45 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should use exponential backoff delays', () => {
-      fc.assert(
+    it('should use exponential backoff delays', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 10, max: 100 }), // initialDelay
           fc.integer({ min: 1, max: 3 }), // Number of retries
           async (initialDelay, retryCount) => {
             const retryHandler = new RetryHandler();
-            const delays: number[] = [];
             let attemptCount = 0;
+            retrySleepSpy.mockClear();
 
             const operation = jest.fn(async () => {
               attemptCount++;
               if (attemptCount <= retryCount) {
-                const startTime = Date.now();
-                delays.push(startTime);
                 throw new Error('network timeout');
               }
               return 'success';
             });
 
-            const startTime = Date.now();
             await retryHandler.executeWithRetry(operation, {
               maxRetries: retryCount,
               initialDelay,
               maxDelay: initialDelay * 10
             });
-            const totalDuration = Date.now() - startTime;
 
-            // Property: Total duration should be at least the sum of exponential delays
-            let expectedMinDuration = 0;
-            for (let i = 0; i < retryCount; i++) {
-              expectedMinDuration += initialDelay * Math.pow(2, i);
-            }
+            const expectedDelays = Array.from(
+              { length: retryCount },
+              (_, attempt) => initialDelay * Math.pow(2, attempt)
+            );
+            const actualDelays = retrySleepSpy.mock.calls.map(([delay]) => delay);
 
-            expect(totalDuration).toBeGreaterThanOrEqual(expectedMinDuration * 0.8); // Allow 20% tolerance
+            expect(actualDelays).toEqual(expectedDelays);
           }
         ),
         { numRuns: 50 } // Reduced runs due to timing tests
       );
     });
 
-    it('should respect maxDelay cap in exponential backoff', () => {
-      fc.assert(
+    it('should respect maxDelay cap in exponential backoff', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 10, max: 50 }), // initialDelay
           fc.integer({ min: 20, max: 100 }), // maxDelay
@@ -924,6 +936,7 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
           async (initialDelay, maxDelay, retryCount) => {
             const retryHandler = new RetryHandler();
             let attemptCount = 0;
+            retrySleepSpy.mockClear();
 
             const operation = jest.fn(async () => {
               attemptCount++;
@@ -933,31 +946,28 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
               return 'success';
             });
 
-            const startTime = Date.now();
             await retryHandler.executeWithRetry(operation, {
               maxRetries: retryCount,
               initialDelay,
               maxDelay
             });
-            const totalDuration = Date.now() - startTime;
 
-            // Property: Total duration should not exceed sum of capped delays
-            let expectedMaxDuration = 0;
-            for (let i = 0; i < retryCount; i++) {
-              const uncappedDelay = initialDelay * Math.pow(2, i);
-              expectedMaxDuration += Math.min(uncappedDelay, maxDelay);
-            }
+            const expectedDelays = Array.from(
+              { length: retryCount },
+              (_, attempt) => Math.min(initialDelay * Math.pow(2, attempt), maxDelay)
+            );
+            const actualDelays = retrySleepSpy.mock.calls.map(([delay]) => delay);
 
-            // Allow 100% overhead for test execution time (timing tests are inherently flaky)
-            expect(totalDuration).toBeLessThan(expectedMaxDuration * 2);
+            expect(actualDelays).toEqual(expectedDelays);
+            expect(Math.max(...actualDelays)).toBeLessThanOrEqual(maxDelay);
           }
         ),
         { numRuns: 30 } // Reduced runs due to timing tests
       );
     });
 
-    it('should fail definitively after exhausting retries', () => {
-      fc.assert(
+    it('should fail definitively after exhausting retries', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 0, max: 5 }), // maxRetries
           async (maxRetries) => {
@@ -985,8 +995,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should handle mixed success and failure patterns', () => {
-      fc.assert(
+    it('should handle mixed success and failure patterns', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }), // Success/failure pattern
           async (pattern) => {
@@ -1062,8 +1072,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       })
     );
 
-    it('should not retry validation errors', () => {
-      fc.assert(
+    it('should not retry validation errors', async () => {
+      await fc.assert(
         fc.asyncProperty(
           nonRetryableErrorGenerator,
           async (error) => {
@@ -1092,8 +1102,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should distinguish retryable from non-retryable errors', () => {
-      fc.assert(
+    it('should distinguish retryable from non-retryable errors', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.oneof(
             // Retryable errors
@@ -1137,8 +1147,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should respect custom shouldRetry function', () => {
-      fc.assert(
+    it('should respect custom shouldRetry function', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.string({ minLength: 1 }), // Error message
           fc.boolean(), // Whether to retry
@@ -1177,8 +1187,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should not retry duplicate detection errors', () => {
-      fc.assert(
+    it('should not retry duplicate detection errors', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.constantFrom(
             'duplicate transaction',
@@ -1223,8 +1233,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
      * should be reset to zero for subsequent operations.
      */
 
-    it('should reset retry counter after successful operation', () => {
-      fc.assert(
+    it('should reset retry counter after successful operation', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 0, max: 3 }), // Number of failures before first success
           fc.integer({ min: 0, max: 3 }), // Number of failures before second success
@@ -1274,8 +1284,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reset counter even after multiple consecutive successes', () => {
-      fc.assert(
+    it('should reset counter even after multiple consecutive successes', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.array(fc.integer({ min: 0, max: 3 }), { minLength: 1, maxLength: 10 }),
           async (failureCounts) => {
@@ -1306,8 +1316,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should maintain independent retry counters for different handler instances', () => {
-      fc.assert(
+    it('should maintain independent retry counters for different handler instances', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 0, max: 3 }),
           fc.integer({ min: 0, max: 3 }),
@@ -1356,8 +1366,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should reset counter manually', () => {
-      fc.assert(
+    it('should reset counter manually', async () => {
+      await fc.assert(
         fc.property(
           fc.integer({ min: 1, max: 10 }),
           (retryCount) => {
@@ -1376,8 +1386,8 @@ describe('Property-Based Tests: Pluggy Optimization', () => {
       );
     });
 
-    it('should not carry over retry count between operations', () => {
-      fc.assert(
+    it('should not carry over retry count between operations', async () => {
+      await fc.assert(
         fc.asyncProperty(
           fc.array(
             fc.record({

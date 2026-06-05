@@ -511,9 +511,6 @@ export default function MonthSelector({
               onPressOut={() => {
                 resetPress.value = withSpring(0, PRESS_SPRING);
               }}
-              onTouchCancel={() => {
-                resetPress.value = withSpring(0, PRESS_SPRING);
-              }}
               style={[styles.resetBtn, resetButtonStyle]}
               activeOpacity={0.75}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -529,9 +526,6 @@ export default function MonthSelector({
             leftPress.value = withSpring(1, PRESS_SPRING);
           }}
           onPressOut={() => {
-            leftPress.value = withSpring(0, PRESS_SPRING);
-          }}
-          onTouchCancel={() => {
             leftPress.value = withSpring(0, PRESS_SPRING);
           }}
           style={[styles.arrowBtn, leftButtonAnimatedStyle]}
@@ -561,9 +555,6 @@ export default function MonthSelector({
               rightPress.value = withSpring(1, PRESS_SPRING);
             }}
             onPressOut={() => {
-              rightPress.value = withSpring(0, PRESS_SPRING);
-            }}
-            onTouchCancel={() => {
               rightPress.value = withSpring(0, PRESS_SPRING);
             }}
             style={[styles.arrowBtn, rightButtonAnimatedStyle]}
