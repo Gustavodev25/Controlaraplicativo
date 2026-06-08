@@ -1001,6 +1001,11 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<Sto
     await initializePurchases();
 
     if (!firebaseUid) throw new Error('Entre na sua conta antes de assinar.');
+    console.log('[IAP] Starting purchase request', {
+        platform: Platform.OS,
+        productId: PRO_PRODUCT_ID,
+        backendUrl: BACKEND_URL,
+    });
 
     if (Platform.OS === 'android') {
         if (!googlePlayOfferToken) {
@@ -1023,6 +1028,11 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<Sto
             },
             type: 'subs',
         });
+        console.log('[IAP] requestPurchase result', {
+            platform: Platform.OS,
+            resultType: Array.isArray(purchase) ? 'array' : purchase ? 'object' : 'empty',
+            productId: getProPurchaseFromRequestResult(purchase)?.productId || null,
+        });
         return getProPurchaseFromRequestResult(purchase);
     }
 
@@ -1034,6 +1044,11 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<Sto
             },
         },
         type: 'subs',
+    });
+    console.log('[IAP] requestPurchase result', {
+        platform: Platform.OS,
+        resultType: Array.isArray(purchase) ? 'array' : purchase ? 'object' : 'empty',
+        productId: getProPurchaseFromRequestResult(purchase)?.productId || null,
     });
     return getProPurchaseFromRequestResult(purchase);
 }

@@ -265,6 +265,11 @@ export default function PlansScreen() {
             if (!user?.uid) return;
             if (purchaseHandledRef.current) return;
 
+            console.log('[IAP] purchaseUpdatedListener received purchase', {
+                productId: purchase.productId,
+                hasTransactionId: Boolean((purchase as any)?.transactionId || (purchase as any)?.id),
+                hasPurchaseToken: Boolean((purchase as any)?.purchaseToken),
+            });
             setIapLoading(true);
             try {
                 const result = await validatePurchaseWithBackend(user.uid, purchase);
@@ -308,6 +313,7 @@ export default function PlansScreen() {
             }
 
             if (isUserCancelledError(error)) {
+                console.log('[IAP] Purchase cancelled by user or StoreKit sign-in sheet');
                 purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
                 return;
@@ -427,6 +433,12 @@ export default function PlansScreen() {
                         `A ${storeName} retornou a compra, mas ainda nao conseguimos sincronizar o Pro. Toque em "Restaurar compras anteriores" para tentar novamente.`,
                         [{ text: 'OK' }]
                     );
+                } else {
+                    Alert.alert(
+                        'Compra nao concluida',
+                        `A ${storeName} nao retornou uma transacao desta vez. Se acabou de entrar com a conta Sandbox, toque no botao novamente. Se continuar igual no simulador, teste em um iPhone fisico ou use StoreKit local no Xcode.`,
+                        [{ text: 'OK' }]
+                    );
                 }
             }, 4500);
         } catch (e: any) {
@@ -436,6 +448,7 @@ export default function PlansScreen() {
                 return;
             }
             if (isUserCancelledError(e)) {
+                console.log('[IAP] Purchase cancelled by user or StoreKit sign-in sheet');
                 purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
                 return;
