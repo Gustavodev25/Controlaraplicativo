@@ -492,7 +492,7 @@ async function persistGoogleSubscription({
             productId: GOOGLE_PLAY_PRO_PRODUCT_ID,
             purchaseTokenHash: tokenHash,
             orderId: latestOrderId,
-            amount: PRO_PRICE,
+            amount: state.isTrialing ? 0 : PRO_PRICE,
             currency: PRO_CURRENCY,
             status: state.isTrialing ? 'trialing' : 'paid',
             createdAt: state.startedMs ? new Date(state.startedMs) : serverTimestamp,

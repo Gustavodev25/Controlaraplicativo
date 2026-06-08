@@ -94,6 +94,7 @@ function resolveMonthlyEntitlementPeriod({
     signedMs,
     nowMs = Date.now(),
     allowFallback = true,
+    isTrial = false,
 }) {
     const appleExpiresMs = parseAppleMillis(explicitExpiresMs);
     const anchorMs =
@@ -101,9 +102,12 @@ function resolveMonthlyEntitlementPeriod({
         parseAppleMillis(signedMs) ||
         nowMs;
 
+    const fallbackDays = isTrial ? APPLE_TRIAL_DAYS : APPLE_MONTHLY_FALLBACK_DAYS;
+    const fallbackMs = fallbackDays * DAY_MS;
+
     return {
         periodStartMs: anchorMs,
-        expiresMs: appleExpiresMs || (allowFallback ? anchorMs + APPLE_MONTHLY_FALLBACK_MS : null),
+        expiresMs: appleExpiresMs || (allowFallback ? anchorMs + fallbackMs : null),
         usedFallbackExpiration: !appleExpiresMs && allowFallback,
     };
 }
@@ -730,6 +734,7 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
         parseAppleMillis(latestReceipt.original_purchase_date_ms) ||
         purchaseMs ||
         now;
+    const isTrial = isAppleFreeTrial({ receipt: latestReceipt });
     const cancellationMs = parseAppleMillis(latestReceipt.cancellation_date_ms);
     const entitlementPeriod = resolveMonthlyEntitlementPeriod({
         explicitExpiresMs: latestReceipt.expires_date_ms,
@@ -737,6 +742,7 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
         signedMs: startedMs,
         nowMs: now,
         allowFallback: result.status !== 21006,
+        isTrial,
     });
     const expiresMs = entitlementPeriod.expiresMs;
     const hasPro = expiresMs > now && !cancellationMs;
@@ -754,7 +760,7 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
         originalTransactionId,
         transactionId,
     });
-    const trialEndsMs = isAppleFreeTrial({ receipt: latestReceipt }) && purchaseMs
+    const trialEndsMs = isTrial && purchaseMs
         ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
         : null;
     const isTrialing = hasPro && trialEndsMs && trialEndsMs > now;
@@ -818,7 +824,7 @@ async function persistAppleSubscription({ firebaseUid, result, latestReceipt, re
             productId: PRO_PRODUCT_ID,
             transactionId,
             originalTransactionId,
-            amount: PRO_PRICE,
+            amount: isTrialing ? 0 : PRO_PRICE,
             currency: PRO_CURRENCY,
             status: isTrialing ? 'trialing' : 'paid',
             createdAt: purchaseMs ? new Date(purchaseMs) : serverTimestamp,
@@ -873,11 +879,13 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
     const cancellationMs =
         parseAppleMillis(transactionPayload.revocationDate) ||
         parseAppleMillis(purchase?.revocationDateIOS);
+    const isTrial = isAppleFreeTrial({ transactionPayload, purchase });
     const entitlementPeriod = resolveMonthlyEntitlementPeriod({
         explicitExpiresMs,
         purchaseMs,
         signedMs,
         nowMs: now,
+        isTrial,
     });
     const expiresMs = entitlementPeriod.expiresMs;
     const hasPro = expiresMs > now && !cancellationMs;
@@ -899,7 +907,7 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
         transactionId,
     });
     const autoRenewStatus = getStoreKitAutoRenewStatus(purchase);
-    const trialEndsMs = isAppleFreeTrial({ transactionPayload, purchase })
+    const trialEndsMs = isTrial
         ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
         : null;
     const isTrialing = hasPro && trialEndsMs && trialEndsMs > now;
@@ -969,7 +977,7 @@ async function persistStoreKitSubscription({ firebaseUid, transactionPayload, pu
             productId: PRO_PRODUCT_ID,
             transactionId,
             originalTransactionId,
-            amount: PRO_PRICE,
+            amount: isTrialing ? 0 : PRO_PRICE,
             currency: PRO_CURRENCY,
             status: isTrialing ? 'trialing' : 'paid',
             createdAt: new Date(purchaseMs),
@@ -1015,12 +1023,14 @@ async function persistAppStoreServerSubscription({
     const cancellationMs =
         parseAppleMillis(transactionPayload.revocationDate) ||
         parseAppleMillis(renewalPayload?.revocationDate);
+    const isTrial = isAppleFreeTrial({ transactionPayload });
     const entitlementPeriod = resolveMonthlyEntitlementPeriod({
         explicitExpiresMs,
         purchaseMs,
         signedMs,
         nowMs: now,
         allowFallback: APPLE_SERVER_ACTIVE_STATUS_CODES.has(statusCode),
+        isTrial,
     });
 
     let expiresMs = entitlementPeriod.expiresMs;
@@ -1046,7 +1056,7 @@ async function persistAppStoreServerSubscription({
         originalTransactionId,
         transactionId,
     });
-    const trialEndsMs = isAppleFreeTrial({ transactionPayload })
+    const trialEndsMs = isTrial
         ? purchaseMs + APPLE_TRIAL_DAYS * DAY_MS
         : null;
     const isTrialing = hasPro && trialEndsMs && trialEndsMs > now;
@@ -1114,7 +1124,7 @@ async function persistAppStoreServerSubscription({
             productId: PRO_PRODUCT_ID,
             transactionId,
             originalTransactionId,
-            amount: PRO_PRICE,
+            amount: isTrialing ? 0 : PRO_PRICE,
             currency: PRO_CURRENCY,
             status: isTrialing ? 'trialing' : 'paid',
             createdAt: new Date(purchaseMs),
@@ -1420,4 +1430,7 @@ module.exports._test = {
     getExpectedAppleAppAccountToken,
     assertAppleAppAccountTokenMatches,
     inferAppleNotificationStatusCode,
+    persistAppleSubscription,
+    persistStoreKitSubscription,
+    persistAppStoreServerSubscription,
 };

@@ -90,6 +90,28 @@ const isNativeStoreProviderValue = (value?: string | null) => {
         .includes(String(value || '').trim().toLowerCase());
 };
 
+async function withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string
+): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<null>((resolve) => {
+                timer = setTimeout(() => {
+                    console.warn(`[IAP] ${label} timed out after ${timeoutMs}ms`);
+                    resolve(null);
+                }, timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
 export default function PlansScreen() {
     const router = useRouter();
     const { forced, setupPayment } = useLocalSearchParams();
@@ -161,24 +183,43 @@ export default function PlansScreen() {
         const setup = async () => {
             setIapReady(false);
 
-            await initializePurchases(user.uid);
             const [statusResult, offeringResult] = await Promise.all([
-                syncStoreSubscriptionStatus(user.uid),
-                getProOffering(),
+                withTimeout(
+                    initializePurchases(user.uid)
+                        .then(() => syncStoreSubscriptionStatus(user.uid)),
+                    10000,
+                    'Initial store status sync'
+                ),
+                withTimeout(
+                    initializePurchases(user.uid)
+                        .then(() => getProOffering()),
+                    10000,
+                    'Initial store offering load'
+                ),
             ]);
 
             if (cancelled) return;
 
-            setAlreadyPro(statusResult.success ? statusResult.hasPro : profileProRef.current);
-            setPriceString(offeringResult.priceString);
+            setAlreadyPro(statusResult?.success ? statusResult.hasPro : profileProRef.current);
+            setPriceString(offeringResult?.priceString || PRO_PRICE_STRING);
             setIapReady(true);
 
-            if (statusResult.success) {
-                await refreshProfileRef.current();
+            if (statusResult?.success) {
+                await withTimeout(
+                    refreshProfileRef.current(),
+                    5000,
+                    'Profile refresh after initial store sync'
+                );
             }
         };
 
-        setup();
+        setup().catch((error) => {
+            console.warn('[IAP] Initial store setup failed:', error);
+            if (cancelled) return;
+            setAlreadyPro(profileProRef.current);
+            setPriceString(PRO_PRICE_STRING);
+            setIapReady(true);
+        });
         return () => { cancelled = true; };
     }, [user?.uid]));
 
@@ -186,13 +227,21 @@ export default function PlansScreen() {
         if (!user?.uid) return false;
 
         clearPurchaseFallbackTimer();
-        const result = await restorePurchases(user.uid);
-        const statusResult = await syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true });
+        const result = await withTimeout(
+            restorePurchases(user.uid),
+            12000,
+            'Restore existing store purchase'
+        );
+        const statusResult = await withTimeout(
+            syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true }),
+            8000,
+            'Post-restore store status sync'
+        );
         const hasStorePurchaseRestored =
-            result.hasPro ||
-            (statusResult.hasPro && isNativeStoreProviderValue(statusResult.provider));
+            result?.hasPro ||
+            (statusResult?.hasPro && isNativeStoreProviderValue(statusResult.provider));
 
-        setAlreadyPro(hasStorePurchaseRestored || (!shouldSetupPayment && statusResult.hasPro));
+        setAlreadyPro(hasStorePurchaseRestored || (!shouldSetupPayment && statusResult?.hasPro === true));
 
         if (!hasStorePurchaseRestored) return false;
 
@@ -386,7 +435,11 @@ export default function PlansScreen() {
         purchaseErrorHandledRef.current = false;
         clearPurchaseFallbackTimer();
         try {
-            const purchase = await purchaseProSubscription(user.uid);
+            const purchase = await withTimeout(
+                purchaseProSubscription(user.uid),
+                20000,
+                'Purchase request'
+            );
             if (purchaseHandledRef.current) {
                 purchaseFlowActiveRef.current = false;
                 setIapLoading(false);
@@ -410,11 +463,19 @@ export default function PlansScreen() {
                     return;
                 }
 
-                const statusResult = await syncStoreSubscriptionStatus(user.uid);
-                if (statusResult.hasPro && isNativeStoreProviderValue(statusResult.provider)) {
+                const statusResult = await withTimeout(
+                    syncStoreSubscriptionStatus(user.uid),
+                    8000,
+                    'Post-purchase store status sync'
+                );
+                if (statusResult?.hasPro && isNativeStoreProviderValue(statusResult.provider)) {
                     purchaseHandledRef.current = true;
                     setAlreadyPro(true);
-                    await refreshProfileRef.current();
+                    await withTimeout(
+                        refreshProfileRef.current(),
+                        5000,
+                        'Profile refresh after purchase'
+                    );
                     setIapLoading(false);
                     Alert.alert(
                         'Bem-vindo ao Pro!',

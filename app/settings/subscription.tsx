@@ -76,6 +76,28 @@ const SectionHeader = ({ title }: { title: string }) => (
 
 const LoadingState = () => <IosCoreLoader />;
 
+async function withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string
+): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<null>((resolve) => {
+                timer = setTimeout(() => {
+                    console.warn(`[Subscription] ${label} timed out after ${timeoutMs}ms`);
+                    resolve(null);
+                }, timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
 const EmptyHistoryState = () => (
     <View style={styles.emptyHistoryContainer}>
         <AlertCircle size={32} color="#6E6E73" />
@@ -179,16 +201,32 @@ export default function SubscriptionSettingsScreen() {
 
         try {
             if (options.syncStoreStatus !== false) {
-                const statusResult = await syncStoreSubscriptionStatus(user.uid);
-                if (statusResult.success) {
-                    await refreshProfileRef.current();
+                const statusResult = await withTimeout(
+                    syncStoreSubscriptionStatus(user.uid),
+                    8000,
+                    'Store subscription sync'
+                );
+                if (statusResult?.success) {
+                    await withTimeout(
+                        refreshProfileRef.current(),
+                        5000,
+                        'Profile refresh after store sync'
+                    );
                 }
             }
 
-            const [subResult, historyResult] = await Promise.all([
-                databaseService.getFullSubscription(user.uid),
-                databaseService.getPaymentHistory(user.uid, 10),
-            ]);
+            const subscriptionDataResult = await withTimeout(
+                Promise.all([
+                    databaseService.getFullSubscription(user.uid),
+                    databaseService.getPaymentHistory(user.uid, 10),
+                ]),
+                10000,
+                'Subscription data load'
+            );
+
+            if (!subscriptionDataResult) return;
+
+            const [subResult, historyResult] = subscriptionDataResult;
 
             if (subResult.success && subResult.data) {
                 setSubscription(subResult.data.subscription);
