@@ -1,10 +1,95 @@
 import { AuthButton } from '@/components/ui/AuthButton';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { ModernSwitch } from '@/components/ui/ModernSwitch';
-import { useCategories } from '@/hooks/use-categories';
-import { Search } from 'lucide-react-native';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+
+/**
+ * Maps common title keywords (in Portuguese and English) to category keys.
+ * When the user types a title, the system automatically detects the best category.
+ */
+const CATEGORY_KEYWORD_MAP: Record<string, string[]> = {
+    // Moradia
+    'rent': ['aluguel', 'rent', 'alugel'],
+    'electricity': ['luz', 'energia', 'eletric', 'cpfl', 'enel', 'cemig', 'celesc', 'copel', 'coelba', 'light'],
+    'water': ['água', 'agua', 'saneamento', 'sabesp', 'copasa', 'cagece', 'cedae', 'compesa'],
+
+    // Alimentação
+    'eating out': ['restaurante', 'lanchonete', 'pizzaria', 'hamburguer', 'churrascaria', 'sushi', 'jantar', 'almoço', 'almoco', 'café da manhã'],
+    'food delivery': ['ifood', 'rappi', 'uber eats', 'delivery', 'entrega comida'],
+    'groceries': ['mercado', 'supermercado', 'feira', 'hortifruti', 'atacadão', 'atacadao', 'assaí', 'assai', 'carrefour', 'pão de açúcar', 'extra'],
+
+    // Transporte
+    'gas stations': ['gasolina', 'combustível', 'combustivel', 'posto', 'etanol', 'diesel', 'shell', 'ipiranga', 'br distribuidora'],
+    'taxi and ride-hailing': ['uber', '99', 'táxi', 'taxi', 'cabify', 'indriver'],
+    'public transportation': ['ônibus', 'onibus', 'metrô', 'metro', 'trem', 'brt', 'vlt', 'bilhete único', 'bilhete unico'],
+    'parking': ['estacionamento', 'parking', 'zona azul'],
+    'vehicle maintenance': ['oficina', 'mecânico', 'mecanico', 'troca de óleo', 'oleo', 'pneu', 'borracharia', 'funilaria', 'revisão carro'],
+    'car rental': ['aluguel carro', 'locadora', 'localiza', 'movida', 'unidas'],
+    'vehicle insurance': ['seguro auto', 'seguro carro', 'seguro veículo', 'seguro veiculo', 'porto seguro'],
+
+    // Saúde
+    'pharmacy': ['farmácia', 'farmacia', 'remédio', 'remedio', 'drogaria', 'droga raia', 'drogasil', 'panvel', 'pague menos'],
+    'health insurance': ['plano de saúde', 'plano de saude', 'unimed', 'amil', 'bradesco saúde', 'sulamerica', 'hapvida', 'notredame'],
+    'hospital clinics and labs': ['hospital', 'clínica', 'clinica', 'consulta', 'exame', 'laboratório', 'laboratorio', 'médico', 'medico', 'dentista', 'psicólogo', 'psicologo'],
+    'gyms and fitness centers': ['academia', 'gym', 'smartfit', 'smart fit', 'musculação', 'musculacao', 'crossfit', 'pilates'],
+    'wellness': ['spa', 'massagem', 'terapia', 'meditação', 'meditacao', 'yoga'],
+
+    // Entretenimento
+    'video streaming': ['netflix', 'disney+', 'disney plus', 'hbo', 'max', 'amazon prime', 'prime video', 'paramount', 'globoplay', 'star+', 'star plus', 'crunchyroll'],
+    'music streaming': ['spotify', 'deezer', 'apple music', 'youtube music', 'tidal', 'amazon music'],
+    'cinema, theater and concerts': ['cinema', 'teatro', 'show', 'ingresso', 'concerto', 'musical'],
+    'entertainment': ['lazer', 'diversão', 'diversao', 'parque', 'zoológico', 'museu'],
+    'lottery': ['loteria', 'mega sena', 'lotofácil', 'lotofacil', 'quina'],
+    'gaming': ['game', 'jogo', 'playstation', 'xbox', 'nintendo', 'steam', 'ps plus', 'game pass'],
+
+    // Compras
+    'clothing': ['roupa', 'calçado', 'calcado', 'tênis', 'tenis', 'sapato', 'renner', 'riachuelo', 'c&a', 'zara', 'shein'],
+    'electronics': ['eletrônico', 'eletronico', 'celular', 'notebook', 'computador', 'tablet', 'fone', 'headphone'],
+    'online shopping': ['amazon', 'mercado livre', 'shopee', 'aliexpress', 'magazine luiza', 'magalu', 'americanas', 'casas bahia', 'kabum'],
+
+    // Educação
+    'school': ['escola', 'colégio', 'colegio', 'material escolar', 'uniforme'],
+    'university': ['faculdade', 'universidade', 'curso', 'pós-graduação', 'pos graduacao', 'mestrado', 'doutorado', 'mba'],
+
+    // Telecom
+    'internet': ['internet', 'wifi', 'wi-fi', 'fibra', 'banda larga'],
+    'mobile': ['celular', 'telefone', 'vivo', 'claro', 'tim', 'oi'],
+    'telecommunications': ['telecom', 'telecomunicação', 'telecomunicacao'],
+
+    // Finanças
+    'taxes': ['imposto', 'iptu', 'ipva', 'detran', 'multa'],
+    'income taxes': ['imposto de renda', 'irpf', 'irpj', 'darf'],
+    'loans': ['empréstimo', 'emprestimo', 'financiamento', 'parcela', 'prestação', 'prestacao', 'consórcio', 'consorcio'],
+    'interests charged': ['juros', 'mora', 'multa atraso'],
+    'account fees': ['tarifa', 'anuidade', 'taxa bancária', 'taxa bancaria'],
+    'credit card': ['cartão de crédito', 'cartao de credito', 'fatura cartão', 'fatura cartao'],
+
+    // Renda
+    'salary': ['salário', 'salario', 'holerite', 'contracheque', 'pagamento', 'remuneração', 'remuneracao'],
+    'fixed income': ['renda fixa', 'tesouro direto', 'cdb', 'lci', 'lca', 'poupança', 'poupanca'],
+    'variable income': ['renda variável', 'renda variavel', 'ações', 'acoes', 'fundo imobiliário', 'fundo imobiliario', 'fii', 'etf', 'bolsa'],
+    'proceeds interests and dividends': ['dividendo', 'rendimento', 'provento', 'jcp', 'juros sobre capital'],
+    'non-recurring income': ['freelance', 'extra', 'bico', 'comissão', 'comissao', 'bônus', 'bonus', 'prêmio', 'premio'],
+    'retirement': ['aposentadoria', 'inss', 'previdência', 'previdencia'],
+    'government aid': ['benefício', 'beneficio', 'bolsa família', 'bolsa familia', 'auxílio', 'auxilio', 'bpc'],
+
+    // Transferências
+    'transfer - pix': ['pix', 'transferência', 'transferencia', 'ted', 'doc'],
+    'bank slip': ['boleto'],
+    'credit card payment': ['pagamento cartão', 'pagamento cartao', 'pagar fatura'],
+
+    // Viagem
+    'accommodation': ['hotel', 'pousada', 'airbnb', 'hospedagem', 'hostel'],
+    'airport and airlines': ['passagem aérea', 'passagem aerea', 'avião', 'aviao', 'voo', 'gol', 'latam', 'azul', 'aeroporto'],
+
+    // Serviços digitais
+    'digital services': ['icloud', 'google one', 'dropbox', 'chatgpt', 'canva', 'adobe', 'microsoft 365', 'office'],
+
+    // Outros
+    'donation': ['doação', 'doacao', 'caridade', 'ong', 'dízimo', 'dizimo', 'oferta'],
+    'alimony': ['pensão', 'pensao', 'pensão alimentícia', 'pensao alimenticia'],
+};
 
 interface ReminderModalProps {
     visible: boolean;
@@ -23,27 +108,43 @@ interface ReminderModalProps {
     } | null;
 }
 
+/**
+ * Detects the best category key based on the title text.
+ * Matches title words against the CATEGORY_KEYWORD_MAP.
+ */
+function detectCategory(title: string): string {
+    if (!title || title.trim().length === 0) return 'n/a';
+
+    const normalizedTitle = title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    let bestMatch = '';
+    let longestKeywordLength = 0;
+
+    for (const [categoryKey, keywords] of Object.entries(CATEGORY_KEYWORD_MAP)) {
+        for (const keyword of keywords) {
+            const normalizedKeyword = keyword.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            if (normalizedTitle.includes(normalizedKeyword) && normalizedKeyword.length > longestKeywordLength) {
+                bestMatch = categoryKey;
+                longestKeywordLength = normalizedKeyword.length;
+            }
+        }
+    }
+
+    return bestMatch || 'n/a';
+}
+
 export function ReminderModal({ visible, onClose, onSave, title, initialData, mode = 'reminders' }: ReminderModalProps) {
-    const { categories: categoryGroups, getCategoryName } = useCategories();
     const [titleInput, setTitle] = useState('');
     const [amountStr, setAmountStr] = useState('');
     const [dateStr, setDateStr] = useState('');
     const [isYearly, setIsYearly] = useState(false);
     const [type, setType] = useState<'income' | 'expense'>('expense');
-    const [category, setCategory] = useState('');
-    const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-    const [categorySearch, setCategorySearch] = useState('');
 
-    const allCategories = useMemo(() => {
-        return categoryGroups.flatMap(group => group.items);
-    }, [categoryGroups]);
-
-    const filteredCategories = useMemo(() => {
-        if (!categorySearch) return allCategories;
-        return allCategories.filter(cat =>
-            cat.label.toLowerCase().includes(categorySearch.toLowerCase())
-        );
-    }, [allCategories, categorySearch]);
+    // Auto-detect category from title
+    const category = useMemo(() => {
+        if (initialData?.category) return initialData.category;
+        return detectCategory(titleInput);
+    }, [titleInput, initialData?.category]);
 
     useEffect(() => {
         if (visible) {
@@ -65,14 +166,12 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
                 setDateStr(formattedDate);
                 setIsYearly(initialData.frequency === 'yearly');
                 setType(initialData.transactionType || 'expense');
-                setCategory(initialData.category || '');
             } else {
                 setTitle('');
                 setAmountStr('');
                 setDateStr('');
                 setIsYearly(false);
                 setType('expense');
-                setCategory('');
             }
 
             if (mode === 'subscriptions' && !initialData) {
@@ -82,9 +181,6 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
                 const y = today.getFullYear();
                 setDateStr(`${d}/${m}/${y}`);
             }
-
-            setShowCategoryPicker(false);
-            setCategorySearch('');
         }
     }, [visible, initialData, mode]);
 
@@ -149,11 +245,11 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
         <ModalPadrao
             visible={visible}
             onClose={onClose}
-            title={title || (initialData ? `Editar ${mode === 'subscriptions' ? 'Assinatura' : 'Lembrete'}` : `Nova ${mode === 'subscriptions' ? 'Assinatura' : 'Lembrete'}`)}
+            title={title || (initialData ? `Editar ${mode === 'subscriptions' ? 'Assinatura' : 'Lembrete'}` : (mode === 'subscriptions' ? 'Nova Assinatura' : 'Novo Lembrete'))}
             titleAlign="start"
-            presentation="center"
-            showHandle={false}
-            enableDragToClose={false}
+            presentation="bottom"
+            showHandle={true}
+            enableDragToClose={true}
             maxHeightRatio={0.86}
             footer={<Footer />}
         >
@@ -238,62 +334,6 @@ export function ReminderModal({ visible, onClose, onSave, title, initialData, mo
                         </>
                     )}
 
-                    {/* Categoria */}
-                    <View style={styles.separator} />
-                    <View style={styles.itemContent}>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.itemTitle}>Categoria</Text>
-                        </View>
-                        <TouchableOpacity onPress={() => setShowCategoryPicker(!showCategoryPicker)}>
-                            <Text style={styles.categoryValue}>
-                                {getCategoryName(category)}
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Category Picker */}
-                    {showCategoryPicker && (
-                        <View style={{ backgroundColor: 'rgba(28,28,30,0.78)', paddingBottom: 16 }}>
-                            <View style={styles.separator} />
-                            <View style={styles.categorySearchContainer}>
-                                <Search size={16} color="#8E8E93" style={{ marginRight: 8 }} />
-                                <TextInput
-                                    style={styles.categorySearchInput}
-                                    placeholder="Buscar categoria..."
-                                    placeholderTextColor="#6E6E73"
-                                    value={categorySearch}
-                                    onChangeText={setCategorySearch}
-                                />
-                            </View>
-                            <ScrollView
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-                            >
-                                {filteredCategories.map((cat) => (
-                                    <TouchableOpacity
-                                        key={cat.key}
-                                        style={[
-                                            styles.categoryChip,
-                                            category === cat.key && styles.categoryChipSelected
-                                        ]}
-                                        onPress={() => {
-                                            setCategory(cat.key);
-                                            setShowCategoryPicker(false);
-                                        }}
-                                    >
-                                        <Text style={[
-                                            styles.categoryChipText,
-                                            category === cat.key && styles.categoryChipTextSelected
-                                        ]}>
-                                            {cat.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    )}
-
                     {/* Frequência - Only for subscriptions */}
                     {mode === 'subscriptions' && (
                         <>
@@ -326,88 +366,49 @@ const styles = StyleSheet.create({
     sectionTitle: {
         fontSize: 12,
         fontWeight: '500',
-        color: '#6E6E73',
+        color: '#8E8E93',
+        marginTop: 16,
         marginBottom: 8,
         textTransform: 'uppercase',
-        letterSpacing: 0,
+        letterSpacing: 0.5,
+        fontFamily: 'AROneSans_500Medium',
     },
     groupCard: {
-        backgroundColor: 'rgba(28, 28, 30, 0.82)',
-        borderRadius: 18,
+        backgroundColor: '#171717',
+        borderRadius: 14,
         marginBottom: 24,
         overflow: 'hidden',
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(84, 84, 88, 0.34)',
+        borderColor: '#242424',
     },
     itemContent: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 12,
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         minHeight: 48,
     },
     itemTitle: {
         fontSize: 16,
-        color: '#F5F5F7',
-        fontWeight: '400',
+        color: '#F4F1EF',
+        fontFamily: 'AROneSans_400Regular',
     },
     itemSubtitle: {
         fontSize: 12,
         color: '#8E8E93',
         marginTop: 1,
+        fontFamily: 'AROneSans_400Regular',
     },
     separator: {
         height: StyleSheet.hairlineWidth,
-        backgroundColor: 'rgba(84, 84, 88, 0.34)',
+        backgroundColor: '#282828',
     },
     inputRight: {
-        color: '#F5F5F7',
+        color: '#F4F1EF',
         fontSize: 16,
         minWidth: 100,
         padding: 0,
-    },
-    categoryValue: {
-        color: '#d97757',
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    categoryChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(84,84,88,0.34)',
-    },
-    categoryChipSelected: {
-        backgroundColor: 'rgba(217, 119, 87, 0.16)',
-        borderColor: '#d97757',
-    },
-    categoryChipText: {
-        color: '#A1A1A6',
-        fontSize: 13,
-        fontWeight: '500',
-    },
-    categoryChipTextSelected: {
-        color: '#d97757',
-        fontWeight: '600',
-    },
-    categorySearchContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        marginHorizontal: 16,
-        marginTop: 12,
-        marginBottom: 12,
-        paddingHorizontal: 12,
-        height: 36,
-        borderRadius: 12,
-    },
-    categorySearchInput: {
-        flex: 1,
-        color: '#F5F5F7',
-        fontSize: 14,
-        padding: 0,
+        fontFamily: 'AROneSans_400Regular',
     },
     typeToggleContainer: {
         flexDirection: 'row',

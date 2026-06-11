@@ -48,11 +48,35 @@ APPLE_BUNDLE_ID=com.gustavodev25.controlarapp
 APPLE_IAP_KEY_ID=
 APPLE_IAP_ISSUER_ID=
 APPLE_IAP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
-APPLE_SERVER_API_ENVIRONMENT=production
+APPLE_SERVER_API_ENVIRONMENT=auto
 ```
 
 O `APPLE_SHARED_SECRET` fica nas configuracoes de assinatura do App Store Connect.
 Para a App Store Server API, gere uma chave em `Users and Access > Integrations`.
+
+Antes de abrir o simulador ou enviar outro build de teste, valide o backend:
+
+```text
+https://SEU_BACKEND/api/diagnostics/apple-iap?target=sandbox
+https://SEU_BACKEND/api/diagnostics/apple-iap/panel?target=sandbox
+```
+
+Use `target=sandbox` para simulador, Sandbox tester, TestFlight e App Review. Use
+`target=production` para validar o ambiente de usuarios reais. O diagnostico nao
+mostra segredos; ele valida presenca, formato da chave `.p8`, assinatura local do
+JWT da App Store Server API, Firebase Admin e riscos comuns de sandbox/producao.
+
+No terminal do backend, o mesmo diagnostico entra no script:
+
+```bash
+cd server
+npm run test:config
+```
+
+Se `APPLE_SERVER_API_ENVIRONMENT=production` aparecer como aviso em teste sandbox,
+troque temporariamente para `auto` ou `sandbox`. O fluxo `validate-receipt` ja tenta
+production e refaz em sandbox quando recebe `21007`, mas a App Store Server API usa
+o ambiente configurado para refresh de status.
 
 ### App Store Server Notifications
 

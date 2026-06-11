@@ -1,8 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { useRouter } from 'expo-router';
-import LottieView from 'lottie-react-native';
-import { ChevronLeft, ChevronRight, Wallet } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Landmark, PiggyBank, ReceiptText } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Animated,
@@ -73,35 +72,6 @@ const AnimatedFloating = ({ children }: { children: React.ReactNode }) => {
     );
 };
 
-// ─── Lottie com intervalo entre repetições ────────────────────────────────────
-
-const IntervalLottie = ({ source, size = 26, interval = 4000 }: { source: any; size?: number; interval?: number }) => {
-    const lottieRef = useRef<LottieView>(null);
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            lottieRef.current?.play();
-        }, 300);
-
-        const id = setInterval(() => {
-            lottieRef.current?.play();
-        }, interval);
-
-        return () => { clearTimeout(timer); clearInterval(id); };
-    }, [interval]);
-
-    return (
-        <LottieView
-            ref={lottieRef}
-            source={source}
-            loop={false}
-            autoPlay={false}
-            style={{ width: size, height: size }}
-            resizeMode="contain"
-        />
-    );
-};
-
 // ─── Card wrapper with per-card stacking layers ───────────────────────────────
 
 type StackLayer = { translateX: number; translateY: number; scaleX: number; opacity: number };
@@ -150,7 +120,7 @@ const MockupFatura = () => (
         <View style={styles.mockupHeaderRow}>
             <View style={styles.mockupTitleRow}>
                 <View style={styles.mockupIconBox}>
-                    <IntervalLottie source={require('@/assets/fatura.json')} interval={5000} />
+                    <ReceiptText size={24} color={MOCKUP_COLORS.accent} strokeWidth={2} />
                 </View>
                 <View>
                     <ThemedText style={styles.mockupTitle}>Fatura atual</ThemedText>
@@ -184,10 +154,10 @@ const progressColor = (pct: number) =>
 
 const MockupCaixinhaCard = ({ name, guardado, meta, pct, prazo }: typeof CAIXINHAS_DATA[0]) => (
     <View style={styles.caixinhaCard}>
-        {/* Linha de cima: lottie + nome/prazo + seta */}
+        {/* Linha de cima: ícone + nome/prazo + seta */}
         <View style={styles.caixinhaCardHeader}>
             <View style={styles.caixinhaIconBox}>
-                <IntervalLottie source={require('@/assets/caixinhasamarelo.json')} size={22} interval={6000} />
+                <PiggyBank size={20} color="#FFB800" strokeWidth={2} />
             </View>
             <View style={{ flex: 1 }}>
                 <ThemedText style={styles.caixinhaCardName}>{name}</ThemedText>
@@ -226,7 +196,7 @@ const MockupMeta = () => (
         <View style={[styles.mockupHeaderRow, { marginBottom: 10 }]}>
             <View style={styles.mockupTitleRow}>
                 <View style={styles.mockupIconBox}>
-                    <IntervalLottie source={require('@/assets/caixinhasamarelo.json')} interval={5000} />
+                    <PiggyBank size={24} color="#FFB800" strokeWidth={2} />
                 </View>
                 <View>
                     <ThemedText style={styles.mockupTitle}>Caixinhas</ThemedText>
@@ -255,7 +225,7 @@ const MockupContas = () => (
         <View style={styles.mockupHeaderRow}>
             <View style={styles.mockupTitleRow}>
                 <View style={styles.mockupIconBox}>
-                    <IntervalLottie source={require('@/assets/banco.json')} interval={5000} />
+                    <Landmark size={24} color={MOCKUP_COLORS.accent} strokeWidth={2} />
                 </View>
                 <View>
                     <ThemedText style={styles.mockupTitle}>Contas</ThemedText>
@@ -267,8 +237,8 @@ const MockupContas = () => (
 
         <View style={styles.accountList}>
             <View style={styles.accountMiniRow}>
-                <View style={styles.bankLottieBox}>
-                    <IntervalLottie source={require('@/assets/banco.json')} size={18} interval={6000} />
+                <View style={styles.bankIconBox}>
+                    <Landmark size={16} color="#F5F5F7" strokeWidth={2} />
                 </View>
                 <View style={styles.accountTextGroup}>
                     <ThemedText style={styles.accountName}>Itaú</ThemedText>
@@ -277,8 +247,8 @@ const MockupContas = () => (
                 <ThemedText style={styles.accountValue}>R$ 4.320</ThemedText>
             </View>
             <View style={styles.accountMiniRow}>
-                <View style={styles.bankLottieBox}>
-                    <IntervalLottie source={require('@/assets/banco.json')} size={18} interval={6000} />
+                <View style={styles.bankIconBox}>
+                    <Landmark size={16} color="#F5F5F7" strokeWidth={2} />
                 </View>
                 <View style={styles.accountTextGroup}>
                     <ThemedText style={styles.accountName}>Nubank</ThemedText>
@@ -462,6 +432,8 @@ export default function WelcomeScreen() {
                 removeClippedSubviews={false}
                 initialNumToRender={SLIDES.length}
                 windowSize={5}
+                style={styles.flatList}
+                contentContainerStyle={styles.flatListContent}
             />
 
             <Footer
@@ -478,6 +450,12 @@ export default function WelcomeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+    flatList: {
+        flex: 1,
+    },
+    flatListContent: {
+        height: '100%',
+    },
     slideContainer: {
         width,
         height: '100%',
@@ -507,7 +485,7 @@ const styles = StyleSheet.create({
         borderRadius: 24,
     },
     mockupCardLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'transparent',
         borderRadius: 24,
         borderWidth: 1,
@@ -710,7 +688,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 9,
     },
-    bankLottieBox: {
+    bankIconBox: {
         width: 28,
         height: 28,
         borderRadius: 8,

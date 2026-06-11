@@ -6,6 +6,8 @@
 
 require('dotenv').config();
 
+const { buildAppleIapDiagnostics } = require('../lib/appleIapDiagnostics');
+
 function parseJsonOrBase64Json(value) {
     const rawValue = String(value || '').trim();
     if (!rawValue) return null;
@@ -108,6 +110,31 @@ if (checks.firebase.serviceAccount) {
     console.log('  Configure FIREBASE_SERVICE_ACCOUNT or FIREBASE_PROJECT_ID + FIREBASE_PRIVATE_KEY + FIREBASE_CLIENT_EMAIL.');
 }
 
+const appleIapDiagnostics = buildAppleIapDiagnostics({
+    targetEnvironment: process.env.APPLE_DIAGNOSTIC_TARGET_ENVIRONMENT || 'sandbox',
+    firebaseStatus: {
+        configured: firebaseConfigured,
+        error: firebaseConfigured ? null : 'Firebase Admin variables are missing or invalid',
+    },
+});
+
+console.log('\nApple IAP Configuration:');
+console.log(`  Status: ${appleIapDiagnostics.status}`);
+console.log(`  Target Environment: ${appleIapDiagnostics.targetEnvironment}`);
+console.log(`  Ready for iOS test: ${appleIapDiagnostics.readyForIosTest ? 'yes' : 'no'}`);
+console.log(`  Can attempt iOS test: ${appleIapDiagnostics.canAttemptIosTest ? 'yes' : 'no'}`);
+console.log(`  Bundle ID: ${appleIapDiagnostics.config.bundleId.value}`);
+console.log(`  Product ID: ${appleIapDiagnostics.config.productId}`);
+for (const check of appleIapDiagnostics.checks) {
+    if (check.status === 'pass') continue;
+    console.log(`  - [${check.status}] ${check.label}: ${check.message}`);
+    if (check.impact) console.log(`    Impact: ${check.impact}`);
+    if (check.fix) console.log(`    Fix: ${check.fix}`);
+}
+if (appleIapDiagnostics.summary.fail === 0 && appleIapDiagnostics.summary.warn === 0) {
+    console.log('  All Apple IAP checks passed.');
+}
+
 console.log('\nGoogle Play Billing Configuration:');
 let googlePlayConfigured = false;
 let googlePlayClientEmail = null;
@@ -154,7 +181,8 @@ console.log(`  Port: ${checks.server.port}`);
 console.log('\n' + '='.repeat(50));
 
 const pluggyConfigured = checks.pluggy.clientId && checks.pluggy.clientSecret;
-const allRequiredConfigured = pluggyConfigured && firebaseConfigured && googlePlayConfigured;
+const appleIapConfigured = appleIapDiagnostics.canAttemptIosTest;
+const allRequiredConfigured = pluggyConfigured && firebaseConfigured && googlePlayConfigured && appleIapConfigured;
 
 if (allRequiredConfigured) {
     console.log('All required configuration is present.');
@@ -168,6 +196,9 @@ if (!pluggyConfigured) {
 }
 if (!firebaseConfigured) {
     console.log('  - Configure Firebase Admin variables.');
+}
+if (!appleIapConfigured) {
+    console.log('  - Configure Apple IAP variables or run /api/diagnostics/apple-iap?target=sandbox for details.');
 }
 if (!googlePlayConfigured) {
     console.log('  - Configure Google Play Billing variables.');

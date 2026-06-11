@@ -10,7 +10,6 @@ import {
 const BASE_BUDGETS: Record<LodLevel, AnimationBudget> = {
   0: {
     targetFps: 60,
-    maxConcurrentLottie: 12,
     particleCount: 12,
     blurIntensity: 68,
     chartAnimationMs: 1000,
@@ -18,7 +17,6 @@ const BASE_BUDGETS: Record<LodLevel, AnimationBudget> = {
   },
   1: {
     targetFps: 45,
-    maxConcurrentLottie: 9,
     particleCount: 8,
     blurIntensity: 50,
     chartAnimationMs: 800,
@@ -26,7 +24,6 @@ const BASE_BUDGETS: Record<LodLevel, AnimationBudget> = {
   },
   2: {
     targetFps: 30,
-    maxConcurrentLottie: 6,
     particleCount: 5,
     blurIntensity: 32,
     chartAnimationMs: 650,
@@ -34,7 +31,6 @@ const BASE_BUDGETS: Record<LodLevel, AnimationBudget> = {
   },
   3: {
     targetFps: 30,
-    maxConcurrentLottie: 4,
     particleCount: 0,
     blurIntensity: 0,
     chartAnimationMs: 500,
@@ -61,10 +57,9 @@ export function getInitialLod(tier: DeviceTier): LodLevel {
 export function getAnimationBudget(params: {
   tier: DeviceTier;
   lod: LodLevel;
-  activeLottieCount: number;
   flags: PerformanceFeatureFlags;
 }): AnimationBudget {
-  const { tier, flags, activeLottieCount } = params;
+  const { tier, flags } = params;
   const lod = clampLod(params.lod);
 
   if (!flags.perfV2Enabled) {
@@ -72,10 +67,6 @@ export function getAnimationBudget(params: {
   }
 
   const base = BASE_BUDGETS[lod];
-  let adjustedMaxLottie = base.maxConcurrentLottie;
-  if (activeLottieCount > base.maxConcurrentLottie) {
-    adjustedMaxLottie = Math.max(2, base.maxConcurrentLottie - 1);
-  }
 
   let targetFps = base.targetFps;
   if (!flags.adaptiveFpsEnabled) {
@@ -85,7 +76,6 @@ export function getAnimationBudget(params: {
   return {
     ...base,
     targetFps,
-    maxConcurrentLottie: adjustedMaxLottie,
   };
 }
 

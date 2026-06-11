@@ -1,0 +1,32 @@
+# Dependencies (EAS installs fresh via npm ci)
+node_modules/
+
+# Server (not needed for mobile build)
+server/
+
+# Cache and temp files
+.npm-cache/
+.expo/
+.expo-home/
+.expo-build-check/
+dist/
+
+# Dev/IDE files
+.vscode/
+.openclaude/
+.agent/
+.claude/
+.git/
+docs/
+
+# Logs and temp
+*.log
+codex-expo-8081.*
+codex-publish-controlarapp/
+
+# Data files
+users.json
+
+# Build artifacts
+__tests__/
+*.tsbuildinfo

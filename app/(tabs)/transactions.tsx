@@ -1,5 +1,4 @@
 import { UniversalBackground } from '@/components/UniversalBackground';
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useCategories } from '@/hooks/use-categories';
@@ -11,8 +10,7 @@ import {
     dedupeTransactionsBySourceId,
     mergeSortedTransactions
 } from '@/utils/transactionsMerge';
-import { useFocusEffect } from '@react-navigation/native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { collection, getDocs, limit, orderBy, query, QueryDocumentSnapshot, startAfter } from 'firebase/firestore';
 import {
     ArrowRightLeft,
@@ -43,6 +41,7 @@ import {
     Utensils,
     Search,
     Wifi,
+    WalletCards,
     X,
     Zap
 } from 'lucide-react-native';
@@ -50,6 +49,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     ActivityIndicator,
     Image,
+    InteractionManager,
     RefreshControl,
     ScrollView,
     SectionList,
@@ -293,7 +293,7 @@ const txStyles = StyleSheet.create({
         elevation: 6,
     },
     arrowSelectorContent: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -575,9 +575,12 @@ export default function TransactionsScreen() {
         : filter === 'account'
             ? hasMoreChecking
             : (hasMoreChecking || hasMoreCredit);
-    const screenEntryProgress = useSharedValue(0);
+    const screenEntryProgress = useSharedValue(1);
     const hasCompletedInitialFetchRef = useRef(false);
     const lastFocusRefreshAtRef = useRef(0);
+    const fetchTransactionsRef = useRef<(isLoadMore?: boolean, isSilent?: boolean) => Promise<void>>(
+        async () => undefined
+    );
 
     const hasActiveFilters = !!(filters.search || filters.categories.length > 0 || filters.year || typeFilter);
 
@@ -699,7 +702,7 @@ export default function TransactionsScreen() {
     }, [filteredTransactions]);
 
     const visibleItemsCount = filteredTransactions.length;
-    const animateRows = lod === 0 && visibleItemsCount <= 40;
+    const animateRows = lod === 0 && visibleItemsCount <= 12;
 
     // Optimized Fetch Logic
     const fetchTransactions = async (isLoadMore = false, isSilent = false) => {
@@ -837,30 +840,41 @@ export default function TransactionsScreen() {
             setRefreshing(false);
         }
     };
+    fetchTransactionsRef.current = fetchTransactions;
 
 
     useEffect(() => {
-        hasCompletedInitialFetchRef.current = false;
-        lastFocusRefreshAtRef.current = Date.now();
+        let cancelled = false;
+        let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
 
-        // Reset pagination state when filters change or user changes
-        setLastCheckingDoc(null);
-        setLastCreditDoc(null);
-        setHasMoreChecking(true);
-        setHasMoreCredit(true);
-        setTransactions([]); // Clear list to show loading state correctly
+        const timer = setTimeout(() => {
+            task = InteractionManager.runAfterInteractions(() => {
+                if (cancelled) return;
 
-        void fetchTransactions(false).finally(() => {
-            hasCompletedInitialFetchRef.current = true;
-        });
+                hasCompletedInitialFetchRef.current = false;
+                lastFocusRefreshAtRef.current = Date.now();
+
+                // Reset pagination state when filters change or user changes.
+                setLastCheckingDoc(null);
+                setLastCreditDoc(null);
+                setHasMoreChecking(true);
+                setHasMoreCredit(true);
+                setTransactions([]);
+
+                void fetchTransactionsRef.current(false).finally(() => {
+                    if (!cancelled) {
+                        hasCompletedInitialFetchRef.current = true;
+                    }
+                });
+            });
+        }, 160);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            task?.cancel?.();
+        };
     }, [user, filter]);
-
-    useFocusEffect(
-        useCallback(() => {
-            screenEntryProgress.value = 0;
-            screenEntryProgress.value = withDelay(35, withSpring(1, AS_SPRING_ENTRY));
-        }, [screenEntryProgress])
-    );
 
     // Refresh data when screen comes into focus (e.g., after connecting a bank)
     useFocusEffect(
@@ -876,13 +890,27 @@ export default function TransactionsScreen() {
 
             lastFocusRefreshAtRef.current = now;
 
-            // Silently refresh without showing loading state
-            setLastCheckingDoc(null);
-            setLastCreditDoc(null);
-            setHasMoreChecking(true);
-            setHasMoreCredit(true);
-            void fetchTransactions(false, true);
-        }, [user, filter])
+            let cancelled = false;
+            let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+            const timer = setTimeout(() => {
+                task = InteractionManager.runAfterInteractions(() => {
+                    if (cancelled) return;
+
+                    // Silently refresh after the tab switch has settled.
+                    setLastCheckingDoc(null);
+                    setLastCreditDoc(null);
+                    setHasMoreChecking(true);
+                    setHasMoreCredit(true);
+                    void fetchTransactionsRef.current(false, true);
+                });
+            }, 180);
+
+            return () => {
+                cancelled = true;
+                clearTimeout(timer);
+                task?.cancel?.();
+            };
+        }, [user])
     );
 
 
@@ -1071,14 +1099,7 @@ export default function TransactionsScreen() {
                             ListEmptyComponent={
                                 <View style={styles.emptyState}>
                                     <View style={styles.emptyIconContainer}>
-                                        <DelayedLoopLottie
-                                            source={require('@/assets/carteirabranca.json')}
-                                            style={{ width: 80, height: 80 }}
-                                            delay={3000}
-                                            initialDelay={100}
-                                            jitterRatio={0.2}
-                                            renderMode="HARDWARE"
-                                        />
+                                        <WalletCards size={54} color="#F5F5F7" strokeWidth={1.7} />
                                     </View>
                                     <Text style={styles.emptyTitle}>
                                         {hasActiveFilters ? 'Nenhum resultado' : 'Nenhuma transação'}
@@ -1356,4 +1377,3 @@ const styles = StyleSheet.create({
         fontWeight: '600'
     },
 });
-

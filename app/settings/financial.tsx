@@ -6,6 +6,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { databaseService } from '@/services/firebase';
 import { Stack, useRouter } from 'expo-router';
 import {
+    ChevronLeft,
     ChevronRight,
     Info,
     Trash2,
@@ -422,7 +423,7 @@ export default function FinancialSettingsScreen() {
                         style={styles.backButton}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                        <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
+                        <ChevronLeft size={24} color="#E0E0E0" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Financeiro</Text>
                     <View style={styles.headerSpacer} />

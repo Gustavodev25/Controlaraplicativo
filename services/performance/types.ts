@@ -4,7 +4,6 @@ export type LodLevel = 0 | 1 | 2 | 3;
 
 export interface AnimationBudget {
   targetFps: 30 | 45 | 60;
-  maxConcurrentLottie: number;
   particleCount: number;
   blurIntensity: number;
   chartAnimationMs: number;

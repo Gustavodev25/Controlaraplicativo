@@ -7,6 +7,7 @@ import { CreditCardInvoice } from '@/components/CreditCardInvoice';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { usePerformanceBudget } from '@/hooks/usePerformanceBudget';
 import { db } from '@/services/firebase';
 import { CreditCardAccount, normalizePluggyDate, Transaction } from '@/services/invoiceBuilder';
 import { queryCache } from '@/services/queryCache';
@@ -25,15 +26,15 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     InteractionManager,
+    Platform,
     StyleSheet,
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const INITIAL_BATCH = 800;      // Reduced from 2000 for faster initial load
-const PAGE_BATCH = 400;
-const MAX_HISTORY_LIMIT = 1500;  // Reduced from 2000
-const SILENT_REFRESH_BATCH = 300;
+const INITIAL_BATCH = 500;
+const PAGE_BATCH = 250;
+const SILENT_REFRESH_BATCH = 200;
 
 function normalizeCreditTransactionType(data: DocumentData): 'income' | 'expense' {
     const explicitType = typeof data?.type === 'string' ? data.type.toLowerCase() : '';
@@ -88,6 +89,7 @@ function mapCreditTransaction(doc: QueryDocumentSnapshot<DocumentData>): Transac
 export default function InvoicesScreen() {
     const router = useRouter();
     const { user } = useAuthContext();
+    const { isEntryTier, isMidTier, lod } = usePerformanceBudget();
     const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -102,6 +104,15 @@ export default function InvoicesScreen() {
     const hasMoreHistoryRef = useRef(false);
     const prefetchingRef = useRef(false);
     const prefetchSessionRef = useRef(0);
+    const batchLimits = React.useMemo(() => {
+        const constrainedAndroid = Platform.OS === 'android' && (isEntryTier || lod >= 2);
+        return {
+            initial: constrainedAndroid ? 250 : isMidTier ? 400 : INITIAL_BATCH,
+            page: constrainedAndroid ? 150 : isMidTier ? 200 : PAGE_BATCH,
+            silent: constrainedAndroid ? 120 : isMidTier ? 160 : SILENT_REFRESH_BATCH,
+            allowBackgroundPrefetch: Platform.OS !== 'android' || (!isEntryTier && lod <= 1),
+        };
+    }, [isEntryTier, isMidTier, lod]);
 
     const appendBatchToHistory = useCallback((batch: Transaction[]) => {
         if (batch.length === 0) {
@@ -151,7 +162,7 @@ export default function InvoicesScreen() {
         cutoffDate.setMonth(cutoffDate.getMonth() - 24);
         const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
 
-        const effectiveLimit = Math.min(batchSize, MAX_HISTORY_LIMIT);
+        const effectiveLimit = batchSize;
         const creditRef = collection(db, 'users', user.uid, 'creditCardTransactions');
 
         const constraints = [
@@ -177,7 +188,7 @@ export default function InvoicesScreen() {
     }, [user?.uid]);
 
     const runBackgroundPrefetch = useCallback(() => {
-        if (!user?.uid || !hasMoreHistoryRef.current || prefetchingRef.current) {
+        if (!batchLimits.allowBackgroundPrefetch || !user?.uid || !hasMoreHistoryRef.current || prefetchingRef.current) {
             return;
         }
 
@@ -188,7 +199,7 @@ export default function InvoicesScreen() {
             try {
                 let buffered: Transaction[] = [];
                 while (hasMoreHistoryRef.current && session === prefetchSessionRef.current) {
-                    const batch = await fetchCreditTransactionsBatch(PAGE_BATCH, historyCursorRef.current);
+                    const batch = await fetchCreditTransactionsBatch(batchLimits.page, historyCursorRef.current);
                     if (session !== prefetchSessionRef.current) {
                         break;
                     }
@@ -209,7 +220,7 @@ export default function InvoicesScreen() {
                     buffered.push(...batch.data);
                     updateHistoryState(batch.nextCursor, batch.hasMore);
 
-                    const shouldFlush = buffered.length >= PAGE_BATCH * 2 || !batch.hasMore;
+                    const shouldFlush = buffered.length >= batchLimits.page * 2 || !batch.hasMore;
                     if (shouldFlush) {
                         const flushBuffer = buffered;
                         buffered = [];
@@ -232,7 +243,7 @@ export default function InvoicesScreen() {
         };
 
         void loop();
-    }, [appendBatchToHistory, fetchCreditTransactionsBatch, updateHistoryState, user?.uid]);
+    }, [appendBatchToHistory, batchLimits.allowBackgroundPrefetch, batchLimits.page, fetchCreditTransactionsBatch, updateHistoryState, user?.uid]);
 
     const fetchAccounts = useCallback(async () => {
         if (!user?.uid) {
@@ -303,13 +314,14 @@ export default function InvoicesScreen() {
         try {
             if (!isSilent) setLoading(true);
             if (!isSilent) {
+                await queryCache.invalidate(`dashboard_credit_transactions_${user.uid}_v3_perf`);
                 await queryCache.invalidate(`dashboard_credit_transactions_${user.uid}_v2`);
                 await queryCache.invalidate(`dashboard_credit_transactions_${user.uid}`);
                 await queryCache.invalidate(`invoices_accounts_${user.uid}`);
             }
 
             const [firstBatch, cards] = await Promise.all([
-                fetchCreditTransactionsBatch(isSilent ? SILENT_REFRESH_BATCH : INITIAL_BATCH, null),
+                fetchCreditTransactionsBatch(isSilent ? batchLimits.silent : batchLimits.initial, null),
                 isSilent ? Promise.resolve<CreditCardAccount[] | null>(null) : fetchAccounts()
             ]);
 
@@ -354,11 +366,23 @@ export default function InvoicesScreen() {
                 setRefreshing(false);
             }
         }
-    }, [fetchAccounts, fetchCreditTransactionsBatch, updateHistoryState, user?.uid]);
+    }, [batchLimits.initial, batchLimits.silent, fetchAccounts, fetchCreditTransactionsBatch, updateHistoryState, user?.uid]);
 
     useEffect(() => {
-        void loadInitialData(false);
+        let cancelled = false;
+        let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+        const timer = setTimeout(() => {
+            task = InteractionManager.runAfterInteractions(() => {
+                if (!cancelled) {
+                    void loadInitialData(false);
+                }
+            });
+        }, 180);
+
         return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            task?.cancel?.();
             prefetchSessionRef.current += 1;
             prefetchingRef.current = false;
         };
@@ -384,7 +408,7 @@ export default function InvoicesScreen() {
 
         setLoadingMoreHistory(true);
         try {
-            const batch = await fetchCreditTransactionsBatch(PAGE_BATCH, historyCursorRef.current);
+            const batch = await fetchCreditTransactionsBatch(batchLimits.page, historyCursorRef.current);
             if (batch.data.length > 0) {
                 appendBatchToHistory(batch.data);
             }
@@ -397,7 +421,7 @@ export default function InvoicesScreen() {
         } finally {
             setLoadingMoreHistory(false);
         }
-    }, [appendBatchToHistory, fetchCreditTransactionsBatch, loading, loadingMoreHistory, runBackgroundPrefetch, updateHistoryState, user?.uid]);
+    }, [appendBatchToHistory, batchLimits.page, fetchCreditTransactionsBatch, loading, loadingMoreHistory, runBackgroundPrefetch, updateHistoryState, user?.uid]);
 
     return (
         <View style={styles.mainContainer}>

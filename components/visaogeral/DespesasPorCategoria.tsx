@@ -140,6 +140,13 @@ const DespesasPorCategoria = React.memo(({
   }, [expenseSource, pieData]);
 
   useEffect(() => {
+    if (chartAnimationMs <= 0) {
+      selectorMorph.value = 0;
+      cardMorph.value = 0;
+      contentMorph.value = 0;
+      return;
+    }
+
     selectorMorph.value = 0;
     selectorMorph.value = withSequence(
       withTiming(1, { duration: 140 }),
@@ -169,7 +176,7 @@ const DespesasPorCategoria = React.memo(({
         mass: 0.58,
       })
     );
-  }, [dataPulseKey, selectorMorph, cardMorph, contentMorph]);
+  }, [chartAnimationMs, dataPulseKey, selectorMorph, cardMorph, contentMorph]);
 
   const selectorAnimatedStyle = useAnimatedStyle(() => {
     const morph = selectorMorph.value;
@@ -247,10 +254,10 @@ const DespesasPorCategoria = React.memo(({
             <View style={styles.chartContainer}>
               <VictoryPie
                 key={expenseSource}
-                animate={{
+                animate={chartAnimationMs > 0 ? {
                   duration: chartAnimationMs,
                   easing: 'exp',
-                }}
+                } : undefined}
                 data={pieData}
                 width={124}
                 height={124}

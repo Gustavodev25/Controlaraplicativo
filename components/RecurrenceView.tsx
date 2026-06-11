@@ -3,7 +3,6 @@ import { RecurrenceFilterModal, RecurrenceFilterState } from '@/components/Recur
 import { ReminderModal } from '@/components/ReminderModal';
 import { useCategories } from '@/hooks/use-categories';
 import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { ModernSwitch } from '@/components/ui/ModernSwitch';
@@ -19,21 +18,27 @@ import { addMonths } from '@/utils/monthWindow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import {
+    Bell,
     CalendarDays,
     Check,
+    CheckCircle2,
     ChevronLeft,
     ChevronRight,
-    MoreVertical,
+    CreditCard,
+    Info,
     Plus,
+    Repeat2,
     Search,
     X
 } from 'lucide-react-native';
+import { RecurrenceActionsSheet } from '@/components/RecurrenceActionsSheet';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Animated as NativeAnimated,
     Easing,
     FlatList,
     Image,
+    InteractionManager,
     LayoutAnimation,
     Platform,
     RefreshControl,
@@ -270,20 +275,11 @@ interface RecurrenceItem {
     sourceCollection?: 'recurrences' | 'subscriptions' | 'reminders';
 }
 
-// Componente Lottie que toca em intervalos
-const IntervalLottie = React.memo(({ source, size, interval = 5000 }: { source: any; size: number; interval?: number }) => (
-    <View pointerEvents="none">
-        <DelayedLoopLottie
-            source={source}
-            style={{ width: size, height: size }}
-            delay={interval}
-            initialDelay={100 + Math.random() * 800}
-            renderMode="HARDWARE"
-            jitterRatio={0.2}
-        />
-    </View>
-));
-IntervalLottie.displayName = 'RecurrenceIntervalLottie';
+const isSameRecurrence = (left: RecurrenceItem, right: RecurrenceItem): boolean => {
+    if (left.id !== right.id) return false;
+    if (!left.sourceCollection || !right.sourceCollection) return true;
+    return left.sourceCollection === right.sourceCollection;
+};
 
 // Helper para calcular status relative
 const getDueStatus = (item: RecurrenceItem) => {
@@ -385,167 +381,7 @@ const RecurrenceGroup = ({
     );
 };
 
-interface RecurrenceActionDropdownProps {
-    visible: boolean;
-    item: RecurrenceItem;
-    onPay: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
-}
 
-function RecurrenceActionDropdown({
-    visible,
-    item,
-    onPay,
-    onEdit,
-    onDelete
-}: RecurrenceActionDropdownProps) {
-    const sheetOpacity = useRef(new NativeAnimated.Value(0)).current;
-    const sheetScaleX = useRef(new NativeAnimated.Value(0.955)).current;
-    const sheetScaleY = useRef(new NativeAnimated.Value(0.935)).current;
-    const sheetY = useRef(new NativeAnimated.Value(-10)).current;
-    const contentOpacity = useRef(new NativeAnimated.Value(0)).current;
-
-    useEffect(() => {
-        if (visible) {
-            sheetOpacity.setValue(0);
-            sheetScaleX.setValue(0.955);
-            sheetScaleY.setValue(0.935);
-            sheetY.setValue(-10);
-            contentOpacity.setValue(0);
-
-            NativeAnimated.parallel([
-                NativeAnimated.timing(sheetOpacity, {
-                    toValue: 1,
-                    duration: 170,
-                    easing: Easing.out(Easing.quad),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.spring(sheetY, {
-                    toValue: 0,
-                    damping: 18,
-                    stiffness: 235,
-                    mass: 0.78,
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.sequence([
-                    NativeAnimated.timing(sheetScaleX, {
-                        toValue: 1.018,
-                        duration: 165,
-                        easing: Easing.out(Easing.cubic),
-                        useNativeDriver: false,
-                    }),
-                    NativeAnimated.spring(sheetScaleX, {
-                        toValue: 1,
-                        damping: 13,
-                        stiffness: 190,
-                        mass: 0.62,
-                        useNativeDriver: false,
-                    }),
-                ]),
-                NativeAnimated.sequence([
-                    NativeAnimated.timing(sheetScaleY, {
-                        toValue: 1.012,
-                        duration: 185,
-                        easing: Easing.out(Easing.cubic),
-                        useNativeDriver: false,
-                    }),
-                    NativeAnimated.spring(sheetScaleY, {
-                        toValue: 1,
-                        damping: 13,
-                        stiffness: 185,
-                        mass: 0.62,
-                        useNativeDriver: false,
-                    }),
-                ]),
-                NativeAnimated.timing(contentOpacity, {
-                    toValue: 1,
-                    duration: 260,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: false,
-                }),
-            ]).start();
-        } else {
-            NativeAnimated.parallel([
-                NativeAnimated.timing(sheetOpacity, {
-                    toValue: 0,
-                    duration: 130,
-                    easing: Easing.out(Easing.quad),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(contentOpacity, {
-                    toValue: 0,
-                    duration: 110,
-                    easing: Easing.out(Easing.quad),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(sheetScaleX, {
-                    toValue: 0.955,
-                    duration: 170,
-                    easing: Easing.bezier(0.22, 1, 0.36, 1),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(sheetScaleY, {
-                    toValue: 0.935,
-                    duration: 180,
-                    easing: Easing.bezier(0.22, 1, 0.36, 1),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(sheetY, {
-                    toValue: -10,
-                    duration: 180,
-                    easing: Easing.bezier(0.22, 1, 0.36, 1),
-                    useNativeDriver: false,
-                }),
-            ]).start();
-        }
-    }, [visible, sheetOpacity, sheetScaleX, sheetScaleY, sheetY, contentOpacity]);
-
-    return (
-        <NativeAnimated.View
-            pointerEvents={visible ? 'auto' : 'none'}
-            style={[
-                styles.itemActionDropdown,
-                {
-                    opacity: sheetOpacity,
-                    transform: [
-                        { translateY: sheetY },
-                        { scaleX: sheetScaleX },
-                        { scaleY: sheetScaleY },
-                    ],
-                },
-            ]}
-        >
-            <BlurView
-                intensity={16}
-                tint="dark"
-                experimentalBlurMethod="dimezisBlurView"
-                style={styles.itemActionDropdownBlur}
-            >
-                <View style={styles.itemActionDropdownOverlay} />
-                <NativeAnimated.View style={[styles.itemActionDropdownContent, { opacity: contentOpacity }]}>
-                    <MorphTouchable radius={12} style={styles.itemActionDropdownItem} onPress={onPay}>
-                        <Text style={styles.itemActionDropdownText}>
-                            {item.status === 'paid' ? 'Marcar pendente' : item.type === 'reminder' ? 'Marcar feito' : 'Marcar pago'}
-                        </Text>
-                    </MorphTouchable>
-
-                    <View style={styles.itemActionDropdownDivider} />
-
-                    <MorphTouchable radius={12} style={styles.itemActionDropdownItem} onPress={onEdit}>
-                        <Text style={styles.itemActionDropdownText}>Editar</Text>
-                    </MorphTouchable>
-
-                    <View style={styles.itemActionDropdownDivider} />
-
-                    <MorphTouchable radius={12} style={styles.itemActionDropdownItem} onPress={onDelete}>
-                        <Text style={styles.itemActionDropdownTextDestructive}>Excluir</Text>
-                    </MorphTouchable>
-                </NativeAnimated.View>
-            </BlurView>
-        </NativeAnimated.View>
-    );
-}
 
 // Componente para item da lista (Assinatura ou Lembrete)
 const ListItem = ({
@@ -595,6 +431,8 @@ const ListItem = ({
 
         if (isSelectionMode) {
             onToggleSelect(item);
+        } else if (!isDetected) {
+            onToggleActionMenu(item);
         }
     };
 
@@ -650,7 +488,7 @@ const ListItem = ({
                         styles.selectionCheckbox,
                         isSelected && styles.selectionCheckboxSelected
                     ]}>
-                        {isSelected && <Check size={14} color="#F5F5F7" />}
+                        {isSelected && <Check size={12} color="#F5F5F7" strokeWidth={3} />}
                     </View>
                 )}
 
@@ -719,50 +557,12 @@ const ListItem = ({
                                     {item.transactionType === 'income' ? '+ ' : '- '}
                                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.amount)}
                                 </Text>
-                                <MorphTouchable
-                                    radius={13}
-                                    style={styles.itemMenuButton}
-                                    onPress={handleToggleActionMenu}
-                                >
-                                    <MoreVertical size={16} color="#A1A1A6" strokeWidth={2.4} />
-                                </MorphTouchable>
                             </View>
                         )}
                     </View>
                 )}
                 </View>
-
-                {!isSelectionMode && !isDetected && (
-                    <RecurrenceActionDropdown
-                        visible={actionMenuOpen}
-                        item={item}
-                        onPay={() => handleMenuAction(onPay)}
-                        onEdit={() => handleMenuAction(onEdit)}
-                        onDelete={() => handleMenuAction(onDelete)}
-                    />
-                )}
             </MorphTouchable>
-
-            {/* Tutorial Overlay */}
-            {showTutorial && (
-                <Animated.View
-                    entering={FadeIn.duration(500)}
-                    style={styles.cardTutorialOverlay}
-                    pointerEvents="none"
-                >
-                    <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFill} />
-                    <View style={styles.cardTutorialContent}>
-                        <IntervalLottie
-                            source={require('@/assets/check.json')}
-                            size={28}
-                            interval={4000}
-                        />
-                        <Text style={styles.cardTutorialText}>
-                            Segure para selecionar
-                        </Text>
-                    </View>
-                </Animated.View>
-            )}
         </Animated.View>
     );
 };
@@ -774,11 +574,11 @@ const EmptyState = ({ type }: { type: RecurrenceTab }) => {
     return (
         <View style={styles.emptyRemindersContainer}>
             <View style={styles.emptyRemindersIconWrapper}>
-                <IntervalLottie
-                    source={isSubscription ? require('@/assets/assinaturabranco.json') : require('@/assets/lembretebranco.json')}
-                    size={48}
-                    interval={3000}
-                />
+                {isSubscription ? (
+                    <Repeat2 size={44} color="#D97757" strokeWidth={1.8} />
+                ) : (
+                    <Bell size={44} color="#D97757" strokeWidth={1.8} />
+                )}
             </View>
 
             <Text style={styles.emptyRemindersTitle}>
@@ -966,6 +766,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
     // Estados de detecção de assinaturas
     const [detectedSubscriptions, setDetectedSubscriptions] = useState<DetectedSubscription[]>([]);
+    const paymentAlertsEnabled = profile?.preferences?.paymentAlertsEnabled ?? true;
 
     useEffect(() => {
         if (initialTab === selectedTab) return;
@@ -997,34 +798,55 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
     useEffect(() => {
         if (!user) return;
-        triggerIOSCoreMorph();
-        setLoading(true);
 
-        const unsubscribe = databaseService.onRecurrencesChange(user.uid, (data) => {
-            const loadedItems = data as RecurrenceItem[];
-            triggerIOSCoreMorph();
-            setItems(loadedItems);
-            setLoading(false);
-            setRefreshing(false);
-        });
+        let cancelled = false;
+        let unsubscribe: (() => void) | null = null;
+        let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+        const timer = setTimeout(() => {
+            task = InteractionManager.runAfterInteractions(() => {
+                if (cancelled) return;
 
-        return () => unsubscribe();
+                unsubscribe = databaseService.onRecurrencesChange(user.uid, (data) => {
+                    if (cancelled) return;
+                    setItems(data as RecurrenceItem[]);
+                    setLoading(false);
+                    setRefreshing(false);
+                });
+            });
+        }, 180);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            task?.cancel?.();
+            unsubscribe?.();
+        };
     }, [user]);
 
     // Reschedule notifications whenever items or preferences change
     useEffect(() => {
         if (!user?.uid || loading || items.length === 0) return;
 
-        const prefs = (profile?.preferences as any);
-        const paymentAlertsEnabled = (prefs?.paymentAlertsEnabled ?? true) as boolean;
+        let cancelled = false;
+        let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+        const timer = setTimeout(() => {
+            task = InteractionManager.runAfterInteractions(() => {
+                if (cancelled) return;
+                notificationService.reschedulePaymentAlerts({
+                    userId: user.uid,
+                    enabled: paymentAlertsEnabled,
+                    recurrences: items,
+                    plan: profile?.subscription || null,
+                });
+            });
+        }, 500);
 
-        notificationService.reschedulePaymentAlerts({
-            userId: user.uid,
-            enabled: paymentAlertsEnabled,
-            recurrences: items,
-            plan: profile?.subscription || null,
-        });
-    }, [user?.uid, profile?.preferences?.paymentAlertsEnabled, items, profile?.subscription]);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            task?.cancel?.();
+        };
+    }, [user?.uid, loading, paymentAlertsEnabled, items, profile?.subscription]);
 
     // Detecta assinaturas automaticamente
     useEffect(() => {
@@ -1083,7 +905,17 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
             }
         };
 
-        detectSubscriptionsAuto();
+        let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+        const timer = setTimeout(() => {
+            task = InteractionManager.runAfterInteractions(() => {
+                void detectSubscriptionsAuto();
+            });
+        }, 650);
+
+        return () => {
+            clearTimeout(timer);
+            task?.cancel?.();
+        };
     }, [user, loading, selectedTab, items]);
 
     const handleOptionPay = async (item: RecurrenceItem) => {
@@ -1128,8 +960,12 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
         );
 
         if (!result?.success) {
-            console.error('[RecurrenceView] Error deleting recurrence:', result?.error);
+            const errorMessage = result && 'error' in result ? result.error : undefined;
+            console.error('[RecurrenceView] Error deleting recurrence:', errorMessage);
+            return;
         }
+
+        setItems(current => current.filter(item => !isSameRecurrence(item, target)));
     };
 
     const handleOptionEdit = (item: RecurrenceItem) => {
@@ -1232,18 +1068,35 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
         setShowBulkDeleteConfirm(false);
 
         // Deleta todos os itens selecionados
-        const promises = idsToDelete.map(id => {
+        const promises = idsToDelete.map(async id => {
             const item = items.find(i => i.id === id);
             if (item) {
-                return databaseService.deleteRecurrence(user.uid, id, item.type, item.sourceCollection);
+                const result = await databaseService.deleteRecurrence(
+                    user.uid,
+                    id,
+                    item.type,
+                    item.sourceCollection
+                );
+                return { item, result };
             }
-            return Promise.resolve({ success: true });
+            return { item: null, result: { success: true } };
         });
 
         const results = await Promise.all(promises);
-        const failed = results.find((result) => !result?.success);
+        const deletedItems = results
+            .filter(({ item, result }) => item && result?.success)
+            .map(({ item }) => item as RecurrenceItem);
+
+        if (deletedItems.length > 0) {
+            setItems(current => current.filter(
+                candidate => !deletedItems.some(deleted => isSameRecurrence(candidate, deleted))
+            ));
+        }
+
+        const failed = results.find(({ result }) => !result?.success);
         if (failed) {
-            console.error('[RecurrenceView] Error deleting selected recurrences:', (failed as any).error);
+            const errorMessage = 'error' in failed.result ? failed.result.error : undefined;
+            console.error('[RecurrenceView] Error deleting selected recurrences:', errorMessage);
         }
     };
 
@@ -1691,6 +1544,28 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
         </Animated.View>
     );
 
+    const renderTutorialBanner = () => {
+        if (!showTutorial) return null;
+
+        return (
+            <Animated.View
+                entering={FadeIn.duration(400)}
+                exiting={FadeOut.duration(300)}
+                style={styles.tutorialBanner}
+            >
+                <View style={styles.tutorialBannerContent}>
+                    <Info size={16} color="#D97757" style={styles.tutorialBannerIcon} />
+                    <Text style={styles.tutorialBannerText}>
+                        Segure um item para selecionar e gerenciar múltiplos vencimentos.
+                    </Text>
+                </View>
+                <TouchableOpacity onPress={dismissTutorial} style={styles.tutorialBannerClose}>
+                    <X size={14} color="#8E8E93" />
+                </TouchableOpacity>
+            </Animated.View>
+        );
+    };
+
     const handleSelectedMonthChange = (month: Date) => {
         triggerIOSCoreMorph();
         setSelectedMonth(month);
@@ -1807,6 +1682,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 <OpenFinanceSyncBanner />
 
                 {!loading && renderSummaryCard()}
+                {!loading && renderTutorialBanner()}
 
                 <View style={styles.listContainer}>
 
@@ -2020,6 +1896,32 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 onApply={handleApplyFilters}
                 initialFilters={filters}
             />
+
+            <RecurrenceActionsSheet
+                visible={openActionMenuId !== null}
+                onVisibleChange={(visible) => {
+                    if (!visible) closeActionMenu();
+                }}
+                item={items.find(i => i.id === openActionMenuId) || null}
+                onPay={() => {
+                    const item = items.find(i => i.id === openActionMenuId);
+                    if (item) {
+                        setTimeout(() => handleOptionPay(item), 350);
+                    }
+                }}
+                onEdit={() => {
+                    const item = items.find(i => i.id === openActionMenuId);
+                    if (item) {
+                        setTimeout(() => handleOptionEdit(item), 350);
+                    }
+                }}
+                onDelete={() => {
+                    const item = items.find(i => i.id === openActionMenuId);
+                    if (item) {
+                        setTimeout(() => handleOptionDelete(item), 350);
+                    }
+                }}
+            />
         </View >
     );
 }
@@ -2142,7 +2044,7 @@ const styles = StyleSheet.create({
         elevation: 6,
     },
     arrowSelectorContent: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -2250,7 +2152,7 @@ const styles = StyleSheet.create({
     },
     listItemSelected: {
         borderColor: '#D97757',
-        backgroundColor: 'rgba(217, 119, 87, 0.14)',
+        backgroundColor: '#101010',
     },
     listItemPaid: {
         borderColor: '#32D74B',
@@ -2320,7 +2222,7 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     itemActionDropdownOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(17, 17, 17, 0.94)',
     },
     itemActionDropdownContent: {
@@ -2465,11 +2367,11 @@ const styles = StyleSheet.create({
     },
     // Estilos de seleção múltipla
     selectionCheckbox: {
-        width: 22,
-        height: 22,
-        borderRadius: 11,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.32)',
+        borderColor: 'rgba(255,255,255,0.24)',
         marginRight: 12,
         justifyContent: 'center',
         alignItems: 'center',
@@ -2824,5 +2726,40 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '600',
         color: '#F5F5F7',
+    },
+    tutorialBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(219, 119, 87, 0.12)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(219, 119, 87, 0.28)',
+        borderRadius: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        marginBottom: 16,
+        marginHorizontal: 22,
+    },
+    tutorialBannerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 12,
+        gap: 8,
+    },
+    tutorialBannerIcon: {
+        flexShrink: 0,
+    },
+    tutorialBannerText: {
+        color: '#F5F5F7',
+        fontSize: 12.5,
+        fontFamily: 'AROneSans_400Regular',
+        lineHeight: 16,
+        flex: 1,
+    },
+    tutorialBannerClose: {
+        padding: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

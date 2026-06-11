@@ -1,8 +1,7 @@
-import { ModalPadrao } from '@/components/ui/ModalPadrao';
+import { CalendarioEventsSheet } from './visaogeral/CalendarioEventsSheet';
 import { buildEventsByDateIndex, EventsForDate } from '@/utils/financialCalendarIndex';
 import { compareMonths, isSameMonth, startOfMonth } from '@/utils/monthWindow';
 
-import { useCategories } from '@/hooks/use-categories';
 import React, { useMemo, useState } from 'react';
 import {
     FlatList,
@@ -286,134 +285,7 @@ function CalendarRailDay({
     );
 }
 
-function EventRow({
-    item,
-    index,
-    isLast,
-    getCategoryName,
-}: {
-    item: any;
-    index: number;
-    isLast: boolean;
-    getCategoryName: (id: string) => string;
-}) {
-    const pressProgress = useSharedValue(0);
-    const morphProgress = useSharedValue(0);
-    const cappedDelay = Math.min(index, 12) * 45;
 
-    const rowAnimatedStyle = useAnimatedStyle(() => {
-        const pressed = pressProgress.value;
-        const morph = morphProgress.value;
-
-        return {
-            borderRadius: 14 + morph * 3 - pressed * 0.8,
-            transform: [
-                { translateY: pressed * 1.1 },
-                { scaleX: 1 + morph * 0.006 - pressed * 0.006 },
-                { scaleY: 1 + morph * 0.008 + pressed * 0.004 },
-            ],
-        };
-    });
-
-    const contentAnimatedStyle = useAnimatedStyle(() => {
-        const pressed = pressProgress.value;
-        const morph = morphProgress.value;
-
-        return {
-            transform: [
-                { scaleX: 1 + morph * 0.003 - pressed * 0.002 },
-                { scaleY: 1 - morph * 0.002 + pressed * 0.002 },
-            ],
-        };
-    });
-
-    return (
-        <Animated.View
-            entering={FadeInUp.delay(cappedDelay).duration(420)}
-            style={[styles.itemContainer, rowAnimatedStyle]}
-        >
-            <AnimatedTouchableOpacity
-                activeOpacity={1}
-                style={styles.itemTouchable}
-                onPressIn={() => {
-                    pressProgress.value = withSpring(1, {
-                        damping: 16,
-                        stiffness: 250,
-                        mass: 0.42,
-                    });
-
-                    morphProgress.value = withSpring(1, {
-                        damping: 13,
-                        stiffness: 190,
-                        mass: 0.48,
-                    });
-                }}
-                onPressOut={() => {
-                    pressProgress.value = withSpring(0, {
-                        damping: 15,
-                        stiffness: 215,
-                        mass: 0.45,
-                    });
-
-                    morphProgress.value = withSpring(0, {
-                        damping: 11,
-                        stiffness: 145,
-                        mass: 0.52,
-                    });
-                }}
-            >
-                <Animated.View style={[styles.itemRightContainer, contentAnimatedStyle]}>
-                    <View style={styles.itemContent}>
-                        <View style={styles.itemTextBlock}>
-                            <Text style={styles.itemTitle} numberOfLines={1}>
-                                {item.title || 'Sem descrição'}
-                            </Text>
-
-                            <Text style={styles.itemSubtitle}>
-                                {item.category ? getCategoryName(item.category) : (
-                                    item.type === 'credit_card' ? 'Cartão de Crédito' :
-                                        item.type === 'subscription' ? 'Assinatura' :
-                                            item.type === 'reminder' ? 'Lembrete' : 'Lançamento'
-                                )}
-                            </Text>
-                        </View>
-
-                        <View style={styles.itemAmountBlock}>
-                            <AnimatedCurrency
-                                value={item.amount}
-                                style={[
-                                    styles.itemAmount,
-                                    {
-                                        color: (item.type === 'checking_income' || item.transactionType === 'income')
-                                            ? '#34C759'
-                                            : '#FF453A'
-                                    }
-                                ]}
-                                prefix="R$ "
-                                prefixStyle={styles.itemAmountPrefix}
-                            />
-
-                            {item.status && (
-                                <Text
-                                    style={[
-                                        styles.itemStatus,
-                                        {
-                                            color: item.status === 'paid' ? '#34C759' : '#8E8E93'
-                                        }
-                                    ]}
-                                >
-                                    {item.status === 'paid' ? 'Pago' : 'Pendente'}
-                                </Text>
-                            )}
-                        </View>
-                    </View>
-                </Animated.View>
-
-                {!isLast && <View style={styles.itemSeparator} />}
-            </AnimatedTouchableOpacity>
-        </Animated.View>
-    );
-}
 
 export function FinancialCalendar({
     checkingTransactions,
@@ -424,11 +296,8 @@ export function FinancialCalendar({
     maxMonth,
     onMonthChange
 }: FinancialCalendarProps) {
-    const { getCategoryName } = useCategories();
-
     const calendarMorph = useSharedValue(0);
     const railMorph = useSharedValue(0);
-    const modalContentMorph = useSharedValue(0);
 
     const normalizeMonthInBounds = React.useCallback((date: Date) => {
         const normalized = startOfMonth(date);
@@ -629,18 +498,6 @@ export function FinancialCalendar({
     }, [selectedDateKey, calendarMorph, railMorph]);
 
     React.useEffect(() => {
-        modalContentMorph.value = 0;
-        modalContentMorph.value = withSequence(
-            withTiming(1, { duration: 155 }),
-            withSpring(0, {
-                damping: 12,
-                stiffness: 145,
-                mass: 0.58,
-            })
-        );
-    }, [selectedEvents.length, selectedDateKey, modalContentMorph]);
-
-    React.useEffect(() => {
         if (selectedDateIndex < 0 || railWidth <= 0) return;
 
         if (skipNextAutoScrollRef.current) {
@@ -689,19 +546,6 @@ export function FinancialCalendar({
             opacity: 1,
             transform: [
                 { translateY: -morph * 1.6 },
-                { scaleX: 1 + morph * 0.006 },
-                { scaleY: 1 - morph * 0.003 },
-            ],
-        };
-    });
-
-    const modalContentAnimatedStyle = useAnimatedStyle(() => {
-        const morph = modalContentMorph.value;
-
-        return {
-            borderRadius: 18 + morph * 4,
-            transform: [
-                { translateY: -morph * 1.2 },
                 { scaleX: 1 + morph * 0.006 },
                 { scaleY: 1 - morph * 0.003 },
             ],
@@ -761,19 +605,7 @@ export function FinancialCalendar({
         handleSelectDate(calendarDays[index].date);
     }, [calendarDays, getCenteredIndexFromOffset, handleSelectDate]);
 
-    const renderEventItem = ({ item, index }: { item: any; index: number }) => {
-        const isLast = index === selectedEvents.length - 1;
 
-        return (
-            <EventRow
-                key={item.id + item.type + index}
-                item={item}
-                index={index}
-                isLast={isLast}
-                getCategoryName={getCategoryName}
-            />
-        );
-    };
 
     const renderDayItem = ({ item }: { item: CalendarDay }) => {
         const dateStr = normalizeDate(item.date);
@@ -866,43 +698,12 @@ export function FinancialCalendar({
                 </Animated.View>
             </Animated.View>
 
-            <ModalPadrao
+            <CalendarioEventsSheet
                 visible={isModalMounted}
-                onClose={() => setIsModalMounted(false)}
-                titleAlign="start"
-                title={
-                    <View>
-                        <Text style={[styles.title, styles.modalTitle]}>
-                            {`${selectedDate.getDate()} de ${months[selectedDate.getMonth()]}`}
-                        </Text>
-                        <Text style={styles.modalSubtitle}>
-                            {weekDays[selectedDate.getDay()]}
-                        </Text>
-                    </View>
-                }
-                bodyStyle={{ paddingTop: 16 }}
-            >
-                {selectedEvents.length > 0 ? (
-                    <Animated.View
-                        entering={FadeIn.duration(260)}
-                        style={[styles.sectionCard, modalContentAnimatedStyle]}
-                    >
-                        {selectedEvents.map((item, index) =>
-                            renderEventItem({ item, index })
-                        )}
-                    </Animated.View>
-                ) : (
-                    <Animated.View
-                        entering={FadeInUp.duration(420)}
-                        style={[styles.emptyStateExpanded, modalContentAnimatedStyle]}
-                    >
-                        <Text style={styles.emptyStateTitle}>Nenhum evento</Text>
-                        <Text style={styles.emptyStateText}>
-                            Este dia ainda não tem lançamentos, faturas ou recorrências.
-                        </Text>
-                    </Animated.View>
-                )}
-            </ModalPadrao>
+                onVisibleChange={setIsModalMounted}
+                selectedDate={selectedDate}
+                selectedEvents={selectedEvents}
+            />
         </View>
     );
 }
@@ -985,7 +786,7 @@ const styles = StyleSheet.create({
     },
 
     dayRailSelectedFill: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: '#D97757',
     },
 
@@ -1046,121 +847,5 @@ const styles = StyleSheet.create({
         width: 4,
         height: 4,
         borderRadius: 2,
-    },
-
-    sectionCard: {
-        backgroundColor: '#111111',
-        borderRadius: 18,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#161616',
-        marginBottom: 16,
-    },
-
-    itemContainer: {
-        position: 'relative',
-        overflow: 'hidden',
-    },
-
-    itemTouchable: {
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-    },
-
-    itemRightContainer: {
-        flex: 1,
-    },
-
-    itemContent: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-
-    itemTextBlock: {
-        flex: 1,
-        marginRight: 8,
-    },
-
-    itemTitle: {
-        fontSize: 15,
-        color: '#FFFFFF',
-        fontFamily: 'AROneSans_400Regular',
-    },
-
-    itemSubtitle: {
-        fontSize: 12,
-        color: '#707070',
-        marginTop: 2,
-        fontFamily: 'AROneSans_400Regular',
-    },
-
-    itemAmountBlock: {
-        alignItems: 'flex-end',
-    },
-
-    itemAmount: {
-        fontSize: 16,
-        fontFamily: 'AROneSans_500Medium',
-        letterSpacing: -0.5,
-    },
-
-    itemAmountPrefix: {
-        fontSize: 12,
-        fontFamily: 'AROneSans_400Regular',
-        color: '#8E8E93',
-    },
-
-    itemStatus: {
-        fontSize: 10,
-        marginTop: 1,
-        fontFamily: 'AROneSans_400Regular',
-        textAlign: 'right',
-        opacity: 0.8,
-    },
-
-    itemSeparator: {
-        position: 'absolute',
-        bottom: 0,
-        left: 16,
-        right: 16,
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: 'rgba(255,255,255,0.07)',
-    },
-
-    emptyStateExpanded: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 24,
-        paddingHorizontal: 22,
-    },
-
-    emptyStateTitle: {
-        color: '#FFFFFF',
-        fontSize: 17,
-        fontFamily: 'AROneSans_400Regular',
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-
-    emptyStateText: {
-        color: '#8E8E93',
-        fontSize: 14,
-        fontFamily: 'AROneSans_400Regular',
-        lineHeight: 20,
-        maxWidth: 260,
-        textAlign: 'center',
-    },
-
-    modalTitle: {
-        fontSize: 18,
-        color: '#FFFFFF',
-    },
-
-    modalSubtitle: {
-        fontSize: 13,
-        color: '#8E8E93',
-        marginTop: 2,
-        fontFamily: 'AROneSans_400Regular',
     },
 });

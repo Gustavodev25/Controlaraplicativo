@@ -1,13 +1,13 @@
 import BankSelector from '@/components/BankSelector';
-import { CategorySelectorModal } from '@/components/CategorySelectorModal';
-import { ClosingDateItem, ClosingDateModal } from '@/components/ClosingDateModal';
+import { CategorySelectorSheet } from '@/components/CategorySelectorSheet';
+import { ClosingDateSheet, type ClosingDateItem } from '@/components/ClosingDateSheet';
 import { FilterState } from '@/components/CreditCardFilterModal';
 
-import { RefundModal } from '@/components/RefundModal';
+import { RefundSheet } from '@/components/RefundSheet';
 import { SwipeTutorial } from '@/components/SwipeTutorial';
-import { TransactionOptionsModal } from '@/components/TransactionOptionsModal';
+import { TransactionOptionsSheet } from '@/components/TransactionOptionsSheet';
+import { InvoiceActionsSheet } from '@/components/InvoiceActionsSheet';
 import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { useStackCardStyle } from '@/components/ui/StackCarousel';
 import { DEFAULT_CATEGORIES } from '@/constants/defaultCategories';
@@ -32,8 +32,12 @@ import { LinearGradient } from 'expo-linear-gradient'; // Added
 import { doc, onSnapshot } from 'firebase/firestore';
 import {
     Check,
+    CreditCard,
+    FileText,
+    ReceiptText,
     RotateCcw,
     Search,
+    Settings,
     Trash2,
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -80,18 +84,6 @@ if (Platform.OS === 'android') {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const TimedLottieIcon = React.memo(({ source, style }: { source: any; style: any }) => (
-    <DelayedLoopLottie
-        source={source}
-        style={style}
-        delay={1000}
-        initialDelay={100}
-        jitterRatio={0.2}
-        renderMode="HARDWARE"
-    />
-));
-TimedLottieIcon.displayName = 'TimedLottieIcon';
-
 interface NeedsConfigurationStateProps {
     onOpenSettings: () => void;
 }
@@ -100,10 +92,7 @@ const NeedsConfigurationState = ({ onOpenSettings }: NeedsConfigurationStateProp
     return (
         <View style={styles.configNeededContainer}>
             <View style={styles.configIconWrapper}>
-                <TimedLottieIcon
-                    source={require('@/assets/fatura.json')}
-                    style={{ width: 120, height: 120 }}
-                />
+                <ReceiptText size={64} color="#D97757" strokeWidth={1.7} />
             </View>
 
             <Text style={styles.configNeededTitle}>Fatura não configurada</Text>
@@ -464,10 +453,7 @@ const StackCard = React.memo(({
                 <View style={{ flex: 1, justifyContent: 'space-between' }}>
                     <View style={styles.carouselHeader}>
                         <View style={[styles.carouselHeaderLeft, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-                            <TimedLottieIcon
-                                source={require('@/assets/papel.json')}
-                                style={{ width: 20, height: 20 }}
-                            />
+                            <FileText size={20} color="#F5F5F7" strokeWidth={2} />
                             <View>
                                 <Text style={styles.carouselLabel}>{item.label}</Text>
                                 {item.status !== 'all' && (
@@ -901,10 +887,7 @@ const TransactionItem = React.memo(({
                     disabled={isMoving}
                 >
                     <View style={styles.refundTopCard}>
-                        <TimedLottieIcon
-                            source={require('@/assets/assinaturabranco.json')}
-                            style={styles.refundTopCardIcon}
-                        />
+                        <RotateCcw size={16} color="#F5F5F7" strokeWidth={2} style={styles.refundTopCardIcon} />
                         <Text numberOfLines={1} style={styles.refundTopCardText}>
                             {`Transação reembolsada no valor de ${formatCurrency(refundedAmount ?? 0)}`}
                         </Text>
@@ -1050,9 +1033,17 @@ export function CreditCardInvoice({
     loadingMoreHistory = false
 }: CreditCardInvoiceProps) {
     const { getCategoryName } = useCategories();
-    const { lod } = usePerformanceBudget();
+    const { lod, isEntryTier, isMidTier } = usePerformanceBudget();
     const [selectedTab, setSelectedTab] = useState<InvoiceTab>('current');
     const [invoiceData, setInvoiceData] = useState<InvoiceBuildResult | null>(null);
+    const invoiceComputeLimits = useMemo(() => {
+        const isAndroid = Platform.OS === 'android';
+        return {
+            months: isAndroid && isEntryTier ? 12 : isAndroid && isMidTier ? 18 : INVOICE_COMPUTE_WINDOW_MONTHS,
+            maxItems: isAndroid && isEntryTier ? 700 : isAndroid && isMidTier ? 1200 : MAX_INVOICE_COMPUTE_ITEMS,
+            debounceMs: isAndroid ? Math.max(INVOICE_BUILD_DEBOUNCE_MS, isEntryTier ? 180 : 120) : INVOICE_BUILD_DEBOUNCE_MS,
+        };
+    }, [isEntryTier, isMidTier]);
 
     // Sync with Firestore
     useEffect(() => {
@@ -1679,7 +1670,7 @@ export function CreditCardInvoice({
         }
 
         const cutoff = new Date();
-        cutoff.setMonth(cutoff.getMonth() - INVOICE_COMPUTE_WINDOW_MONTHS);
+        cutoff.setMonth(cutoff.getMonth() - invoiceComputeLimits.months);
         const cutoffIso = cutoff.toISOString().split('T')[0];
 
         const recent: Transaction[] = [];
@@ -1691,7 +1682,7 @@ export function CreditCardInvoice({
                 break;
             }
             recent.push(tx);
-            if (recent.length >= MAX_INVOICE_COMPUTE_ITEMS) {
+            if (recent.length >= invoiceComputeLimits.maxItems) {
                 break;
             }
         }
@@ -1700,8 +1691,8 @@ export function CreditCardInvoice({
             return recent;
         }
 
-        return filteredTransactions.slice(0, Math.min(filteredTransactions.length, MAX_INVOICE_COMPUTE_ITEMS));
-    }, [filteredTransactions]);
+        return filteredTransactions.slice(0, Math.min(filteredTransactions.length, invoiceComputeLimits.maxItems));
+    }, [filteredTransactions, invoiceComputeLimits.maxItems, invoiceComputeLimits.months]);
 
     // Só exigir configuração manual se NÃO houver qualquer dado automático do Pluggy.
     const hasManualConfig = Boolean(selectedCard?.closingDateSettings?.lastClosingDate);
@@ -1737,7 +1728,7 @@ export function CreditCardInvoice({
                     setInvoiceData(nextData);
                 }
             });
-        }, INVOICE_BUILD_DEBOUNCE_MS);
+        }, invoiceComputeLimits.debounceMs);
 
         return () => {
             clearTimeout(timer);
@@ -1745,10 +1736,10 @@ export function CreditCardInvoice({
                 task.cancel();
             }
         };
-    }, [invoiceComputationTransactions, selectedCard, selectedCardId]);
+    }, [invoiceComputationTransactions, invoiceComputeLimits.debounceMs, selectedCard, selectedCardId]);
 
     const allHistoryItems = useMemo(
-        () => filteredTransactions.map((t) => ({
+        () => selectedTab === 'all' ? filteredTransactions.map((t) => ({
             id: t.id,
             description: t.description,
             amount: Math.abs(t.amount),
@@ -1760,8 +1751,8 @@ export function CreditCardInvoice({
             isPayment: false,
             isRefund: t.isRefund || t.category === 'Refund',
             originalTransactionId: t.originalTransactionId
-        })),
-        [filteredTransactions]
+        })) : [],
+        [filteredTransactions, selectedTab]
     );
 
     const historyTotal = useMemo(() => {
@@ -2150,10 +2141,7 @@ export function CreditCardInvoice({
         setShowInvoiceCards((prev) => !prev);
     }, []);
 
-    const closeInvoiceActionsAndRun = useCallback((action: () => void) => {
-        setInvoiceActionsModalVisible(false);
-        action();
-    }, []);
+
 
     if (creditCards.length === 0) return (
         <View style={styles.screen}>
@@ -2168,14 +2156,7 @@ export function CreditCardInvoice({
                 </View>
             </View>
             <View style={styles.emptyState}>
-                <DelayedLoopLottie
-                    source={require('@/assets/cartabranco.json')}
-                    style={styles.emptyLottie}
-                    delay={3000}
-                    initialDelay={100}
-                    jitterRatio={0.2}
-                    renderMode="HARDWARE"
-                />
+                <CreditCard size={56} color="#F5F5F7" strokeWidth={1.7} style={styles.emptyIcon} />
                 <Text style={styles.emptyTitle}>Nenhum cartão</Text>
                 <Text style={styles.emptyText}>Conecte um cartão para visualizar suas faturas.</Text>
             </View>
@@ -2186,11 +2167,13 @@ export function CreditCardInvoice({
         <View style={styles.screen}>
 
 
-            <TransactionOptionsModal
+            <TransactionOptionsSheet
                 visible={transactionOptionsVisible}
-                onClose={() => {
-                    setTransactionOptionsVisible(false);
-                    setSelectedTransactionForOptions(null);
+                onVisibleChange={(visible) => {
+                    setTransactionOptionsVisible(visible);
+                    if (!visible) {
+                        setSelectedTransactionForOptions(null);
+                    }
                 }}
                 transaction={selectedTransactionForOptions}
                 onMoveInvoice={handleMoveTransaction}
@@ -2198,7 +2181,6 @@ export function CreditCardInvoice({
                     requestDeleteTransaction(item);
                 }}
                 onRefund={(item) => {
-                    setTransactionOptionsVisible(false);
                     handleOpenRefundModal(item);
                 }}
                 onChangeCategory={handleOpenCategorySelector}
@@ -2222,34 +2204,36 @@ export function CreditCardInvoice({
                 centerActions
             />
 
-            <ClosingDateModal
+            <ClosingDateSheet
                 visible={closingDateModalVisible}
-                onClose={() => setClosingDateModalVisible(false)}
+                onVisibleChange={setClosingDateModalVisible}
                 onSave={handleSaveClosingDates}
                 items={closingDateModalItems}
-                hasBankData={Boolean(normalizePluggyDate(selectedCard?.currentBill?.periodEnd || null) || normalizePluggyDate(selectedCard?.currentBill?.closeDate || null))}
                 bankName={selectedCard?.name || undefined}
-                onRefreshBank={onRefresh}
                 originalCloseDate={originalCloseDate}
                 originalDueDate={originalDueDate}
             />
 
-            <CategorySelectorModal
+            <CategorySelectorSheet
                 visible={categorySelectorVisible}
-                onClose={() => {
-                    setCategorySelectorVisible(false);
-                    setCategoryChangeTarget(null);
+                onVisibleChange={(visible) => {
+                    setCategorySelectorVisible(visible);
+                    if (!visible) {
+                        setCategoryChangeTarget(null);
+                    }
                 }}
                 onSelect={handleCategoryChange}
                 categories={DEFAULT_CATEGORIES}
                 loading={false}
             />
 
-            <RefundModal
+            <RefundSheet
                 visible={refundModalVisible}
-                onClose={() => {
-                    setRefundModalVisible(false);
-                    setRefundTransaction(null);
+                onVisibleChange={(visible) => {
+                    setRefundModalVisible(visible);
+                    if (!visible) {
+                        setRefundTransaction(null);
+                    }
                 }}
                 transaction={refundTransaction ? {
                     id: refundTransaction.id,
@@ -2346,57 +2330,14 @@ export function CreditCardInvoice({
                 </View>
             </ModalPadrao>
 
-            <ModalPadrao
+            <InvoiceActionsSheet
                 visible={invoiceActionsModalVisible}
-                onClose={() => setInvoiceActionsModalVisible(false)}
-                title="Ações da fatura"
-                titleAlign="start"
-                maxHeightRatio={0.42}
-            >
-                <View style={styles.invoiceActionsContainer}>
-                    <Text style={styles.invoiceActionsSectionTitle}>FATURA</Text>
-                    <View style={styles.invoiceActionsGroupCard}>
-                        <IOSTouchable
-                            style={styles.invoiceActionItem}
-                            activeOpacity={1}
-                            onPress={() => closeInvoiceActionsAndRun(() => setClosingDateModalVisible(true))}
-                        >
-                            <View style={styles.invoiceActionTextBlock}>
-                                <Text style={styles.invoiceActionTitle}>Configurar fatura</Text>
-                                <Text style={styles.invoiceActionSubtitle}>Fechamento, vencimento e ajustes</Text>
-                            </View>
-                        </IOSTouchable>
-
-                        <View style={styles.invoiceActionSeparator} />
-
-                        <IOSTouchable
-                            style={styles.invoiceActionItem}
-                            activeOpacity={1}
-                            onPress={() => closeInvoiceActionsAndRun(() => setTransactionSearchModalVisible(true))}
-                        >
-                            <View style={styles.invoiceActionTextBlock}>
-                                <Text style={styles.invoiceActionTitle}>Buscar transação</Text>
-                                <Text style={styles.invoiceActionSubtitle}>Encontrar lançamentos nesta fatura</Text>
-                            </View>
-                        </IOSTouchable>
-
-                        <View style={styles.invoiceActionSeparator} />
-
-                        <IOSTouchable
-                            style={styles.invoiceActionItem}
-                            activeOpacity={1}
-                            onPress={() => closeInvoiceActionsAndRun(toggleInvoiceCards)}
-                        >
-                            <View style={styles.invoiceActionTextBlock}>
-                                <Text style={styles.invoiceActionTitle}>
-                                    {showInvoiceCards ? 'Ocultar cartões da fatura' : 'Mostrar cartões da fatura'}
-                                </Text>
-                                <Text style={styles.invoiceActionSubtitle}>Alternar a visualização do carrossel</Text>
-                            </View>
-                        </IOSTouchable>
-                    </View>
-                </View>
-            </ModalPadrao>
+                onVisibleChange={setInvoiceActionsModalVisible}
+                showInvoiceCards={showInvoiceCards}
+                onConfigureInvoice={() => setClosingDateModalVisible(true)}
+                onSearchTransaction={() => setTransactionSearchModalVisible(true)}
+                onToggleInvoiceCards={toggleInvoiceCards}
+            />
 
             <View style={styles.headerRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
@@ -2458,7 +2399,7 @@ export function CreditCardInvoice({
                                         }}
                                         activeOpacity={1}
                                     >
-                                        <TimedLottieIcon source={require('@/assets/engrenagem.json')} style={{ width: 20, height: 20 }} />
+                                        <Settings size={20} color="#F5F5F7" strokeWidth={2} />
                                     </IOSTouchable>
                                 </View>
                             </Animated.View>
@@ -2572,48 +2513,6 @@ const styles = StyleSheet.create({
     cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     settingsButton: { padding: 9, borderRadius: 16, backgroundColor: '#101010', borderWidth: 1, borderColor: '#252525' },
     toggleButton: { padding: 9, borderRadius: 16, backgroundColor: '#101010', borderWidth: 1, borderColor: '#252525' },
-    invoiceActionsContainer: {
-        paddingTop: 12,
-        paddingBottom: 0,
-    },
-    invoiceActionsSectionTitle: {
-        fontSize: 12,
-        fontWeight: '500',
-        color: '#8E8E93',
-        marginBottom: 8,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    invoiceActionsGroupCard: {
-        backgroundColor: '#101010',
-        borderRadius: 22,
-        borderWidth: 1,
-        borderColor: '#252525',
-        overflow: 'hidden',
-    },
-    invoiceActionItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        minHeight: 56,
-    },
-    invoiceActionTextBlock: { flex: 1 },
-    invoiceActionTitle: {
-        color: '#FFFFFF',
-        fontSize: 17,
-        fontWeight: '400',
-    },
-    invoiceActionSubtitle: {
-        color: '#8E8E93',
-        fontSize: 12,
-        marginTop: 1,
-    },
-    invoiceActionSeparator: {
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: '#252525',
-        marginLeft: 16,
-    },
     configPrompt: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#101010', borderRadius: 22, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#252525', marginHorizontal: 20 },
     configPromptText: { flex: 1 },
     configPromptTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
@@ -2784,7 +2683,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
     },
     transactionMovingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 30,
@@ -2898,7 +2797,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 28,
         paddingBottom: 96
     },
-    emptyLottie: {
+    emptyIcon: {
         width: 48,
         height: 48
     },
@@ -3132,7 +3031,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     configIconWrapper: {
-        marginBottom: 0, // Lottie j├í tem um padding natural geralmente, ou ajustamos aqui
+        marginBottom: 0,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -3185,7 +3084,7 @@ const styles = StyleSheet.create({
         maxWidth: 140,
     },
     globalLoadingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 9999,
@@ -3215,19 +3114,20 @@ const searchStyles = StyleSheet.create({
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#101010',
+        backgroundColor: '#171717',
         marginBottom: 24,
         paddingHorizontal: 12,
         height: 44,
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: '#252525',
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#242424',
     },
     searchInput: {
         flex: 1,
         color: '#FFF',
         fontSize: 15,
         padding: 0,
+        fontFamily: 'AROneSans_400Regular',
     },
     sectionTitle: {
         fontSize: 12,
@@ -3236,15 +3136,16 @@ const searchStyles = StyleSheet.create({
         marginBottom: 8,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
+        fontFamily: 'AROneSans_500Medium',
     },
     resultsContent: {
         paddingBottom: 8,
     },
     resultsGroup: {
-        backgroundColor: '#101010',
-        borderRadius: 22,
-        borderWidth: 1,
-        borderColor: '#252525',
+        backgroundColor: '#171717',
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#242424',
         overflow: 'hidden',
     },
     emptyContainer: {
@@ -3254,6 +3155,7 @@ const searchStyles = StyleSheet.create({
     emptyText: {
         color: '#8E8E93',
         fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
     },
     resultCard: {
         flexDirection: 'row',
@@ -3271,6 +3173,7 @@ const searchStyles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '400',
         marginBottom: 2,
+        fontFamily: 'AROneSans_400Regular',
     },
     resultMetaRow: {
         flexDirection: 'row',
@@ -3281,10 +3184,12 @@ const searchStyles = StyleSheet.create({
         color: '#8E8E93',
         fontSize: 12,
         flexShrink: 1,
+        fontFamily: 'AROneSans_400Regular',
     },
     resultDate: {
         color: '#636366',
         fontSize: 12,
+        fontFamily: 'AROneSans_400Regular',
     },
     resultAmountContainer: {
         alignItems: 'flex-end',
@@ -3292,15 +3197,17 @@ const searchStyles = StyleSheet.create({
     resultAmount: {
         fontSize: 15,
         fontWeight: '400',
+        fontFamily: 'AROneSans_400Regular',
     },
     resultInstallment: {
         fontSize: 10,
         color: '#8E8E93',
         marginTop: 2,
+        fontFamily: 'AROneSans_400Regular',
     },
     resultSeparator: {
         height: StyleSheet.hairlineWidth,
-        backgroundColor: '#252525',
+        backgroundColor: '#282828',
         marginLeft: 16,
     },
 });

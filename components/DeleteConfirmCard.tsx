@@ -1,17 +1,7 @@
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
+import { TriangleAlert } from 'lucide-react-native';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { Layout, SlideInRight, SlideOutRight } from 'react-native-reanimated';
-
-const IntervalLottie = ({ source, size, interval = 5000 }: { source: any; size: number; interval?: number }) => (
-    <DelayedLoopLottie
-        source={source}
-        style={{ width: size, height: size }}
-        delay={interval}
-        initialDelay={100}
-        jitterRatio={0.2}
-    />
-);
 
 interface DeleteConfirmCardProps {
     title: string;
@@ -38,11 +28,7 @@ export function DeleteConfirmCard({
             style={[styles.deleteConfirmCard, style]}
         >
             <View style={styles.deleteConfirmContent}>
-                <IntervalLottie
-                    source={require('@/assets/perigo.json')}
-                    size={22}
-                    interval={4000}
-                />
+                <TriangleAlert size={22} color="#EF4444" strokeWidth={2} />
                 <Text style={styles.deleteConfirmText}>
                     {title}
                 </Text>
@@ -116,4 +102,3 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
 });
-

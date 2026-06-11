@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     contentContainer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
 });
 

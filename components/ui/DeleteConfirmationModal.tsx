@@ -316,7 +316,7 @@ export function DeleteConfirmationModal({
 
 const styles = StyleSheet.create({
     overlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 9999,
         alignItems: 'center',
     },

@@ -18,6 +18,8 @@ DEFAULT_CATEGORIES.forEach(group => {
     CATEGORY_GROUPS_MAP[group.title] = group.items.map(item => item.key);
 });
 
+const sanitizeId = (id: string) => id.replace(/\//g, '_');
+
 export const CategoryService = {
     // 1. Inicializar Categorias Padrão
     initializeCategoryMappings: async (userId: string): Promise<CategoryMapping[]> => {
@@ -33,7 +35,7 @@ export const CategoryService = {
 
             DEFAULT_CATEGORIES.forEach(group => {
                 group.items.forEach(item => {
-                    const id = item.key; // Use key as ID for default categories
+                    const id = sanitizeId(item.key); // Use key as ID for default categories
                     const mapping: CategoryMapping = {
                         id,
                         originalKey: item.key,
@@ -61,7 +63,7 @@ export const CategoryService = {
     // 2. Atualizar Nome de Categoria
     updateCategoryMapping: async (userId: string, categoryId: string, displayName: string): Promise<void> => {
         try {
-            const docRef = doc(db, 'users', userId, 'categoryMappings', categoryId);
+            const docRef = doc(db, 'users', userId, 'categoryMappings', sanitizeId(categoryId));
             await updateDoc(docRef, {
                 displayName,
                 updatedAt: new Date().toISOString()
@@ -75,7 +77,7 @@ export const CategoryService = {
     // 3. Resetar para Padrão
     resetCategoryMapping: async (userId: string, categoryId: string, originalDisplayName: string): Promise<void> => {
         try {
-            const docRef = doc(db, 'users', userId, 'categoryMappings', categoryId);
+            const docRef = doc(db, 'users', userId, 'categoryMappings', sanitizeId(categoryId));
             await updateDoc(docRef, {
                 displayName: originalDisplayName,
                 isDefault: true,
@@ -115,7 +117,7 @@ export const CategoryService = {
     // 5. Deletar Categoria Customizada
     deleteCategoryMapping: async (userId: string, categoryId: string): Promise<void> => {
         try {
-            const docRef = doc(db, 'users', userId, 'categoryMappings', categoryId);
+            const docRef = doc(db, 'users', userId, 'categoryMappings', sanitizeId(categoryId));
             await deleteDoc(docRef);
         } catch (error) {
             console.error('Error deleting category mapping:', error);

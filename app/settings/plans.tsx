@@ -19,8 +19,7 @@ import {
     type SubscriptionPurchase,
 } from '@/services/iapService';
 import { safeBack } from '@/utils/navigation';
-import { useFocusEffect } from '@react-navigation/native';
-import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { Check, LogOut, RefreshCw, Shield, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -130,6 +129,8 @@ export default function PlansScreen() {
     const [priceString, setPriceString] = useState(PRO_PRICE_STRING);
     const [iapReady, setIapReady] = useState(false);
     const [alreadyPro, setAlreadyPro] = useState(false);
+    const [trialAvailable, setTrialAvailable] = useState<boolean | null>(null);
+    const [trialDays, setTrialDays] = useState<number>(PRO_TRIAL_DAYS);
     const refreshProfileRef = useRef(refreshProfile);
     const purchaseHandledRef = useRef(false);
     const purchaseFlowActiveRef = useRef(false);
@@ -202,6 +203,12 @@ export default function PlansScreen() {
 
             setAlreadyPro(statusResult?.success ? statusResult.hasPro : profileProRef.current);
             setPriceString(offeringResult?.priceString || PRO_PRICE_STRING);
+            if (offeringResult?.trialAvailable != null) {
+                setTrialAvailable(offeringResult.trialAvailable);
+            }
+            if (offeringResult?.trialDays != null && offeringResult.trialDays > 0) {
+                setTrialDays(offeringResult.trialDays);
+            }
             setIapReady(true);
 
             if (statusResult?.success) {
@@ -425,7 +432,11 @@ export default function PlansScreen() {
 
     const handlePurchase = async () => {
         if (!user?.uid || !user?.email) {
-            Alert.alert('Autenticação necessária', 'Faça login para assinar o plano Pro.', [{ text: 'OK' }]);
+            Alert.alert(
+                'Autenticação necessária',
+                'Faça login com sua conta Controlar+ para assinar o Plano Pro. A Apple Sandbox só entra na tela de compra da App Store.',
+                [{ text: 'OK' }]
+            );
             return;
         }
 
@@ -497,7 +508,7 @@ export default function PlansScreen() {
                 } else {
                     Alert.alert(
                         'Compra nao concluida',
-                        `A ${storeName} nao retornou uma transacao desta vez. Se acabou de entrar com a conta Sandbox, toque no botao novamente. Se continuar igual no simulador, teste em um iPhone fisico ou use StoreKit local no Xcode.`,
+                        `A ${storeName} nao retornou uma transacao desta vez. Use Apple Sandbox apenas quando a folha da App Store pedir login. Expo Go nao testa IAP; use TestFlight, um build nativo ou StoreKit local no Xcode.`,
                         [{ text: 'OK' }]
                     );
                 }
@@ -571,7 +582,7 @@ export default function PlansScreen() {
             } else {
                 Alert.alert(
                     'Nenhuma compra encontrada',
-                    `Nao encontramos uma assinatura Pro ativa nesta conta ou na ${storeName} deste dispositivo.`,
+                    `Nao encontramos uma assinatura Pro ativa para a conta Controlar+ logada nem na ${storeName} deste dispositivo.`,
                     [{ text: 'OK' }]
                 );
             }
@@ -650,7 +661,7 @@ export default function PlansScreen() {
     // ---------------------------------------------------------------------------
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+        <View style={styles.container}>
             <StatusBar barStyle="light-content" />
 
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }} pointerEvents="none">
@@ -663,44 +674,48 @@ export default function PlansScreen() {
                 />
             </View>
 
-            <View style={styles.header}>
-                {isForced ? (
-                    <TouchableOpacity
-                        style={styles.closeButton}
-                        onPress={handleSwitchAccount}
-                        activeOpacity={0.7}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                        <LogOut size={20} color="#8E8E93" />
-                    </TouchableOpacity>
-                ) : (
-                    <View style={{ width: 40 }} />
-                )}
-                <Text style={styles.headerTitle}>Meu plano</Text>
-                {!isForced ? (
-                    <TouchableOpacity
-                        style={styles.closeButton}
-                        onPress={() => safeBack(router)}
-                        activeOpacity={0.7}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                        <X size={24} color="#8E8E93" />
-                    </TouchableOpacity>
-                ) : (
-                    <View style={{ width: 40 }} />
-                )}
+            <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+                <View style={styles.header}>
+                    {isForced ? (
+                        <TouchableOpacity
+                            style={styles.leftHeaderButton}
+                            onPress={handleSwitchAccount}
+                            activeOpacity={0.7}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                            <LogOut size={20} color="#A1A1A6" />
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={styles.leftHeaderButton} />
+                    )}
+                    <Text style={styles.headerTitle}>Meu plano</Text>
+                    {!isForced ? (
+                        <TouchableOpacity
+                            style={styles.rightHeaderButton}
+                            onPress={() => safeBack(router)}
+                            activeOpacity={0.7}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                            <X size={24} color="#A1A1A6" />
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={styles.rightHeaderButton} />
+                    )}
+                </View>
             </View>
 
             <ScrollView
                 style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[styles.scrollContent, { flexGrow: 1, justifyContent: 'center' }]}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Hero */}
                 <Animated.View style={[styles.heroSection, heroStyle]}>
                     <Text style={styles.heroTitle}>Conheça o Plano Pro</Text>
                     <Text style={styles.heroDescription}>
-                        Teste gratis por {PRO_TRIAL_DAYS} dias. Cancele quando quiser.
+                        {trialAvailable === false
+                            ? `${priceString}/mês. Cancele quando quiser.`
+                            : `Teste gratis por ${trialDays} dias. Cancele quando quiser.`}
                     </Text>
                 </Animated.View>
 
@@ -726,34 +741,67 @@ export default function PlansScreen() {
                     </View>
                     <View style={styles.disclosureDivider} />
                     <View style={styles.disclosureRow}>
-                        <Text style={styles.disclosureLabel}>Duracao</Text>
+                        <Text style={styles.disclosureLabel}>Duração</Text>
                         <Text style={styles.disclosureValue}>{PRO_SUBSCRIPTION_DISCLOSURE.duration}</Text>
                     </View>
                     <View style={styles.disclosureDivider} />
                     <View style={styles.disclosureRow}>
-                        <Text style={styles.disclosureLabel}>Preco</Text>
-                        <Text style={styles.disclosureValue}>{priceString} por mes</Text>
+                        <Text style={styles.disclosureLabel}>Preço</Text>
+                        <Text style={styles.disclosureValue}>{priceString} por mês</Text>
                     </View>
                     <View style={styles.disclosureDivider} />
                     <View style={styles.disclosureRow}>
-                        <Text style={styles.disclosureLabel}>Teste gratis</Text>
-                        <Text style={styles.disclosureValue}>{PRO_TRIAL_DAYS} dias sem cobranca</Text>
+                        <Text style={styles.disclosureLabel}>Teste grátis</Text>
+                        <Text style={styles.disclosureValue}>
+                            {trialAvailable === false
+                                ? 'Indisponível para esta conta'
+                                : `${trialDays} dias sem cobrança`}
+                        </Text>
                     </View>
                     <View style={styles.disclosureDivider} />
                     <View style={styles.disclosureRow}>
-                        <Text style={styles.disclosureLabel}>Renovacao</Text>
+                        <Text style={styles.disclosureLabel}>Renovação</Text>
                         <Text style={styles.disclosureValue}>{PRO_SUBSCRIPTION_DISCLOSURE.renewal}</Text>
+                    </View>
+                    <View style={styles.disclosureDivider} />
+                    <View style={styles.disclosureRow}>
+                        <Text style={styles.disclosureLabel}>Segurança</Text>
+                        <Text style={styles.disclosureValue}>Compra segura e gerenciada pela {storeName}</Text>
                     </View>
                 </Animated.View>
 
-                <Animated.View style={[styles.guaranteeCard, guaranteeCardStyle]}>
-                    <View style={styles.guaranteeRow}>
-                        <Shield size={16} color="#8E8E93" />
-                        <Text style={styles.guaranteeText}>
-                            Compra segura e gerenciada pela {storeName}
-                        </Text>
-                    </View>
-                </Animated.View>
+                {isIOS ? (
+                    <Animated.View style={[styles.iapCredentialCard, securityStyle]}>
+                        <View style={styles.iapCredentialHeader}>
+                            <View style={styles.iapCredentialIcon}>
+                                <Shield size={18} color="#F2B8A0" />
+                            </View>
+                            <View style={styles.iapCredentialTitleWrap}>
+                                <Text style={styles.iapCredentialTitle}>
+                                    {isForced ? 'Cadastro concluído: continue no Controlar+' : 'Use a credencial certa no iOS'}
+                                </Text>
+                                <Text style={styles.iapCredentialAccount} numberOfLines={1} ellipsizeMode="middle">
+                                    Conta Controlar+: {user?.email || 'e-mail usado no app'}
+                                </Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.iapCredentialRows}>
+                            <View style={styles.iapCredentialRow}>
+                                <Text style={styles.iapCredentialLabel}>Controlar+</Text>
+                                <Text style={styles.iapCredentialText}>login, cadastro e acesso ao app.</Text>
+                            </View>
+                            <View style={styles.iapCredentialRow}>
+                                <Text style={styles.iapCredentialLabel}>Apple Sandbox</Text>
+                                <Text style={styles.iapCredentialText}>somente quando a App Store abrir a compra ou restauração.</Text>
+                            </View>
+                            <View style={styles.iapCredentialRow}>
+                                <Text style={styles.iapCredentialLabel}>Expo Go</Text>
+                                <Text style={styles.iapCredentialText}>não testa IAP; use TestFlight, build nativo ou StoreKit.</Text>
+                            </View>
+                        </View>
+                    </Animated.View>
+                ) : null}
 
                 {/* Botão de Compra */}
                 {isMobileStore && (
@@ -776,56 +824,52 @@ export default function PlansScreen() {
                             </View>
                         ) : (
                             <>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.purchaseButton,
-                                        (iapLoading || !iapReady) && styles.purchaseButtonDisabled,
-                                    ]}
-                                    onPress={handlePurchase}
-                                    activeOpacity={0.85}
-                                    disabled={iapLoading || !iapReady}
-                                >
-                                    {iapLoading ? (
-                                        <ActivityIndicator color="#000" />
-                                    ) : (
-                                        <Text style={styles.purchaseButtonText}>
-                                            {shouldSetupPayment ? 'Configurar pagamento' : `Comecar ${PRO_TRIAL_DAYS} dias gratis`}
-                                        </Text>
-                                    )}
-                                </TouchableOpacity>
+                                <View style={styles.buttonsRow}>
+                                    <TouchableOpacity
+                                        style={styles.restoreButton}
+                                        onPress={handleRestore}
+                                        activeOpacity={0.7}
+                                        disabled={restoring}
+                                    >
+                                        {restoring ? (
+                                            <ActivityIndicator size="small" color="#8E8E93" />
+                                        ) : (
+                                            <Text style={styles.restoreText} numberOfLines={1} adjustsFontSizeToFit>
+                                                Restaurar
+                                            </Text>
+                                        )}
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.purchaseButton,
+                                            (iapLoading || !iapReady) && styles.purchaseButtonDisabled,
+                                        ]}
+                                        onPress={handlePurchase}
+                                        activeOpacity={0.85}
+                                        disabled={iapLoading || !iapReady}
+                                    >
+                                        {iapLoading ? (
+                                            <ActivityIndicator color="#FFFFFF" />
+                                        ) : (
+                                            <Text style={styles.purchaseButtonText} numberOfLines={1} adjustsFontSizeToFit>
+                                                {shouldSetupPayment
+                                                    ? 'Pagar'
+                                                    : trialAvailable === false
+                                                        ? 'Assinar'
+                                                        : 'Testar grátis'}
+                                            </Text>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
 
                                 {shouldSetupPayment ? (
                                     <Text style={styles.setupPaymentText}>
                                         Seu Pro já está liberado. Configure a cobrança pela App Store para manter o acesso na próxima renovação.
                                     </Text>
                                 ) : null}
-
-                                <TouchableOpacity
-                                    style={styles.restoreButton}
-                                    onPress={handleRestore}
-                                    activeOpacity={0.7}
-                                    disabled={restoring}
-                                >
-                                    {restoring ? (
-                                        <ActivityIndicator size="small" color="#8E8E93" />
-                                    ) : (
-                                        <View style={styles.restoreRow}>
-                                            <RefreshCw size={13} color="#8E8E93" />
-                                            <Text style={styles.restoreText}>
-                                                Restaurar compras anteriores
-                                            </Text>
-                                        </View>
-                                    )}
-                                </TouchableOpacity>
-
-                                <Text style={styles.legalText}>
-                                    Teste gratis de {PRO_TRIAL_DAYS} dias. Depois, o Plano Pro mensal e renovado
-                                    automaticamente pela {storeName}, salvo cancelamento antes da renovacao.
-                                    Cancele a qualquer momento no gerenciamento de assinaturas da loja.
-                                </Text>
                             </>
                         )}
-
                     </Animated.View>
                 )}
 
@@ -863,19 +907,31 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#0C0C0C',
     },
+    headerWrapper: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 24,
-        paddingVertical: 12,
+        height: 52,
+        paddingHorizontal: 20,
     },
     headerTitle: {
-        fontSize: 12,
+        flex: 1,
+        fontSize: 18,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#E8E8EA',
+        textAlign: 'center',
     },
-    closeButton: {
+    leftHeaderButton: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+    },
+    rightHeaderButton: {
         width: 40,
         height: 40,
         justifyContent: 'center',
@@ -908,12 +964,12 @@ const styles = StyleSheet.create({
         opacity: 0.8,
     },
     mainCard: {
-        backgroundColor: '#151515',
-        borderRadius: 24,
-        padding: 24,
+        backgroundColor: '#111111',
+        borderRadius: 16,
+        padding: 20,
         marginBottom: 16,
-        borderWidth: 1,
-        borderColor: '#252525',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
     },
     planInfoRow: {
         flexDirection: 'row',
@@ -947,12 +1003,12 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     disclosureCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.035)',
+        backgroundColor: '#111111',
         borderRadius: 16,
         paddingHorizontal: 16,
         paddingVertical: 6,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
         marginBottom: 16,
     },
     disclosureRow: {
@@ -966,7 +1022,6 @@ const styles = StyleSheet.create({
         color: '#8E8E93',
         fontSize: 12,
         fontWeight: '600',
-        textTransform: 'uppercase',
         letterSpacing: 0,
     },
     disclosureValue: {
@@ -979,22 +1034,80 @@ const styles = StyleSheet.create({
     },
     disclosureDivider: {
         height: StyleSheet.hairlineWidth,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        backgroundColor: '#1A1A1A',
+        marginHorizontal: -16,
+    },
+    iapCredentialCard: {
+        backgroundColor: '#151311',
+        borderRadius: 14,
+        padding: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(217, 119, 87, 0.35)',
+        marginBottom: 16,
+    },
+    iapCredentialHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 12,
+    },
+    iapCredentialIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(217, 119, 87, 0.14)',
+    },
+    iapCredentialTitleWrap: {
+        flex: 1,
+    },
+    iapCredentialTitle: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+        lineHeight: 18,
+    },
+    iapCredentialAccount: {
+        color: '#B8B8BC',
+        fontSize: 12,
+        lineHeight: 17,
+        marginTop: 2,
+    },
+    iapCredentialRows: {
+        gap: 8,
+    },
+    iapCredentialRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+    },
+    iapCredentialLabel: {
+        width: 96,
+        color: '#F2B8A0',
+        fontSize: 12,
+        fontWeight: '700',
+        lineHeight: 17,
+    },
+    iapCredentialText: {
+        flex: 1,
+        color: '#E8E8EA',
+        fontSize: 12,
+        lineHeight: 17,
     },
     guaranteeCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
-        borderRadius: 16,
+        backgroundColor: '#111111',
+        borderRadius: 14,
         paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.06)',
-        marginBottom: 24,
-        alignSelf: 'center',
+        paddingVertical: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1A1A1A',
+        marginBottom: 16,
     },
     guaranteeRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 8,
     },
     guaranteeText: {
         fontSize: 12,
@@ -1002,30 +1115,42 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     purchaseSection: {
+        marginTop: 0,
+        marginBottom: 8,
+    },
+    buttonsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
         marginTop: 8,
         marginBottom: 8,
     },
     purchaseButton: {
         backgroundColor: '#d97757',
-        borderRadius: 16,
-        paddingVertical: 18,
-        paddingHorizontal: 24,
+        borderRadius: 12,
+        paddingVertical: 13,
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: 60,
+        flex: 1,
     },
     purchaseButtonDisabled: {
         opacity: 0.5,
     },
     purchaseButtonText: {
-        fontSize: 17,
+        fontSize: 14,
         fontWeight: '700',
-        color: '#000',
+        color: '#FFFFFF',
         letterSpacing: 0,
     },
     restoreButton: {
+        backgroundColor: '#111111',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#242424',
+        borderRadius: 12,
+        paddingVertical: 13,
         alignItems: 'center',
-        paddingVertical: 14,
+        justifyContent: 'center',
+        flex: 1,
     },
     restoreRow: {
         flexDirection: 'row',
@@ -1033,8 +1158,9 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     restoreText: {
-        fontSize: 13,
-        color: '#8E8E93',
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#A1A1A6',
     },
     setupPaymentText: {
         fontSize: 12,

@@ -64,16 +64,16 @@ const BANNER_BOTTOM_OFFSET = FLOATING_TAB_BAR_BOTTOM + FLOATING_TAB_BAR_HEIGHT -
 const TOP_BAR_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 340);
 
 const BANNER_MAX_WIDTH = Math.round(TOP_BAR_WIDTH * 0.8);
-const BANNER_HORIZONTAL_PADDING = 8;   // Reduced horizontal padding (tighter)
+const BANNER_HORIZONTAL_PADDING = 14;   // Increased padding to keep content away from the borders
 const TEXT_ONLY_WIDTH_BUFFER = BANNER_HORIZONTAL_PADDING * 2 + 2;
 const ESTIMATED_TEXT_CHAR_WIDTH = 7.4;
 
 // Discrete morph targets — each "shape" the banner can take
 const SHAPE = {
-    compactActions: { width: 138, height: 46, radius: 24 }, // Sim/Não centralizado
-    textOnly: { width: 0, height: 46, radius: 22 }, // mensagem curta  (reduced height)
-    textLong: { width: BANNER_MAX_WIDTH, height: 56, radius: 26 }, // 2 linhas
-    withActions: { width: BANNER_MAX_WIDTH, height: 46, radius: 22 }, // texto + ações (tighter)
+    compactActions: { width: 158, height: 42, radius: 21 }, // Sim/Não centralizado
+    textOnly: { width: 0, height: 42, radius: 21 }, // mensagem curta  (reduced height)
+    textLong: { width: BANNER_MAX_WIDTH, height: 52, radius: 24 }, // 2 linhas
+    withActions: { width: BANNER_MAX_WIDTH, height: 42, radius: 21 }, // texto + ações (tighter)
 } as const;
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -95,36 +95,36 @@ const SPRING_ENTRY = {
 } as const;
 
 const SPRING_MORPH = {
-    damping: 15,
-    stiffness: 185,
-    mass: 1.08,
+    damping: 24,
+    stiffness: 170,
+    mass: 1.0,
     overshootClamping: false,
     restDisplacementThreshold: 0.001,
     restSpeedThreshold: 0.001,
 } as const;
 
 const SPRING_STRETCH = {
-    damping: 12,
-    stiffness: 165,
-    mass: 1.1,
+    damping: 20,
+    stiffness: 150,
+    mass: 1.0,
     overshootClamping: false,
     restDisplacementThreshold: 0.001,
     restSpeedThreshold: 0.001,
 } as const;
 
 const SPRING_RECOIL = {
-    damping: 16,
-    stiffness: 150,
-    mass: 1.05,
+    damping: 22,
+    stiffness: 140,
+    mass: 1.0,
     overshootClamping: false,
     restDisplacementThreshold: 0.001,
     restSpeedThreshold: 0.001,
 } as const;
 
 const SPRING_SETTLE = {
-    damping: 22,
-    stiffness: 160,
-    mass: 1,
+    damping: 26,
+    stiffness: 150,
+    mass: 1.0,
     overshootClamping: false,
     restDisplacementThreshold: 0.001,
     restSpeedThreshold: 0.001,
@@ -318,8 +318,8 @@ export function AnimatedInlineBanner({
 
             // Subtle morph pulse — squashes laterally then settles
             squash.value = withSequence(
-                withSpring(1.045, SPRING_STRETCH),
-                withSpring(0.982, SPRING_RECOIL),
+                withSpring(1.015, SPRING_STRETCH),
+                withSpring(0.995, SPRING_RECOIL),
                 withSpring(1, SPRING_SETTLE)
             );
         }
@@ -354,8 +354,8 @@ export function AnimatedInlineBanner({
 
             if (!reduced) {
                 squash.value = withSequence(
-                    withSpring(1.085, SPRING_STRETCH),
-                    withSpring(0.976, SPRING_RECOIL),
+                    withSpring(1.025, SPRING_STRETCH),
+                    withSpring(0.99, SPRING_RECOIL),
                     withSpring(1, SPRING_SETTLE)
                 );
             } else {
@@ -538,7 +538,7 @@ export function AnimatedInlineBanner({
             <Animated.View style={[styles.banner, bannerStyle]}>
                 {/* Layer 1 — base blur */}
                 <Animated.View pointerEvents="none" style={[styles.baseBlurLayer, baseBlurStyle]}>
-                    <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
+                    <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
                 </Animated.View>
 
                 {/* Layer 2 — base tint gradient */}
@@ -552,7 +552,7 @@ export function AnimatedInlineBanner({
                         locations={[0, 0.45, 1]}
                         start={{ x: 0.5, y: 0 }}
                         end={{ x: 0.5, y: 1 }}
-                        style={StyleSheet.absoluteFillObject}
+                        style={StyleSheet.absoluteFill}
                     />
                 </View>
 
@@ -561,7 +561,7 @@ export function AnimatedInlineBanner({
                     <BlurView
                         intensity={34}
                         tint="dark"
-                        style={[StyleSheet.absoluteFillObject, styles.rightBlurView]}
+                        style={[StyleSheet.absoluteFill, styles.rightBlurView]}
                     />
                     <LinearGradient
                         colors={[
@@ -574,7 +574,7 @@ export function AnimatedInlineBanner({
                         locations={[0, 0.24, 0.55, 0.8, 1]}
                         start={{ x: 0, y: 0.5 }}
                         end={{ x: 1, y: 0.5 }}
-                        style={StyleSheet.absoluteFillObject}
+                        style={StyleSheet.absoluteFill}
                     />
                 </Animated.View>
 
@@ -589,7 +589,7 @@ export function AnimatedInlineBanner({
                         locations={[0, 0.42, 1]}
                         start={{ x: 0.5, y: 0 }}
                         end={{ x: 0.5, y: 1 }}
-                        style={StyleSheet.absoluteFillObject}
+                        style={StyleSheet.absoluteFill}
                     />
                 </View>
 
@@ -611,7 +611,7 @@ export function AnimatedInlineBanner({
                         >
                             <Text
                                 style={[styles.text, { color: colors.text }]}
-                                numberOfLines={2}
+                                numberOfLines={hasActions ? 1 : 2}
                                 onTextLayout={handleTextLayout}
                             >
                                 {label}
@@ -701,13 +701,13 @@ const styles = StyleSheet.create({
     },
 
     baseBlurLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
         overflow: 'hidden',
     },
 
     baseTint: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 1,
         opacity: 0.9,
     },
@@ -730,15 +730,15 @@ const styles = StyleSheet.create({
     },
 
     edgeLight: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 4,
         opacity: 0.78,
     },
 
     content: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         paddingHorizontal: BANNER_HORIZONTAL_PADDING,
-        paddingVertical: 6,   // Reduced from 9 - less padding as requested
+        paddingVertical: 4,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-start',
@@ -754,8 +754,8 @@ const styles = StyleSheet.create({
     centeredActionsContent: {
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 8,
-        paddingVertical: 4,   // Slight padding for better balance when centered
+        paddingHorizontal: 12,
+        paddingVertical: 4,
     },
 
     textBlock: {
@@ -768,53 +768,52 @@ const styles = StyleSheet.create({
     },
 
     text: {
-        fontSize: 13,
-        fontWeight: '700',
-        letterSpacing: 0,
+        fontSize: 12,
+        fontWeight: '600',
+        letterSpacing: -0.15,
         flexShrink: 1,
     },
 
     actionsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: 6,
         flexShrink: 0,
     },
 
     centeredActionsRow: {
         alignSelf: 'center',
         justifyContent: 'center',
+        gap: 8,
     },
 
     cancelButton: {
         paddingHorizontal: 8,
-        height: 34,
-        borderRadius: 999,
+        height: 26,
+        borderRadius: 8,
         justifyContent: 'center',
         alignItems: 'center',
     },
 
     cancelButtonText: {
         color: '#A0A0A0',
-        fontSize: 12,
+        fontSize: 10.5,
         fontWeight: '600',
     },
 
     confirmButton: {
         paddingHorizontal: 10,
-        height: 34,
-        minWidth: 64,
-        borderRadius: 999,
+        height: 26,
+        minWidth: 54,
+        borderRadius: 8,
         backgroundColor: '#D97757',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
         justifyContent: 'center',
         alignItems: 'center',
     },
 
     confirmButtonText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: 10.5,
         fontWeight: '700',
     },
 

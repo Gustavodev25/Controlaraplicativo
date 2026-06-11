@@ -3,6 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const pluggyRoutes = require('./api/pluggy');
 const { isFirebaseConfigured, getFirebaseInitStatus } = require('./lib/firebaseAdmin');
+const {
+    buildAppleIapDiagnostics,
+    renderAppleIapDiagnosticsHtml,
+} = require('./lib/appleIapDiagnostics');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +54,10 @@ app.get('/health', (req, res) => {
 app.get('/api/diagnostics', (req, res) => {
     const firebaseStatus = getFirebaseInitStatus();
     const pluggyAuthConfigured = !!process.env.PLUGGY_CLIENT_ID && !!process.env.PLUGGY_CLIENT_SECRET;
+    const appleIapDiagnostics = buildAppleIapDiagnostics({
+        targetEnvironment: req.query.appleTarget || req.query.target || 'sandbox',
+        firebaseStatus,
+    });
 
     res.json({
         status: 'running',
@@ -63,9 +71,39 @@ app.get('/api/diagnostics', (req, res) => {
             googlePlayConfigured: !!process.env.GOOGLE_PLAY_SERVICE_ACCOUNT,
             firebaseConfigured: isFirebaseConfigured(),
             firebaseInitError: firebaseStatus.error,
+            appleIap: {
+                status: appleIapDiagnostics.status,
+                readyForIosTest: appleIapDiagnostics.readyForIosTest,
+                canAttemptIosTest: appleIapDiagnostics.canAttemptIosTest,
+                targetEnvironment: appleIapDiagnostics.targetEnvironment,
+                fail: appleIapDiagnostics.summary.fail,
+                warn: appleIapDiagnostics.summary.warn,
+                endpoint: '/api/diagnostics/apple-iap?target=sandbox',
+                panel: '/api/diagnostics/apple-iap/panel?target=sandbox',
+            },
             oauthCallbackEnabled: true,
         }
     });
+});
+
+app.get('/api/diagnostics/apple-iap', (req, res) => {
+    const diagnostics = buildAppleIapDiagnostics({
+        targetEnvironment: req.query.target || req.query.environment || 'sandbox',
+    });
+
+    if (String(req.query.format || '').toLowerCase() === 'html') {
+        res.type('html').send(renderAppleIapDiagnosticsHtml(diagnostics));
+        return;
+    }
+
+    res.json(diagnostics);
+});
+
+app.get('/api/diagnostics/apple-iap/panel', (req, res) => {
+    const diagnostics = buildAppleIapDiagnostics({
+        targetEnvironment: req.query.target || req.query.environment || 'sandbox',
+    });
+    res.type('html').send(renderAppleIapDiagnosticsHtml(diagnostics));
 });
 
 app.use('/api/pluggy', pluggyRoutes);

@@ -4,7 +4,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useBiometricAuth } from '@/hooks/use-biometric-auth';
 
 import { useRouter } from 'expo-router';
-import LottieView from 'lottie-react-native';
+import { CircleCheck } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, LogBox, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -63,32 +63,27 @@ export default function Index() {
 
     const fadeAnim = useRef(new Animated.Value(0)).current; // 0 = loading, 1 = success
 
-    // ActivityIndicator large (~36px) com scale 1.5 = ~54px visual
-    // Lottie canvas é 240x240 mas o check ocupa ~71%, então 80px * 0.71 = ~57px visual
-    const LOADER_SIZE = 54; // tamanho visual do loader
-    const LOTTIE_VIEW_SIZE = 80; // tamanho do componente Lottie (compensa padding interno)
+    const SUCCESS_ICON_SIZE = 80;
 
     // Loader: some com escala reduzindo + rotação
     const loaderOpacity = fadeAnim.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: 'clamp' });
     const loaderScale = fadeAnim.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0.3], extrapolate: 'clamp' });
     const loaderRotate = fadeAnim.interpolate({ inputRange: [0, 0.6], outputRange: ['0deg', '90deg'], extrapolate: 'clamp' });
 
-    // Lottie: aparece com escala crescendo (começa um pouco depois do loader começar a sumir)
+    // Ícone de sucesso: aparece com escala crescendo.
     const successOpacity = fadeAnim.interpolate({ inputRange: [0.3, 0.8], outputRange: [0, 1], extrapolate: 'clamp' });
     const successScale = fadeAnim.interpolate({ inputRange: [0.3, 0.8], outputRange: [0.5, 1], extrapolate: 'clamp' });
 
-    const lottieRef = useRef<LottieView>(null);
     const readyToFinish = useRef(false);
 
-    // Duração real do Lottie: 60 frames a 60fps = 1000ms
-    const LOTTIE_DURATION_MS = 1200; // margem extra para garantir
+    const SUCCESS_HOLD_MS = 700;
     const CROSSFADE_DURATION_MS = 400;
 
     useEffect(() => {
         if (isBiometricAuth) {
             readyToFinish.current = false;
 
-            // 1. Inicia cross-fade (loader → lottie) com easing suave
+            // Inicia o cross-fade do loader para o ícone de sucesso.
             Animated.timing(fadeAnim, {
                 toValue: 1,
                 duration: CROSSFADE_DURATION_MS,
@@ -96,24 +91,11 @@ export default function Index() {
                 useNativeDriver: true,
             }).start();
 
-            // 2. Inicia o Lottie imediatamente (ele aparece conforme o fade avança)
-            const playTimer = setTimeout(() => {
-                try {
-                    lottieRef.current?.reset();
-                    lottieRef.current?.play();
-                } catch (e) {
-                    console.error("Lottie play error:", e);
-                    setIsAnimComplete(true);
-                }
-            }, 50);
-
-            // 3. Timer manual: espera o cross-fade + a animação completa do Lottie
             const finishTimer = setTimeout(() => {
                 readyToFinish.current = true;
                 setIsAnimComplete(true);
-            }, CROSSFADE_DURATION_MS + LOTTIE_DURATION_MS + 300); // +300ms para o "respiro" visual
+            }, CROSSFADE_DURATION_MS + SUCCESS_HOLD_MS);
 
-            // 4. Safety fallback
             const safetyTimeout = setTimeout(() => {
                 if (!readyToFinish.current) {
                     setIsAnimComplete(true);
@@ -121,7 +103,6 @@ export default function Index() {
             }, 6000);
 
             return () => {
-                clearTimeout(playTimer);
                 clearTimeout(finishTimer);
                 clearTimeout(safetyTimeout);
             };
@@ -153,7 +134,7 @@ export default function Index() {
                             <ThemedText type="title" style={styles.titleSplash}>Controlar</ThemedText>
                             <ThemedText style={styles.subtitleSplash}>Gerencie suas finanças com simplicidade e elegância.</ThemedText>
                         </View>
-                        <View style={[styles.iconContainer, { width: LOTTIE_VIEW_SIZE, height: LOTTIE_VIEW_SIZE }]}>
+                        <View style={[styles.iconContainer, { width: SUCCESS_ICON_SIZE, height: SUCCESS_ICON_SIZE }]}>
                             {/* Loader - some com rotação e escala */}
                             <Animated.View style={{
                                 position: 'absolute',
@@ -166,20 +147,13 @@ export default function Index() {
                                 <ActivityIndicator size="large" color="#F5F5F7" style={{ transform: [{ scale: 1.5 }] }} />
                             </Animated.View>
 
-                            {/* Success Lottie - mesmo tamanho, aparece com escala */}
+                            {/* Ícone de sucesso - mesmo tamanho, aparece com escala */}
                             <Animated.View style={{
                                 position: 'absolute',
                                 opacity: successOpacity,
                                 transform: [{ scale: successScale }],
                             }}>
-                                <LottieView
-                                    ref={lottieRef}
-                                    source={require('@/assets/certo.json')}
-                                    autoPlay={false}
-                                    loop={false}
-                                    style={{ width: LOTTIE_VIEW_SIZE, height: LOTTIE_VIEW_SIZE }}
-                                    resizeMode="contain"
-                                />
+                                <CircleCheck size={58} color="#04D361" strokeWidth={2.2} />
                             </Animated.View>
                         </View>
 

@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
-import { Modal, Platform, SafeAreaView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ModalPadrao } from '@/components/ui/ModalPadrao';
 
 interface ConnectAccountModalProps {
     visible: boolean;
@@ -26,155 +27,113 @@ export function ConnectAccountModal({
     title,
     subtitle,
     children,
-    connectionStep,
-    banksCount = 0,
-    isBanksLoading = false,
-    credentialsCount = 0,
     onBack,
-    rightElement,
     searchElement,
     warningText,
     overlayElement,
     onDismiss,
 }: ConnectAccountModalProps) {
-    const [isModalMounted, setIsModalMounted] = useState(false);
-    const { width, height } = useWindowDimensions();
-    const isNarrowPhone = width < 360;
-    const isShortPhone = height < 700;
-
-    useEffect(() => {
-        if (visible) {
-            setIsModalMounted(true);
-        } else {
-            setIsModalMounted(false);
-        }
-    }, [visible]);
-
     const handleClose = () => {
-        setIsModalMounted(false);
         onClose();
     };
 
+    const CustomTitle = (
+        <View style={styles.titleRow}>
+            {onBack && (
+                <TouchableOpacity onPress={onBack} hitSlop={10} style={styles.backButton}>
+                    <ArrowLeft size={22} color="#FFFFFF" />
+                </TouchableOpacity>
+            )}
+            <Text style={styles.titleText}>
+                {title}
+            </Text>
+        </View>
+    );
+
     return (
-        <Modal
-            visible={isModalMounted}
-            transparent={false}
-            animationType="slide"
-            statusBarTranslucent
-            onRequestClose={handleClose}
-            onDismiss={onDismiss}
+        <ModalPadrao
+            visible={visible}
+            onClose={handleClose}
+            title={CustomTitle}
+            presentation="bottom"
+            scrollable={false}
+            enableDragToClose={true}
+            showHandle={true}
+            maxHeightRatio={0.92}
+            onAfterClose={onDismiss}
+            bodyStyle={styles.modalBody}
         >
-            <SafeAreaView style={styles.safeArea}>
-                <View
-                    style={[
-                        styles.container,
-                        isShortPhone && styles.containerShort
-                    ]}
-                >
-                    <View
-                        style={[
-                            styles.header,
-                            isNarrowPhone && styles.headerNarrow,
-                            isShortPhone && styles.headerShort
-                        ]}
-                    >
-                        <TouchableOpacity onPress={handleClose} hitSlop={10} style={styles.backButton}>
-                            <ArrowLeft size={22} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        <View style={styles.titleContainer}>
-                            <Text
-                                style={[styles.title, isNarrowPhone && styles.titleNarrow]}
-                                numberOfLines={1}
-                                adjustsFontSizeToFit
-                                minimumFontScale={0.84}
-                            >
-                                {title}
-                            </Text>
-                            {subtitle && (
-                                <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text>
-                            )}
-                            {warningText && (
-                                <Text style={styles.warningText} numberOfLines={2}>{warningText}</Text>
-                            )}
-                        </View>
-                        {searchElement && (
-                            <View style={[styles.searchWrapper, isShortPhone && styles.searchWrapperShort]}>
-                                {searchElement}
-                            </View>
-                        )}
+            <View style={styles.container}>
+                {subtitle && (
+                    <Text style={styles.subtitle} numberOfLines={2}>
+                        {subtitle}
+                    </Text>
+                )}
+                {warningText && (
+                    <Text style={styles.warningText} numberOfLines={2}>
+                        {warningText}
+                    </Text>
+                )}
+                {searchElement && (
+                    <View style={styles.searchWrapper}>
+                        {searchElement}
                     </View>
-                    <View style={styles.content}>
-                        {children}
-                    </View>
+                )}
+                <View style={styles.content}>
+                    {children}
                 </View>
-                {overlayElement}
-            </SafeAreaView>
-        </Modal>
+            </View>
+            {overlayElement}
+        </ModalPadrao>
     );
 }
 
 const styles = StyleSheet.create({
-    safeArea: {
-        flex: 1,
-        backgroundColor: '#0A0A0A',
+    modalBody: {
+        paddingHorizontal: 0,
+        paddingBottom: 0,
     },
     container: {
         flex: 1,
-        backgroundColor: '#0A0A0A',
-        paddingTop: Platform.OS === 'android' ? 40 : 0,
+        paddingTop: 8,
     },
-    containerShort: {
-        paddingTop: Platform.OS === 'android' ? 28 : 0,
-    },
-    header: {
-        paddingHorizontal: 20,
-        paddingTop: 16,
-        paddingBottom: 12,
-        backgroundColor: '#0A0A0A',
-    },
-    headerNarrow: {
-        paddingHorizontal: 12,
-    },
-    headerShort: {
-        paddingTop: 10,
-        paddingBottom: 8,
-    },
-    searchWrapper: {
-        marginTop: 12,
-        width: '100%',
-        alignSelf: 'stretch',
-    },
-    searchWrapperShort: {
-        marginTop: 8,
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
     },
     backButton: {
-        alignSelf: 'flex-start',
         padding: 4,
-        marginBottom: 12,
+        marginRight: 2,
     },
-    titleContainer: {
-        flexDirection: 'column',
-    },
-    title: {
-        fontSize: 24,
+    titleText: {
+        fontSize: 22,
         color: '#FFFFFF',
         fontFamily: 'AROneSans_400Regular',
-    },
-    titleNarrow: {
-        fontSize: 21,
     },
     subtitle: {
         fontSize: 15,
         color: '#909090',
         marginTop: 2,
         fontFamily: 'AROneSans_400Regular',
+        paddingHorizontal: 20,
+        marginBottom: 8,
     },
     warningText: {
         fontSize: 11,
         color: '#FF9F0A',
         marginTop: 4,
+        paddingHorizontal: 20,
+        marginBottom: 8,
+    },
+    searchWrapper: {
+        marginTop: 4,
+        width: '100%',
+        alignSelf: 'stretch',
+        paddingHorizontal: 20,
+        marginBottom: 8,
     },
     content: {
         flex: 1,
-    }
+    },
 });

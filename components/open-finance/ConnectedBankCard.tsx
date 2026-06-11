@@ -1,3 +1,4 @@
+import { BankActionsSheet } from '@/components/open-finance/BankActionsSheet';
 import { BankConnectorLogo } from '@/components/open-finance/BankConnectorLogo';
 import { databaseService } from '@/services/firebase';
 import { notificationService } from '@/services/notifications';
@@ -5,16 +6,14 @@ import { openFinanceSyncBus } from '@/services/openFinanceSyncBus';
 import { BlurView } from 'expo-blur';
 import {
     CheckCircle,
+    ChevronRight,
     Lock,
-    MoreVertical,
     RefreshCw,
     XCircle
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Alert,
-    Animated as NativeAnimated,
-    Easing,
     LayoutAnimation,
     Platform,
     StyleSheet,
@@ -153,170 +152,6 @@ const formatRelativeSyncTime = (date: Date | null) => {
     return `em ${date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
 };
 
-interface BankCardDropdownProps {
-    visible: boolean;
-    syncDisabled: boolean;
-    onSync: () => void;
-    onDisconnect: () => void;
-}
-
-function BankCardDropdown({
-    visible,
-    syncDisabled,
-    onSync,
-    onDisconnect
-}: BankCardDropdownProps) {
-    const sheetOpacity = useRef(new NativeAnimated.Value(0)).current;
-    const sheetScaleX = useRef(new NativeAnimated.Value(0.955)).current;
-    const sheetScaleY = useRef(new NativeAnimated.Value(0.935)).current;
-    const sheetY = useRef(new NativeAnimated.Value(-10)).current;
-    const contentOpacity = useRef(new NativeAnimated.Value(0)).current;
-
-    useEffect(() => {
-        if (visible) {
-            sheetOpacity.setValue(0);
-            sheetScaleX.setValue(0.955);
-            sheetScaleY.setValue(0.935);
-            sheetY.setValue(-10);
-            contentOpacity.setValue(0);
-
-            NativeAnimated.parallel([
-                NativeAnimated.timing(sheetOpacity, {
-                    toValue: 1,
-                    duration: 170,
-                    easing: Easing.out(Easing.quad),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.spring(sheetY, {
-                    toValue: 0,
-                    damping: 18,
-                    stiffness: 235,
-                    mass: 0.78,
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.sequence([
-                    NativeAnimated.timing(sheetScaleX, {
-                        toValue: 1.018,
-                        duration: 165,
-                        easing: Easing.out(Easing.cubic),
-                        useNativeDriver: false,
-                    }),
-                    NativeAnimated.spring(sheetScaleX, {
-                        toValue: 1,
-                        damping: 13,
-                        stiffness: 190,
-                        mass: 0.62,
-                        useNativeDriver: false,
-                    }),
-                ]),
-                NativeAnimated.sequence([
-                    NativeAnimated.timing(sheetScaleY, {
-                        toValue: 1.012,
-                        duration: 185,
-                        easing: Easing.out(Easing.cubic),
-                        useNativeDriver: false,
-                    }),
-                    NativeAnimated.spring(sheetScaleY, {
-                        toValue: 1,
-                        damping: 13,
-                        stiffness: 185,
-                        mass: 0.62,
-                        useNativeDriver: false,
-                    }),
-                ]),
-                NativeAnimated.timing(contentOpacity, {
-                    toValue: 1,
-                    duration: 260,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: false,
-                }),
-            ]).start();
-        } else {
-            NativeAnimated.parallel([
-                NativeAnimated.timing(sheetOpacity, {
-                    toValue: 0,
-                    duration: 130,
-                    easing: Easing.out(Easing.quad),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(contentOpacity, {
-                    toValue: 0,
-                    duration: 110,
-                    easing: Easing.out(Easing.quad),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(sheetScaleX, {
-                    toValue: 0.955,
-                    duration: 170,
-                    easing: Easing.bezier(0.22, 1, 0.36, 1),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(sheetScaleY, {
-                    toValue: 0.935,
-                    duration: 180,
-                    easing: Easing.bezier(0.22, 1, 0.36, 1),
-                    useNativeDriver: false,
-                }),
-                NativeAnimated.timing(sheetY, {
-                    toValue: -10,
-                    duration: 180,
-                    easing: Easing.bezier(0.22, 1, 0.36, 1),
-                    useNativeDriver: false,
-                }),
-            ]).start();
-        }
-    }, [visible, sheetOpacity, sheetScaleX, sheetScaleY, sheetY, contentOpacity]);
-
-    return (
-        <NativeAnimated.View
-            pointerEvents={visible ? 'auto' : 'none'}
-            style={[
-                styles.actionDropdownContainer,
-                {
-                    opacity: sheetOpacity,
-                    transform: [
-                        { translateY: sheetY },
-                        { scaleX: sheetScaleX },
-                        { scaleY: sheetScaleY },
-                    ],
-                },
-            ]}
-        >
-            <View style={styles.actionDropdownShell}>
-                <BlurView
-                    intensity={16}
-                    tint="dark"
-                    experimentalBlurMethod="dimezisBlurView"
-                    style={styles.actionDropdownBlur}
-                >
-                    <View style={styles.actionDropdownOverlay} />
-                    <NativeAnimated.View style={[styles.actionDropdownContent, { opacity: contentOpacity }]}>
-                        <TouchableOpacity
-                            style={[styles.actionDropdownItem, syncDisabled && styles.actionDropdownItemDisabled]}
-                            onPress={onSync}
-                            disabled={syncDisabled}
-                            activeOpacity={0.78}
-                        >
-                            <Text style={[styles.actionDropdownText, syncDisabled && styles.actionDropdownTextDisabled]}>
-                                Sincronizar
-                            </Text>
-                        </TouchableOpacity>
-
-                        <View style={styles.actionDropdownDivider} />
-
-                        <TouchableOpacity
-                            style={styles.actionDropdownItem}
-                            onPress={onDisconnect}
-                            activeOpacity={0.78}
-                        >
-                            <Text style={styles.actionDropdownTextDestructive}>Desconectar</Text>
-                        </TouchableOpacity>
-                    </NativeAnimated.View>
-                </BlurView>
-            </View>
-        </NativeAnimated.View>
-    );
-}
 
 
 export const ConnectedBankCard = ({
@@ -597,13 +432,18 @@ export const ConnectedBankCard = ({
                     intensity={12}
                     tint="dark"
                     experimentalBlurMethod="dimezisBlurView"
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                 />
                 <View style={styles.connectedBankBackdropTint} />
             </View>
 
             <View style={styles.connectedBankContent}>
-            <View style={[styles.connectedBankHeader, isNarrowPhone && styles.connectedBankHeaderNarrow]}>
+            <TouchableOpacity
+                style={[styles.connectedBankHeader, isNarrowPhone && styles.connectedBankHeaderNarrow]}
+                onPress={() => setMenuVisible(true)}
+                activeOpacity={0.7}
+                disabled={isSyncing}
+            >
                 <View style={[styles.bankHeaderLeft, isNarrowPhone && styles.bankHeaderLeftNarrow]}>
                     <BankConnectorLogo
                         connector={group.connector}
@@ -624,23 +464,17 @@ export const ConnectedBankCard = ({
                     </View>
                 </View>
 
-                <TouchableOpacity
-                    onPress={() => setMenuVisible((visible) => !visible)}
-                    style={[styles.menuButton, isSyncing && styles.headerActionDisabled]}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    disabled={isSyncing}
-                    activeOpacity={0.7}
-                >
-                    <MoreVertical size={21} color="#A7ADB6" strokeWidth={2.8} />
-                </TouchableOpacity>
+                <ChevronRight size={20} color="#68686D" strokeWidth={2} />
 
-                <BankCardDropdown
+                <BankActionsSheet
                     visible={menuVisible}
+                    bankName={bankName}
                     syncDisabled={isSyncDisabled || isSyncing}
+                    onVisibleChange={setMenuVisible}
                     onSync={handleMenuSync}
                     onDisconnect={handleDisconnect}
                 />
-            </View>
+            </TouchableOpacity>
 
             <View style={[styles.balanceSection, isNarrowPhone && styles.balanceSectionNarrow]}>
                 <Text style={styles.balanceLabel}>Saldo em conta</Text>
@@ -761,11 +595,11 @@ const styles = StyleSheet.create({
         elevation: 8,
     },
     connectedBankBackdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     connectedBankBackdropTint: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(16, 16, 16, 0.92)',
     },
     connectedBankContent: {
@@ -830,64 +664,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginRight: 3,
     },
-    actionDropdownContainer: {
-        position: 'absolute',
-        top: 55,
-        right: 6,
-        width: 168,
-        zIndex: 1000,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.45,
-        shadowRadius: 18,
-        elevation: 12,
-    },
-    actionDropdownShell: {
-        width: '100%',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.07)',
-        overflow: 'hidden',
-        borderRadius: 20,
-        backgroundColor: 'rgba(17, 17, 17, 0.94)',
-        zIndex: 1,
-    },
-    actionDropdownBlur: {
-        width: '100%',
-    },
-    actionDropdownOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(17, 17, 17, 0.94)',
-    },
-    actionDropdownContent: {
-        paddingVertical: 4,
-    },
-    actionDropdownItem: {
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    actionDropdownItemDisabled: {
-        opacity: 0.45,
-    },
-    actionDropdownText: {
-        color: '#E0E0E0',
-        fontSize: 14,
-        fontFamily: 'AROneSans_400Regular',
-    },
-    actionDropdownTextDisabled: {
-        color: '#8C8F96',
-    },
-    actionDropdownTextDestructive: {
-        color: '#FF6B6B',
-        fontSize: 14,
-        fontFamily: 'AROneSans_400Regular',
-    },
-    actionDropdownDivider: {
-        height: 1,
-        width: '100%',
-        backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    },
+
     balanceSection: {
         paddingHorizontal: 20,
         paddingTop: 18,

@@ -1,7 +1,7 @@
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { APP_LEGAL } from '@/constants/legal';
 import { Stack, useRouter } from 'expo-router';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import React from 'react';
 import {
     Linking,
@@ -68,7 +68,7 @@ export default function PrivacyPolicyScreen() {
                         style={styles.backButton}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                        <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
+                        <ChevronLeft size={24} color="#E0E0E0" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>{APP_LEGAL.privacyTitle}</Text>
                     <View style={styles.backButton} />
@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
         right: 0,
     },
     contentLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 2,
     },
     header: {

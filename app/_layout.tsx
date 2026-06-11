@@ -1,10 +1,9 @@
-import { DarkTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import { SubscriptionBlocker } from '@/components/SubscriptionBlocker';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider, useAuthContext } from '@/contexts/AuthContext';
 import { CategoryProvider } from '@/contexts/CategoryContext';
 import { NetworkProvider } from '@/contexts/NetworkContext';
 import { OpenFinanceSyncProvider } from '@/contexts/OpenFinanceSyncContext';
@@ -22,7 +21,11 @@ import {
   useFonts,
 } from '@expo-google-fonts/ar-one-sans';
 import { useEffect } from 'react';
+import { InteractionManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { enableFreeze } from 'react-native-screens';
+
+enableFreeze(true);
 
 const APP_NAV_THEME = {
   ...DarkTheme,
@@ -36,6 +39,46 @@ const APP_NAV_THEME = {
   },
 };
 
+function DeferredOfflineSync({ enabled }: { enabled: boolean }) {
+  useEffect(() => {
+    if (!enabled) {
+      offlineSync.stop();
+      return;
+    }
+
+    let cancelled = false;
+    let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    const timer = setTimeout(() => {
+      task = InteractionManager.runAfterInteractions(() => {
+        if (!cancelled) {
+          offlineSync.start();
+        }
+      });
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      task?.cancel?.();
+      offlineSync.stop();
+    };
+  }, [enabled]);
+
+  return null;
+}
+
+function RuntimeServices({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuthContext();
+  const runtimeReady = isAuthenticated && !isLoading;
+
+  return (
+    <NetworkProvider enabled={runtimeReady}>
+      <DeferredOfflineSync enabled={runtimeReady} />
+      {children}
+    </NetworkProvider>
+  );
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     AROneSans_400Regular,
@@ -43,12 +86,6 @@ export default function RootLayout() {
     AROneSans_600SemiBold,
     AROneSans_700Bold,
   });
-
-  // Start offline sync service
-  useEffect(() => {
-    offlineSync.start();
-    return () => offlineSync.stop();
-  }, []);
 
   if (!fontsLoaded) {
     return null;
@@ -58,8 +95,8 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ToastProvider>
         <PerformanceProvider>
-          <NetworkProvider>
-            <AuthProvider>
+          <AuthProvider>
+            <RuntimeServices>
               <SubscriptionBlocker>
                 <CategoryProvider>
                   <OpenFinanceSyncProvider>
@@ -83,13 +120,13 @@ export default function RootLayout() {
                         />
                         <Stack.Screen name="open-finance/callback" options={{ headerShown: false }} />
                       </Stack>
-                      <StatusBar style="light" translucent backgroundColor="transparent" />
+                      <StatusBar style="light" />
                     </ThemeProvider>
                   </OpenFinanceSyncProvider>
                 </CategoryProvider>
               </SubscriptionBlocker>
-            </AuthProvider>
-          </NetworkProvider>
+            </RuntimeServices>
+          </AuthProvider>
         </PerformanceProvider>
       </ToastProvider>
     </GestureHandlerRootView>
@@ -98,4 +135,3 @@ export default function RootLayout() {
 
 
 // Force rebuild 7
-

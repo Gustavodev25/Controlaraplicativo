@@ -7,13 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "controlarapp",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splashscreen_logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#000000"
-    },
     "ios": {
-      "newArchEnabled": true,
       "supportsTablet": true,
       "infoPlist": {
         "CFBundleDisplayName": "Controlar+",
@@ -27,14 +21,12 @@
       "buildNumber": "7"
     },
     "android": {
-      "newArchEnabled": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.USE_BIOMETRIC",
@@ -68,7 +60,11 @@
       ],
       "expo-secure-store",
       "expo-notifications",
-      "react-native-iap"
+      "react-native-iap",
+      "expo-font",
+      "expo-image",
+      "expo-web-browser",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,

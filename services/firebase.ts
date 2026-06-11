@@ -43,6 +43,12 @@ import { isNonInstallmentMerchant } from './installmentRules';
 import { normalizePluggyDate } from './invoiceBuilder';
 import { offlineStorage } from './offlineStorage';
 import { offlineSync } from './offlineSync';
+import {
+    deleteRecurrenceRecord,
+    resolveRecurrenceSourceCollection,
+    type RecurrenceSourceCollection,
+    type RecurrenceType
+} from './recurrenceDeletion';
 declare const __DEV__: boolean;
 
 type FirebaseAuthModuleWithRnPersistence = {
@@ -90,6 +96,23 @@ const deleteDocRefsInChunks = async (docRefs: any[], chunkSize: number = 200): P
     }
 
     return deleted;
+};
+
+const removeRecurrenceFromCache = async (
+    userId: string,
+    recurrenceId: string,
+    sourceCollection?: RecurrenceSourceCollection
+): Promise<void> => {
+    const cached = await offlineStorage.getRecurrences(userId);
+    if (!cached) return;
+
+    const filtered = cached.filter((item: any) => {
+        if (item?.id !== recurrenceId) return true;
+        if (!sourceCollection || !item?.sourceCollection) return false;
+        return item.sourceCollection !== sourceCollection;
+    });
+
+    await offlineStorage.saveRecurrences(userId, filtered);
 };
 
 const FIRESTORE_WRITE_BATCH_LIMIT = 450;
@@ -3173,47 +3196,64 @@ export const databaseService = {
     deleteRecurrence: async (
         userId: string,
         recurrenceId: string,
-        type: 'subscription' | 'reminder' = 'subscription',
-        sourceCollection?: 'recurrences' | 'subscriptions' | 'reminders'
+        type: RecurrenceType = 'subscription',
+        sourceCollection?: RecurrenceSourceCollection
     ) => {
+        const resolvedCollection = resolveRecurrenceSourceCollection(type, sourceCollection);
+
+        const queueOfflineDelete = async () => {
+            await offlineSync.queueOperation(
+                'delete',
+                resolvedCollection,
+                userId,
+                undefined,
+                recurrenceId,
+                {
+                    recurrenceType: type,
+                    sourceCollection: resolvedCollection
+                }
+            );
+            await removeRecurrenceFromCache(userId, recurrenceId, resolvedCollection);
+            return { success: true, queued: true };
+        };
+
+        if (!offlineSync.isOnline) {
+            return queueOfflineDelete();
+        }
+
         try {
-            // Check if this is a virtual item (auto-detected, future transaction, or bill)
-            const isVirtual = recurrenceId.startsWith('auto_') || recurrenceId.startsWith('tx_') || recurrenceId.startsWith('bill_');
-
-            if (isVirtual) {
-                // Virtual items don't exist in Firebase, they're generated dynamically
-                // To "delete" them, we need to add them to a blacklist
-                const blacklistRef = collection(db, 'users', userId, 'recurrence_blacklist');
-                const blacklistDocRef = doc(blacklistRef, recurrenceId);
-
-                await setDoc(blacklistDocRef, {
-                    recurrenceId: recurrenceId,
-                    type: type,
-                    deletedAt: Timestamp.now()
-                });
-
-                return { success: true };
-            }
-
-            // For real documents, delete from the source collection when known.
-            const collectionName = sourceCollection || (type === 'subscription' ? 'subscriptions' : 'reminders');
-            const docRef = doc(db, 'users', userId, collectionName, recurrenceId);
-            await deleteDoc(docRef);
-
-            // Tenta deletar também da collection legada quando o item veio das coleções novas.
-            if (collectionName !== 'recurrences') {
-                try {
-                    const legacyDocRef = doc(db, 'users', userId, 'recurrences', recurrenceId);
-                    await deleteDoc(legacyDocRef);
-                } catch (legacyError) {
-                    if (__DEV__) {
-                        console.warn('[Firebase] Ignoring legacy recurrence delete failure:', legacyError);
+            await deleteRecurrenceRecord(
+                recurrenceId,
+                type,
+                resolvedCollection,
+                {
+                    deleteFromCollection: async (collectionName, targetId) => {
+                        const docRef = doc(db, 'users', userId, collectionName, targetId);
+                        await deleteDoc(docRef);
+                    },
+                    addToBlacklist: async (targetId, targetType) => {
+                        const blacklistRef = collection(db, 'users', userId, 'recurrence_blacklist');
+                        const blacklistDocRef = doc(blacklistRef, targetId);
+                        await setDoc(blacklistDocRef, {
+                            recurrenceId: targetId,
+                            type: targetType,
+                            deletedAt: Timestamp.now()
+                        });
+                    },
+                    onLegacyDeleteError: (legacyError) => {
+                        if (__DEV__) {
+                            console.warn('[Firebase] Ignoring legacy recurrence delete failure:', legacyError);
+                        }
                     }
                 }
-            }
+            );
 
+            await removeRecurrenceFromCache(userId, recurrenceId, resolvedCollection);
             return { success: true };
         } catch (error: any) {
+            if (!offlineSync.isOnline) {
+                return queueOfflineDelete();
+            }
             console.error('[Firebase] Error deleting recurrence:', error);
             return { success: false, error: error.message };
         }

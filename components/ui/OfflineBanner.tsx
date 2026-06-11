@@ -1,8 +1,7 @@
 // Offline Banner Component for Controlar+ App
 // Styled as a liquid notification expanding from the bottom navbar
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { useNetwork } from '@/contexts/NetworkContext';
-import { Ionicons } from '@expo/vector-icons';
+import { RefreshCw, TriangleAlert } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, {
@@ -19,16 +18,6 @@ const TAB_BAR_WIDTH = SCREEN_WIDTH * 0.75;
 
 // Física ajustada para transições mais ágeis e elásticas
 const springConfig = { damping: 14, stiffness: 200, mass: 0.6 };
-
-const IntervalLottie = ({ source, size, interval = 5000 }: { source: any; size: number; interval?: number }) => (
-    <DelayedLoopLottie
-        source={source}
-        style={{ width: size, height: size }}
-        delay={interval}
-        initialDelay={100}
-        jitterRatio={0.2}
-    />
-);
 
 type IslandState = 'HIDDEN' | 'SYNCING' | 'OFFLINE';
 
@@ -83,7 +72,7 @@ export function OfflineBanner() {
                     exiting={FadeOut.duration(100)}
                     style={[styles.islandContent, styles.syncingContent]}
                 >
-                    <Ionicons name="sync" size={16} color="#66BB6A" />
+                    <RefreshCw size={16} color="#66BB6A" strokeWidth={2.4} />
                     <Text style={styles.syncingText}>
                         Sincronizando {pendingOps}...
                     </Text>
@@ -98,10 +87,7 @@ export function OfflineBanner() {
                     style={[styles.islandContent, styles.offlineContent]}
                 >
                     <View style={styles.offlineLeft}>
-                        <IntervalLottie
-                            source={require('@/assets/perigo.json')}
-                            size={18}
-                        />
+                        <TriangleAlert size={18} color="#F97316" strokeWidth={2} />
                         <Text style={styles.offlineText} numberOfLines={1}>
                             Sem conexão
                         </Text>

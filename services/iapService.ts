@@ -98,6 +98,13 @@ export interface RestoreResult {
 
 export interface OfferingsResult {
     priceString: string;
+    hasIntroductoryOffer?: boolean;
+    introductoryPriceString?: string;
+    introductoryNumberOfPeriods?: number;
+    introductoryPeriodUnit?: string;
+    introductoryPeriodNumberOfUnits?: number;
+    trialAvailable?: boolean;
+    trialDays?: number;
     error?: string;
 }
 
@@ -384,6 +391,79 @@ export async function initializePurchases(_userId?: string): Promise<void> {
     await connectionPromise;
 }
 
+function extractIntroductoryOfferInfo(product: ProductSubscription): Partial<OfferingsResult> {
+    const rawProduct = product as Record<string, any>;
+
+    // StoreKit 2 / react-native-iap v15 exposes introductory offer data on the product.
+    const introPrice = rawProduct.introductoryPrice ?? rawProduct.introductoryPriceIOS;
+    const introPriceString = String(
+        rawProduct.introductoryPriceStringIOS ??
+        rawProduct.introductoryPriceString ??
+        introPrice ??
+        ''
+    ).trim();
+
+    const paymentMode = String(
+        rawProduct.introductoryPricePaymentModeIOS ??
+        rawProduct.introductoryPricePaymentMode ??
+        rawProduct.introductoryPaymentMode ??
+        ''
+    ).trim().toLowerCase();
+
+    const periodUnit = String(
+        rawProduct.introductoryPriceSubscriptionPeriodIOS ??
+        rawProduct.introductoryPriceSubscriptionPeriod ??
+        rawProduct.introductorySubscriptionPeriod ??
+        ''
+    ).trim().toUpperCase();
+
+    const numberOfPeriods = toFiniteNumber(
+        rawProduct.introductoryPriceNumberOfPeriodsIOS ??
+        rawProduct.introductoryPriceNumberOfPeriods ??
+        rawProduct.introductoryNumberOfPeriods
+    ) ?? 1;
+
+    const numberOfUnits = toFiniteNumber(
+        rawProduct.introductoryPriceSubscriptionPeriodNumberOfUnitsIOS ??
+        rawProduct.introductoryPriceSubscriptionPeriodNumberOfUnits ??
+        rawProduct.introductorySubscriptionPeriodNumberOfUnits
+    ) ?? 1;
+
+    // A free trial is an introductory offer with payment mode "free" or "freetrial"
+    // and the price is 0 or the price string includes "Free" / "Grátis".
+    const isFreeByMode = paymentMode === 'freetrial' || paymentMode === 'free' || paymentMode === '2';
+    const isFreeByPrice =
+        introPriceString === '' ||
+        introPriceString === '0' ||
+        /gr[aá]tis|free|\b0[.,]00\b/i.test(introPriceString);
+    const numericPrice = toFiniteNumber(introPrice);
+    const isFreeByNumeric = numericPrice === 0;
+
+    const hasIntro = Boolean(introPriceString || isFreeByMode || isFreeByNumeric || periodUnit);
+    if (!hasIntro) return {};
+
+    const isFreeTrial = isFreeByMode || isFreeByPrice || isFreeByNumeric;
+
+    // Convert period to approximate days for easy display
+    let trialDays: number | undefined;
+    if (isFreeTrial && numberOfUnits > 0) {
+        const unitDays: Record<string, number> = {
+            DAY: 1, WEEK: 7, MONTH: 30, YEAR: 365,
+        };
+        trialDays = (unitDays[periodUnit] ?? 0) * numberOfUnits * numberOfPeriods;
+    }
+
+    return {
+        hasIntroductoryOffer: true,
+        introductoryPriceString: introPriceString || undefined,
+        introductoryNumberOfPeriods: numberOfPeriods,
+        introductoryPeriodUnit: periodUnit || undefined,
+        introductoryPeriodNumberOfUnits: numberOfUnits,
+        trialAvailable: isFreeTrial,
+        trialDays: trialDays || undefined,
+    };
+}
+
 export async function getProOffering(): Promise<OfferingsResult> {
     if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) {
         return { priceString: PRO_PRICE_STRING };
@@ -403,7 +483,13 @@ export async function getProOffering(): Promise<OfferingsResult> {
             if (Platform.OS === 'android') {
                 googlePlayOfferToken = getGooglePlaySubscriptionOfferToken(product);
             }
-            return { priceString: getTrustedDisplayPrice(product) };
+            const introInfo = Platform.OS === 'ios'
+                ? extractIntroductoryOfferInfo(product)
+                : {};
+            return {
+                priceString: getTrustedDisplayPrice(product),
+                ...introInfo,
+            };
         }
     } catch (e) {
         console.error('[IAP] fetchProducts error:', e);

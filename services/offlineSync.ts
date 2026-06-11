@@ -2,6 +2,7 @@
 // Manages pending write operations and syncs them when back online
 import { AppState, AppStateStatus } from 'react-native';
 import { offlineStorage, PendingOperation } from './offlineStorage';
+import { isRecurrenceSourceCollection } from './recurrenceDeletion';
 
 type SyncStatusListener = (status: { pending: number; syncing: boolean; lastError?: string }) => void;
 
@@ -212,6 +213,10 @@ class OfflineSyncService {
 
     private async syncRecurrence(op: PendingOperation, db: any): Promise<void> {
         const recType = op.extra?.recurrenceType || 'subscription';
+        const sourceCollection = isRecurrenceSourceCollection(op.extra?.sourceCollection)
+            ? op.extra.sourceCollection
+            : (isRecurrenceSourceCollection(op.collection) ? op.collection : undefined);
+
         switch (op.type) {
             case 'add':
                 await db.addRecurrence(op.userId, op.data);
@@ -219,9 +224,18 @@ class OfflineSyncService {
             case 'update':
                 await db.updateRecurrence(op.userId, op.documentId!, op.data, recType);
                 break;
-            case 'delete':
-                await db.deleteRecurrence(op.userId, op.documentId!, recType);
+            case 'delete': {
+                const result = await db.deleteRecurrence(
+                    op.userId,
+                    op.documentId!,
+                    recType,
+                    sourceCollection
+                );
+                if (result?.success === false) {
+                    throw new Error(result.error || 'Failed to delete recurrence');
+                }
                 break;
+            }
         }
     }
 

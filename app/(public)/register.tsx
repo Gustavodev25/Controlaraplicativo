@@ -1,5 +1,5 @@
 import { useRouter, type Href } from 'expo-router';
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, User as UserIcon } from 'lucide-react-native';
+import { ArrowLeft, Eye, EyeOff, Info, Lock, Mail, User as UserIcon } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { KeyboardAvoidingViewProps } from 'react-native';
@@ -47,7 +47,7 @@ export default function RegisterScreen() {
             const result = await signUp(email, password, name);
 
             if (result.success) {
-                showToast('Conta criada com sucesso!', 'success');
+                showToast('Conta Controlar+ criada. Use Apple Sandbox só na compra da App Store.', 'success');
                 router.replace('/settings/plans?forced=true');
             } else {
                 showError(result.error || 'Erro ao criar conta.');
@@ -99,6 +99,20 @@ export default function RegisterScreen() {
                         </View>
 
                         <View style={styles.form}>
+                            {Platform.OS === 'ios' ? (
+                                <View style={styles.credentialNotice}>
+                                    <View style={styles.credentialNoticeIcon}>
+                                        <Info size={18} color="#d97757" />
+                                    </View>
+                                    <View style={styles.credentialNoticeCopy}>
+                                        <Text style={styles.credentialNoticeTitle}>Crie sua conta Controlar+</Text>
+                                        <Text style={styles.credentialNoticeText}>
+                                            Este cadastro é para entrar no app. Não use Apple Sandbox aqui; ela só aparece quando a App Store abrir a compra do plano.
+                                        </Text>
+                                    </View>
+                                </View>
+                            ) : null}
+
                             <AuthInput
                                 label="Nome Completo"
                                 placeholder="Seu nome"
@@ -225,6 +239,38 @@ const styles = StyleSheet.create({
     form: {
         width: '100%',
         gap: 16,
+    },
+    credentialNotice: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: 'rgba(217, 119, 87, 0.1)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(217, 119, 87, 0.35)',
+    },
+    credentialNoticeIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(217, 119, 87, 0.14)',
+    },
+    credentialNoticeCopy: {
+        flex: 1,
+    },
+    credentialNoticeTitle: {
+        fontSize: 13,
+        color: '#faf9f5',
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    credentialNoticeText: {
+        fontSize: 12,
+        color: '#d1d5db',
+        lineHeight: 17,
     },
     button: {
         marginTop: 12,

@@ -1,20 +1,14 @@
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
-import { ModernSwitch } from '@/components/ui/ModernSwitch';
 import { AuthButton } from '@/components/ui/AuthButton';
 import { databaseService } from '@/services/firebase';
-import { Wallet } from 'lucide-react-native';
-import React, { useEffect, useState, useRef } from 'react';
-import LottieView from 'lottie-react-native';
+import { Landmark } from 'lucide-react-native';
+import React, { useEffect, useState } from 'react';
 import {
-    Dimensions,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
-
-const { height: windowHeight } = Dimensions.get('window');
-
 
 interface BankAccount {
     id: string;
@@ -48,7 +42,6 @@ export function BalanceAccountsModal({
     onSave,
 }: BalanceAccountsModalProps) {
     const [selected, setSelected] = useState<string[]>(selectedAccountIds);
-    const lottieRef = useRef<LottieView>(null);
 
 
     // Sync with props when modal opens
@@ -70,24 +63,6 @@ export function BalanceAccountsModal({
 
         return isCheckingType && !isCreditType && !isSavingsType && !isInvestmentType && !isSavingsByName && !isCaixinhaByName;
     });
-
-    // Play lottie animation periodically when empty state is visible
-    useEffect(() => {
-        if (visible && (displayedAccounts?.length || 0) === 0) {
-            const initialTimeout = setTimeout(() => {
-                lottieRef.current?.play();
-            }, 500);
-
-            const interval = setInterval(() => {
-                lottieRef.current?.play();
-            }, 5000);
-
-            return () => {
-                clearTimeout(initialTimeout);
-                clearInterval(interval);
-            };
-        }
-    }, [visible, displayedAccounts?.length]);
 
     // Count occurrences of each name to add indexes if necessary
     const nameTotals = (displayedAccounts || []).reduce((acc, account) => {
@@ -144,13 +119,7 @@ export function BalanceAccountsModal({
                 {/* Accounts List */}
                 {(displayedAccounts?.length || 0) === 0 ? (
                     <View style={styles.emptyStateContainer}>
-                        <LottieView
-                            ref={lottieRef}
-                            source={require('@/assets/banco.json')}
-                            autoPlay={false}
-                            loop={false}
-                            style={styles.emptyStateLottie}
-                        />
+                        <Landmark size={52} color="#D97757" strokeWidth={1.7} style={styles.emptyStateIcon} />
                         <Text style={styles.emptyStateTitle}>Nenhuma conta</Text>
                         <Text style={styles.emptyStateDescription}>
                             Conecte uma conta para ver seu saldo.
@@ -325,9 +294,7 @@ const styles = StyleSheet.create({
         paddingVertical: 48,
         paddingHorizontal: 32,
     },
-    emptyStateLottie: {
-        width: 70,
-        height: 70,
+    emptyStateIcon: {
         marginBottom: 12,
     },
     emptyStateTitle: {

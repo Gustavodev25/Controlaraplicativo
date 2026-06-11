@@ -8,9 +8,9 @@ import { notificationService } from '@/services/notifications';
 
 import Avvvatars from '@/components/ui/Avvvatars';
 import { Stack, useRouter } from 'expo-router';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, LogOut, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface SettingsItemProps {
@@ -20,6 +20,7 @@ interface SettingsItemProps {
     onPress?: () => void;
     isLast?: boolean;
     showDivider?: boolean;
+    destructive?: boolean;
 }
 
 const SettingsItem = ({
@@ -28,17 +29,21 @@ const SettingsItem = ({
     rightElement,
     onPress,
     isLast = false,
-    showDivider = true
+    showDivider = true,
+    destructive = false,
 }: SettingsItemProps) => (
     <TouchableOpacity
         style={styles.itemContainer}
         activeOpacity={0.72}
         onPress={onPress}
         disabled={!onPress}
+        accessibilityRole="button"
     >
         <View style={styles.itemContent}>
             <View style={styles.itemTextBlock}>
-                <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
+                <Text style={[styles.itemTitle, destructive && styles.itemTitleDestructive]} numberOfLines={1}>
+                    {title}
+                </Text>
                 {subtitle && <Text style={styles.itemSubtitle} numberOfLines={1}>{subtitle}</Text>}
             </View>
             {rightElement || <ChevronRight size={20} color="#5F5F63" />}
@@ -53,7 +58,7 @@ const SectionHeader = ({ title }: { title: string }) => (
 
 export default function SettingsScreen() {
     const router = useRouter();
-    const { user, profile } = useAuthContext();
+    const { user, profile, signOut } = useAuthContext();
     const { showToast } = useToast();
     const insets = useSafeAreaInsets();
 
@@ -69,6 +74,7 @@ export default function SettingsScreen() {
         ((profile?.preferences as any)?.paymentAlertsEnabled ?? true) as boolean
     );
     const [biometricLoading, setBiometricLoading] = useState(false);
+    const [signingOut, setSigningOut] = useState(false);
     const [showHeaderGlass, setShowHeaderGlass] = useState(false);
 
     useEffect(() => {
@@ -134,6 +140,21 @@ export default function SettingsScreen() {
         });
     }, []);
 
+    const handleSignOut = useCallback(async () => {
+        if (signingOut) return;
+
+        setSigningOut(true);
+        const result = await signOut();
+
+        if (!result.success) {
+            showToast(result.error || 'Nao foi possivel sair da conta', 'error');
+            setSigningOut(false);
+            return;
+        }
+
+        router.replace('/(public)/welcome');
+    }, [router, showToast, signOut, signingOut]);
+
     const displayName = profile?.name || user?.displayName || 'Usuário';
     const email = user?.email || '';
     const avatarValue = email || displayName || 'Guest';
@@ -157,10 +178,16 @@ export default function SettingsScreen() {
                         style={styles.backButton}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                        <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
+                        <ChevronLeft size={24} color="#E0E0E0" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Configurações</Text>
-                    <View style={styles.headerSpacer} />
+                    <TouchableOpacity
+                        onPress={() => router.back()}
+                        style={styles.headerLogoutButton}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <X size={22} color="#E0E0E0" />
+                    </TouchableOpacity>
                 </View>
             </View>
 
@@ -260,6 +287,23 @@ export default function SettingsScreen() {
                     />
                 </View>
 
+                <SectionHeader title="CONTA" />
+                <View style={styles.sectionCard}>
+                    <SettingsItem
+                        title={signingOut ? 'Saindo...' : 'Sair'}
+                        rightElement={
+                            signingOut ? (
+                                <ActivityIndicator size="small" color="#FF6B6B" />
+                            ) : (
+                                <LogOut size={20} color="#FF6B6B" />
+                            )
+                        }
+                        isLast
+                        destructive
+                        onPress={handleSignOut}
+                    />
+                </View>
+
                 <View style={styles.footer}>
                     <Text style={styles.versionText}>Versão 1.0.0</Text>
                 </View>
@@ -279,7 +323,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     headerGlassTint: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill as any,
         backgroundColor: 'rgba(12, 12, 12, 0.72)',
     },
     header: {
@@ -302,9 +346,11 @@ const styles = StyleSheet.create({
         color: '#E8E8EA',
         textAlign: 'center',
     },
-    headerSpacer: {
+    headerLogoutButton: {
         width: 40,
         height: 40,
+        justifyContent: 'center',
+        alignItems: 'flex-end',
     },
     scroll: {
         flex: 1,
@@ -389,6 +435,9 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#FFFFFF',
         fontWeight: '400',
+    },
+    itemTitleDestructive: {
+        color: '#FF6B6B',
     },
     itemSubtitle: {
         fontSize: 13,

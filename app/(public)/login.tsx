@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Eye, EyeOff, Lock, Mail } from 'lucide-react-native';
+import { ArrowLeft, Eye, EyeOff, Info, Lock, Mail } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { KeyboardAvoidingViewProps } from 'react-native';
@@ -90,6 +90,20 @@ export default function LoginScreen() {
                         </View>
 
                         <View style={styles.form}>
+                            {Platform.OS === 'ios' ? (
+                                <View style={styles.credentialNotice}>
+                                    <View style={styles.credentialNoticeIcon}>
+                                        <Info size={18} color="#d97757" />
+                                    </View>
+                                    <View style={styles.credentialNoticeCopy}>
+                                        <Text style={styles.credentialNoticeTitle}>Login do Controlar+</Text>
+                                        <Text style={styles.credentialNoticeText}>
+                                            Entre aqui com o e-mail e senha da sua conta do app. A conta Apple Sandbox só é usada se a App Store pedir login na etapa de compra.
+                                        </Text>
+                                    </View>
+                                </View>
+                            ) : null}
+
                             <AuthInput
                                 label="E-mail"
                                 placeholder="seu@email.com"
@@ -197,6 +211,38 @@ const styles = StyleSheet.create({
     form: {
         width: '100%',
         gap: 16,
+    },
+    credentialNotice: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: 'rgba(217, 119, 87, 0.1)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(217, 119, 87, 0.35)',
+    },
+    credentialNoticeIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(217, 119, 87, 0.14)',
+    },
+    credentialNoticeCopy: {
+        flex: 1,
+    },
+    credentialNoticeTitle: {
+        fontSize: 13,
+        color: '#faf9f5',
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    credentialNoticeText: {
+        fontSize: 12,
+        color: '#d1d5db',
+        lineHeight: 17,
     },
     button: {
         marginTop: 12,

@@ -1,4 +1,6 @@
-import type { Href, Router } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
+
+type Router = ReturnType<typeof useRouter>;
 
 export const AUTH_FALLBACK_ROUTE = '/(public)/welcome' as Href;
 export const APP_FALLBACK_ROUTE = '/(tabs)/dashboard' as Href;

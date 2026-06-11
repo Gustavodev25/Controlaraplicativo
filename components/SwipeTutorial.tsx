@@ -1,6 +1,6 @@
 import { BlurView } from 'expo-blur';
-import LottieView from 'lottie-react-native';
-import React, { useEffect, useRef } from 'react';
+import { MoveHorizontal } from 'lucide-react-native';
+import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
@@ -19,16 +19,6 @@ export const SwipeTutorial = ({
     size = 80,
     absoluteFill = true
 }: SwipeTutorialProps) => {
-    const animation = useRef<LottieView>(null);
-
-    useEffect(() => {
-        if (visible) {
-            animation.current?.play();
-        } else {
-            animation.current?.pause();
-        }
-    }, [visible]);
-
     if (!visible) return null;
 
     return (
@@ -36,7 +26,7 @@ export const SwipeTutorial = ({
             entering={FadeIn.duration(300)}
             exiting={FadeOut.duration(300)}
             style={[
-                absoluteFill ? StyleSheet.absoluteFillObject : null,
+                absoluteFill ? StyleSheet.absoluteFill : null,
                 styles.container,
                 style
             ]}
@@ -54,13 +44,7 @@ export const SwipeTutorial = ({
                     style={StyleSheet.absoluteFill}
                 />
                 <View style={styles.content}>
-                    <LottieView
-                        ref={animation}
-                        source={require('../assets/swipe.json')}
-                        style={{ width: size, height: size }}
-                        autoPlay
-                        loop
-                    />
+                    <MoveHorizontal size={size * 0.72} color="#F5F5F7" strokeWidth={1.8} />
                 </View>
             </TouchableOpacity>
         </Animated.View>
@@ -86,8 +70,4 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    lottie: {
-        width: 100,
-        height: 100,
-    }
 });

@@ -21,8 +21,8 @@ const NetworkContext = createContext<NetworkContextType>({
     refresh: () => { },
 });
 
-export function NetworkProvider({ children }: { children: ReactNode }) {
-    const networkStatus = useNetworkStatus();
+export function NetworkProvider({ children, enabled = true }: { children: ReactNode; enabled?: boolean }) {
+    const networkStatus = useNetworkStatus({ enabled });
 
     return (
         <NetworkContext.Provider value={networkStatus}>

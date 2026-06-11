@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePathname } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  animationScheduler,
   clampLod,
   createLodHysteresisState,
   DEFAULT_PERFORMANCE_FLAGS,
@@ -47,10 +46,7 @@ interface PerformanceContextValue {
   flags: PerformanceFeatureFlags;
   config: PerformanceConfig;
   latestSample: PerfSample | null;
-  activeAnimationCount: number;
   setLod: (lod: LodLevel) => void;
-  registerAnimation: () => void;
-  unregisterAnimation: () => void;
 }
 
 const PerformanceContext = createContext<PerformanceContextValue | null>(null);
@@ -81,7 +77,6 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
   const [tierInfo, setTierInfo] = useState<DeviceTierInfo>(FALLBACK_TIER);
   const [lod, setLodState] = useState<LodLevel>(0);
   const [latestSample, setLatestSample] = useState<PerfSample | null>(null);
-  const [activeAnimationCount, setActiveAnimationCount] = useState(0);
 
   const hysteresisRef = useRef(createLodHysteresisState());
   const flagsRef = useRef(flags);
@@ -149,10 +144,9 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
       getAnimationBudget({
         tier: tierInfo.tier,
         lod,
-        activeLottieCount: activeAnimationCount,
         flags,
       }),
-    [tierInfo.tier, lod, activeAnimationCount, flags]
+    [tierInfo.tier, lod, flags]
   );
 
   useEffect(() => {
@@ -217,7 +211,6 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     runtimeMonitor.setLod(lod);
     runtimeMonitor.setTargetFps(budget.targetFps);
-    animationScheduler.setBudget(budget);
   }, [lod, budget]);
 
   useEffect(() => {
@@ -230,14 +223,6 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
     setLodState(clampLod(nextLod));
   }, []);
 
-  const registerAnimation = useCallback(() => {
-    setActiveAnimationCount((prev) => prev + 1);
-  }, []);
-
-  const unregisterAnimation = useCallback(() => {
-    setActiveAnimationCount((prev) => Math.max(0, prev - 1));
-  }, []);
-
   const value = useMemo(
     () => ({
       tierInfo,
@@ -246,10 +231,7 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
       flags,
       config,
       latestSample,
-      activeAnimationCount,
       setLod,
-      registerAnimation,
-      unregisterAnimation,
     }),
     [
       tierInfo,
@@ -258,10 +240,7 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
       flags,
       config,
       latestSample,
-      activeAnimationCount,
       setLod,
-      registerAnimation,
-      unregisterAnimation,
     ]
   );
 
@@ -276,7 +255,6 @@ export function usePerformance(): PerformanceContextValue {
       lod: 0,
       budget: {
         targetFps: 60,
-        maxConcurrentLottie: 12,
         particleCount: 12,
         blurIntensity: 68,
         chartAnimationMs: 1000,
@@ -285,10 +263,7 @@ export function usePerformance(): PerformanceContextValue {
       flags: DEFAULT_FLAGS,
       config: DEFAULT_CONFIG,
       latestSample: null,
-      activeAnimationCount: 0,
       setLod: () => undefined,
-      registerAnimation: () => undefined,
-      unregisterAnimation: () => undefined,
     };
   }
   return context;

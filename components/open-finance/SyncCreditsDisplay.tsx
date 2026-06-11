@@ -36,8 +36,6 @@ export interface SyncCreditsData {
     unlimited?: boolean;
 }
 
-// Helper Lottie component that plays at intervals (matching RecurrenceView)
-
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 interface MorphTouchableProps extends TouchableOpacityProps {
@@ -428,5 +426,4 @@ const styles = StyleSheet.create({
         flexShrink: 1,
     },
 });
-
 

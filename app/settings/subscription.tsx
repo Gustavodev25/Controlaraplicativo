@@ -2,15 +2,14 @@ import { UniversalBackground } from '@/components/UniversalBackground';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
-import { openSubscriptionManagement, syncStoreSubscriptionStatus } from '@/services/iapService';
+import { openSubscriptionManagement, restorePurchases, syncStoreSubscriptionStatus } from '@/services/iapService';
 import { safeBack } from '@/utils/navigation';
-import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import {
     AlertCircle,
     AlertTriangle,
-    ChevronRight,
+    ChevronLeft,
     LogOut,
     RefreshCw,
     Zap
@@ -18,6 +17,7 @@ import {
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     BackHandler,
     Platform,
@@ -182,6 +182,7 @@ export default function SubscriptionSettingsScreen() {
     // State
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isRestoring, setIsRestoring] = useState(false);
     const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryItem[]>([]);
     const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethodData | null>(null);
@@ -370,6 +371,38 @@ export default function SubscriptionSettingsScreen() {
         }
     };
 
+    // Restore purchases handler
+    const handleRestorePurchases = async () => {
+        if (!user?.uid) return;
+        setIsRestoring(true);
+        try {
+            const result = await restorePurchases(user.uid);
+            if (result.hasPro) {
+                await refreshProfile();
+                await loadSubscriptionData({ syncStoreStatus: false });
+                Alert.alert(
+                    'Compra restaurada!',
+                    'Sua assinatura Pro foi restaurada com sucesso.',
+                    [{ text: 'Continuar', onPress: () => router.replace('/(tabs)/dashboard') }]
+                );
+            } else {
+                Alert.alert(
+                    'Nenhuma compra encontrada',
+                    'Não encontramos uma assinatura Pro ativa para esta conta.',
+                    [{ text: 'OK' }]
+                );
+            }
+        } catch (error: any) {
+            Alert.alert(
+                'Erro ao restaurar',
+                error?.message || 'Não foi possível restaurar as compras agora.',
+                [{ text: 'OK' }]
+            );
+        } finally {
+            setIsRestoring(false);
+        }
+    };
+
     // Expired plan helper for banner message
     const getExpiredInfo = () => {
         if (!isExpired || !hasKnownProSubscription) return null;
@@ -392,7 +425,7 @@ export default function SubscriptionSettingsScreen() {
                             style={styles.backButton}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            <ChevronRight size={24} color="#A1A1A6" style={{ transform: [{ rotate: '180deg' }] }} />
+                            <ChevronLeft size={24} color="#A1A1A6" />
                         </TouchableOpacity>
                     ) : (
                         <View style={styles.backButton} />
@@ -429,23 +462,35 @@ export default function SubscriptionSettingsScreen() {
                     }
                 >
 
-                    <SectionHeader title="PLANO ATUAL" />
+                    <SectionHeader title="Plano atual" />
 
                     <View style={[styles.planCard, isExpired && hasKnownProSubscription && styles.planCardExpired]}>
-                        <View style={styles.planTopRow}>
-                            <Text style={styles.planName}>{planDisplay}</Text>
+                        <View style={styles.planHeader}>
+                            <View>
+                                <Text style={styles.planName}>{planDisplay}</Text>
+                                <Text style={styles.planSubName}>
+                                    {!hasKnownProSubscription ? 'Plano atual' : 'Recursos ilimitados'}
+                                </Text>
+                            </View>
                             <View style={[styles.statusBadge, { backgroundColor: `${statusConfig.color}18` }]}>
-                                <View style={[styles.statusDot, { backgroundColor: statusConfig.color }]} />
                                 <Text style={[styles.statusText, { color: statusConfig.color }]}>
                                     {statusConfig.label}
                                 </Text>
                             </View>
                         </View>
 
+                        <Text style={styles.planDescription}>
+                            {!hasKnownProSubscription
+                                ? 'Para usar o app você precisa de uma assinatura ativa. Você pode testar por 7 dias grátis. Após o período de teste, o valor é de R$ 35,90/mês (ou R$ 34,90/mês no iPhone).'
+                                : 'Controle completo, relatórios detalhados, conexões inteligentes e muito mais.'}
+                        </Text>
+
                         {hasKnownProSubscription && !isExpired && !isCancelled && (
-                            <Text style={styles.planMeta}>
-                                {priceValue} · {billingCycle === 'yearly' ? 'Anual' : 'Mensal'}
-                            </Text>
+                            <View style={styles.planMetaContainer}>
+                                <Text style={styles.planMetaText}>
+                                    {priceValue} • {billingCycle === 'yearly' ? 'Anual' : 'Mensal'}
+                                </Text>
+                            </View>
                         )}
 
                         {isPro && !isTrial && !isCancelled && !isExpired && (
@@ -456,19 +501,25 @@ export default function SubscriptionSettingsScreen() {
                         )}
 
                         {(isExpired || isCancelled) && hasKnownProSubscription && (
-                            <Text style={styles.planMeta}>
-                                {isCancelled ? 'Plano cancelado' : 'Plano vencido'}
-                                {Platform.OS !== 'ios' && !isCancelled ? '' : ''}
-                            </Text>
+                            <View style={styles.planMetaContainer}>
+                                <Text style={styles.planMetaText}>
+                                    {isCancelled ? 'Plano cancelado' : 'Plano vencido'}
+                                </Text>
+                            </View>
                         )}
 
                         {isTrial && (
-                            <Text style={styles.planMeta}>Período de teste em andamento</Text>
+                            <View style={styles.planMetaContainer}>
+                                <Text style={styles.planMetaText}>Período de teste em andamento</Text>
+                            </View>
                         )}
 
-                        {!hasKnownProSubscription && (
+                        {!hasKnownProSubscription ? (
                             <View style={styles.planFooterRow}>
-                                <Text style={styles.planMeta}>Plano gratuito</Text>
+                                <View>
+                                    <Text style={styles.planPriceLabel}>Gratuito</Text>
+                                    <Text style={styles.planPriceSublabel}>Para sempre</Text>
+                                </View>
                                 <TouchableOpacity
                                     style={styles.upgradeButton}
                                     onPress={() => router.push('/settings/plans')}
@@ -477,77 +528,100 @@ export default function SubscriptionSettingsScreen() {
                                     <Text style={styles.upgradeButtonText}>Fazer upgrade</Text>
                                 </TouchableOpacity>
                             </View>
+                        ) : null}
+
+                        {/* Renewal / Restore buttons for expired or cancelled plans */}
+                        {(isExpired || isCancelled) && hasKnownProSubscription && (
+                            <View style={styles.planFooterRow}>
+                                <TouchableOpacity
+                                    style={styles.restoreButton}
+                                    onPress={handleRestorePurchases}
+                                    activeOpacity={0.7}
+                                    disabled={isRestoring}
+                                >
+                                    {isRestoring ? (
+                                        <ActivityIndicator size="small" color="#8E8E93" />
+                                    ) : (
+                                        <Text style={styles.restoreButtonText}>Restaurar</Text>
+                                    )}
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.upgradeButton}
+                                    onPress={() => router.push('/settings/plans')}
+                                    activeOpacity={0.85}
+                                >
+                                    <Text style={styles.upgradeButtonText}>Renovar assinatura</Text>
+                                </TouchableOpacity>
+                            </View>
                         )}
                     </View>
 
                     {/* PAYMENT METHOD CARD */}
-                    <SectionHeader title="PAGAMENTO" />
-                    <View style={styles.paymentCard}>
-                        {isNativeStoreSubscription ? (
-                            <View style={styles.paymentRow}>
-                                <View style={styles.paymentIconBox}>
-                                    <Text style={styles.paymentIconEmoji}></Text>
-                                </View>
-                                <View style={styles.cardInfo}>
-                                    <Text style={styles.cardText}>{nativeStoreName}</Text>
-                                    <Text style={styles.cardSubtext}>Gerenciado pela loja do dispositivo</Text>
-                                </View>
-                                <TouchableOpacity
-                                    style={styles.editButton}
-                                    onPress={handleManageNativeSubscription}
-                                    activeOpacity={0.75}
-                                >
-                                    <Text style={styles.editButtonText}>Gerenciar</Text>
-                                </TouchableOpacity>
+                    {(isNativeStoreSubscription || needsPaymentSetup || hasDisplayPaymentMethod) && (
+                        <>
+                            <SectionHeader title="Pagamento" />
+                            <View style={styles.paymentCard}>
+                                {isNativeStoreSubscription ? (
+                                    <View style={styles.paymentRow}>
+                                        <View style={styles.paymentIconBox}>
+                                            <Text style={styles.paymentIconEmoji}></Text>
+                                        </View>
+                                        <View style={styles.cardInfo}>
+                                            <Text style={styles.cardText}>{nativeStoreName}</Text>
+                                            <Text style={styles.cardSubtext}>Gerenciado pela loja do dispositivo</Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.editButton}
+                                            onPress={handleManageNativeSubscription}
+                                            activeOpacity={0.75}
+                                        >
+                                            <Text style={styles.editButtonText}>Gerenciar</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : needsPaymentSetup ? (
+                                    <View style={styles.paymentRow}>
+                                        <View style={styles.paymentIconBox}>
+                                            <Text style={styles.paymentIconEmoji}></Text>
+                                        </View>
+                                        <View style={styles.cardInfo}>
+                                            <Text style={styles.cardText}>Método de pagamento pendente</Text>
+                                            <Text style={styles.cardSubtext}>
+                                                {renewalDateText
+                                                    ? `Renovação prevista para ${renewalDateText}`
+                                                    : 'Configure pela App Store para manter o Pro'}
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.editButton}
+                                            onPress={handleConfigurePayment}
+                                            activeOpacity={0.75}
+                                        >
+                                            <Text style={styles.editButtonText}>Configurar</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : hasDisplayPaymentMethod ? (
+                                    <View style={styles.paymentRow}>
+                                        <View style={styles.paymentIconBox}>
+                                            <Text style={styles.paymentIconEmoji}>💳</Text>
+                                        </View>
+                                        <View style={styles.cardInfo}>
+                                            <Text style={styles.cardText}>
+                                                {getCardBrandName(displayPaymentMethod?.brand)} •••• {displayPaymentMethod?.last4}
+                                            </Text>
+                                            <Text style={styles.cardSubtext}>
+                                                {displayPaymentMethod?.expiryMonth && displayPaymentMethod?.expiryYear
+                                                    ? `Expira em ${String(displayPaymentMethod.expiryMonth).padStart(2, '0')}/${displayPaymentMethod.expiryYear}`
+                                                    : paymentDetails?.expiry
+                                                        ? `Expira em ${paymentDetails.expiry}`
+                                                        : 'Cartão de crédito'
+                                                }
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ) : null}
                             </View>
-                        ) : needsPaymentSetup ? (
-                            <View style={styles.paymentRow}>
-                                <View style={styles.paymentIconBox}>
-                                    <Text style={styles.paymentIconEmoji}></Text>
-                                </View>
-                                <View style={styles.cardInfo}>
-                                    <Text style={styles.cardText}>Método de pagamento pendente</Text>
-                                    <Text style={styles.cardSubtext}>
-                                        {renewalDateText
-                                            ? `Renovação prevista para ${renewalDateText}`
-                                            : 'Configure pela App Store para manter o Pro'}
-                                    </Text>
-                                </View>
-                                <TouchableOpacity
-                                    style={styles.editButton}
-                                    onPress={handleConfigurePayment}
-                                    activeOpacity={0.75}
-                                >
-                                    <Text style={styles.editButtonText}>Configurar</Text>
-                                </TouchableOpacity>
-                            </View>
-                        ) : hasDisplayPaymentMethod ? (
-                            <View style={styles.paymentRow}>
-                                <View style={styles.paymentIconBox}>
-                                    <Text style={styles.paymentIconEmoji}>💳</Text>
-                                </View>
-                                <View style={styles.cardInfo}>
-                                    <Text style={styles.cardText}>
-                                        {getCardBrandName(displayPaymentMethod?.brand)} •••• {displayPaymentMethod?.last4}
-                                    </Text>
-                                    <Text style={styles.cardSubtext}>
-                                        {displayPaymentMethod?.expiryMonth && displayPaymentMethod?.expiryYear
-                                            ? `Expira em ${String(displayPaymentMethod.expiryMonth).padStart(2, '0')}/${displayPaymentMethod.expiryYear}`
-                                            : paymentDetails?.expiry
-                                                ? `Expira em ${paymentDetails.expiry}`
-                                                : 'Cartão de crédito'
-                                        }
-                                    </Text>
-                                </View>
-                            </View>
-                        ) : (
-                            <View style={styles.noPaymentMethod}>
-                                <Text style={styles.noPaymentText}>
-                                    {hasKnownProSubscription ? 'Nenhum método configurado' : 'Configure ao fazer upgrade'}
-                                </Text>
-                            </View>
-                        )}
-                    </View>
+                        </>
+                    )}
 
 
 
@@ -608,6 +682,49 @@ const styles = StyleSheet.create({
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: '#1A1A1A',
     },
+    planHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    planSubName: {
+        fontSize: 13,
+        color: '#8E8E93',
+        marginTop: 2,
+    },
+    planDescription: {
+        fontSize: 14,
+        color: '#A1A1A6',
+        lineHeight: 20,
+        marginBottom: 16,
+    },
+    planMetaContainer: {
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        alignSelf: 'flex-start',
+        marginBottom: 12,
+    },
+    planMetaText: {
+        fontSize: 13,
+        color: '#E8E8EA',
+        fontWeight: '500',
+    },
+    planPriceLabel: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
+    planPriceSublabel: {
+        fontSize: 11,
+        color: '#6E6E73',
+        marginTop: 1,
+    },
+    upgradeIcon: {
+        marginRight: 6,
+    },
     planTopRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -651,8 +768,10 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         marginTop: 14,
         paddingTop: 14,
+        marginHorizontal: -18,
+        paddingHorizontal: 18,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#1A1A1A',
+        borderTopColor: 'rgba(255, 255, 255, 0.08)',
     },
     statusBadge: {
         flexDirection: 'row',
@@ -683,6 +802,22 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#fff',
     },
+    restoreButton: {
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 10,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
+        minWidth: 90,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    restoreButtonText: {
+        fontSize: 13,
+        fontWeight: '500',
+        color: '#A1A1A6',
+    },
     // Section Headers
     sectionHeader: {
         fontSize: 12,
@@ -692,7 +827,6 @@ const styles = StyleSheet.create({
         marginBottom: 10,
         marginLeft: 4,
         letterSpacing: 0,
-        textTransform: 'uppercase',
     },
 
     itemSeparatorInset: {

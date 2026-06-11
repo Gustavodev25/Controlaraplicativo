@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
   },
 
   content: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,19 +1,20 @@
-import { BalanceAccountsModal } from '@/components/BalanceAccountsModal';
+import { BalanceAccountsSheet } from '@/components/visaogeral/BalanceAccountsSheet';
 import { ExtraIncomeModal } from '@/components/ExtraIncomeModal';
-import { ProjectionSettings, ProjectionsModal } from '@/components/ProjectionsModal';
+import { ProjectionSettings } from '@/components/ProjectionsModal';
+import { ProjectionsSheet } from '@/components/visaogeral/ProjectionsSheet';
 import Avvvatars from '@/components/ui/Avvvatars';
-import { ProfileDropdown } from '@/components/ui/ProfileDropdown';
 
 import { ConfigIncomeModal } from '@/components/ConfigIncomeModal';
 import { UniversalBackground } from '@/components/UniversalBackground';
-import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import CalendarioFinanceiro from '@/components/visaogeral/CalendarioFinanceiro';
 import DespesasPorCategoria from '@/components/visaogeral/DespesasPorCategoria';
 import MeusCartoes from '@/components/visaogeral/MeusCartoes';
 import MinhasContas from '@/components/visaogeral/MinhasContas';
+import { InvoicePeriodSheet } from '@/components/visaogeral/InvoicePeriodSheet';
 import SaldoConta from '@/components/visaogeral/SaldoConta';
 import { INVOICE_PERIOD_VALUES, type CreditCardCarouselItem, type ExpenseSource, type InvoicePeriod } from '@/components/visaogeral/types';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import { useCategories } from '@/hooks/use-categories';
 import { usePerformanceBudget } from '@/hooks/usePerformanceBudget';
 import { databaseService, db } from '@/services/firebase';
@@ -33,9 +34,8 @@ import {
   startOfMonth,
   toMonthKey
 } from '@/utils/monthWindow';
-import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { collection, DocumentData, getDocs, limit, orderBy, query, Query, QueryDocumentSnapshot, startAfter, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -60,34 +60,6 @@ const debugDashboardPerfLog = (...args: unknown[]) => {
 const isInvoicePeriod = (value: unknown): value is InvoicePeriod => (
   typeof value === 'string' && INVOICE_PERIOD_VALUES.includes(value as InvoicePeriod)
 );
-
-const getInitials = (name?: string) => {
-  if (!name) return 'U';
-  const names = name.trim().split(' ');
-  if (names.length === 0) return 'U';
-  if (names.length === 1) {
-    if (name.includes('@')) {
-      // Is email, take first 2 chars
-      return name.substring(0, 2).toUpperCase();
-    }
-    return names[0].substring(0, 2).toUpperCase();
-  }
-  return (names[0][0] + names[names.length - 1][0]).toUpperCase();
-};
-
-const getAvatarGradient = (name?: string): [string, string] => {
-  if (!name) return ['#e0e0e0', '#f5f5f5'];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const h = Math.abs(hash) % 360;
-  // Generate two pastel colors with slight hue shift for a pleasant gradient
-  return [
-    `hsl(${h}, 75%, 85%)`,
-    `hsl(${(h + 40) % 360}, 75%, 80%)`
-  ];
-};
 
 const toLocalDateString = (date: Date): string => {
   const year = date.getFullYear();
@@ -156,10 +128,10 @@ const normalizeCreditTransactionType = (data: DocumentData): 'income' | 'expense
 export default function DashboardScreen() {
   const router = useRouter();
   const { user, profile, signOut, refreshProfile } = useAuthContext();
+  const { showToast } = useToast();
   const { getCategoryName } = useCategories();
   const { budget, lod } = usePerformanceBudget();
 
-  const [menuVisible, setMenuVisible] = useState(false);
   const [invoiceModalVisible, setInvoiceModalVisible] = useState(false);
   const [balanceModalVisible, setBalanceModalVisible] = useState(false);
   const [extraModalVisible, setExtraModalVisible] = useState(false);
@@ -283,6 +255,8 @@ export default function DashboardScreen() {
   // Preference state
   const [includeOpenFinance, setIncludeOpenFinance] = useState(true);
   const [isValuesVisible, setIsValuesVisible] = useState(true);
+  const refreshProfileRef = useRef(refreshProfile);
+  refreshProfileRef.current = refreshProfile;
 
   // Force refresh profile when entering dashboard to ensure financial data is up to date
   useFocusEffect(
@@ -297,9 +271,22 @@ export default function DashboardScreen() {
       }
 
       lastProfileRefreshAtRef.current = now;
-      refreshProfile().catch((error) => {
-        console.error('Error refreshing dashboard profile:', error);
-      });
+      let cancelled = false;
+      let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+      const timer = setTimeout(() => {
+        task = InteractionManager.runAfterInteractions(() => {
+          if (cancelled) return;
+          refreshProfileRef.current().catch((error) => {
+            console.error('Error refreshing dashboard profile:', error);
+          });
+        });
+      }, 180);
+
+      return () => {
+        cancelled = true;
+        clearTimeout(timer);
+        task?.cancel?.();
+      };
     }, [user?.uid])
   );
 
@@ -1082,6 +1069,7 @@ export default function DashboardScreen() {
 
       // Invalidate cache on manual refresh
       await queryCache.invalidate(`accounts_${user.uid}`);
+      await queryCache.invalidate(`dashboard_credit_transactions_${user.uid}_v3_perf`);
       await queryCache.invalidate(`dashboard_credit_transactions_${user.uid}_v2`);
       await queryCache.invalidate(`dashboard_credit_transactions_${user.uid}`);
 
@@ -1097,11 +1085,9 @@ export default function DashboardScreen() {
       setRefreshing(false);
     }
   }, [fetchCreditOverviewData, fetchMonthScopedData, selectedMonth, selectedMonthKey, user?.uid]);
-  const displayName = profile?.name || user?.email || undefined;
-  const initials = getInitials(displayName);
-  const gradientColors = getAvatarGradient(user?.email || displayName);
-
-
+  const displayName = profile?.name || user?.displayName || 'Usuário';
+  const email = user?.email || '';
+  const profileAvatarValue = email || displayName || 'Guest';
 
   const pieData = useMemo(() => {
     const transactions = expenseSource === 'credit' ? creditCardTransactions : checkingTransactions;
@@ -1219,25 +1205,15 @@ export default function DashboardScreen() {
             {/* Avatar - Moved First for row-reverse anchoring */}
             <View style={{ position: 'relative', zIndex: 10 }}>
               <TouchableOpacity
-                onPress={() => setMenuVisible(!menuVisible)}
+                onPress={() => router.push('/settings')}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir menu da conta"
               >
                 <View style={styles.avatar}>
-                  <Avvvatars value={user?.email || (profile as any)?.name || user?.displayName || 'Guest'} size={32} style="shape" />
+                  <Avvvatars value={profileAvatarValue} size={32} style="shape" />
                 </View>
               </TouchableOpacity>
-
-              <ProfileDropdown
-                visible={menuVisible}
-                onSettings={() => {
-                  setMenuVisible(false);
-                  router.push('/settings');
-                }}
-                onSignOut={async () => {
-                  setMenuVisible(false);
-                  await signOut();
-                }}
-              />
             </View>
 
 
@@ -1281,7 +1257,7 @@ export default function DashboardScreen() {
           <DespesasPorCategoria
             pieData={pieData}
             expenseSource={expenseSource}
-            chartAnimationMs={budget.chartAnimationMs}
+            chartAnimationMs={lod >= 2 ? 0 : budget.chartAnimationMs}
             onCycleExpenseSource={cycleExpenseSource}
           />
 
@@ -1294,121 +1270,46 @@ export default function DashboardScreen() {
             maxMonth={maxMonth}
             onMonthChange={(date) => setSelectedMonth(clampMonth(date, minMonth, maxMonth))}
           />
-          {/* Projections Modal */}
-          <ProjectionsModal
-            visible={showProjectionsModal}
-            onClose={() => setShowProjectionsModal(false)}
-            currentSettings={projectionSettings}
-            onSave={handleSaveProjections}
-            salaryPreview={salaryPreview}
-            valePreview={valePreview}
-            includeOpenFinance={includeOpenFinance}
-            onToggleOpenFinance={handleToggleOpenFinance}
-          />
+
 
         </View >
       </ScrollView >
 
-      {invoiceModalVisible && (
-        <ModalPadrao
-          visible={invoiceModalVisible}
-          onClose={() => setInvoiceModalVisible(false)}
-          title={`Selecionar Fatura - ${selectedCardForModalData?.name?.trim() || ''}`}
-        >
-          <View style={modalOptionStyles.sectionCard}>
+      {/* Projections Bottom Sheet */}
+      <ProjectionsSheet
+        visible={showProjectionsModal}
+        onVisibleChange={setShowProjectionsModal}
+        currentSettings={projectionSettings}
+        onSave={handleSaveProjections}
+        salaryPreview={salaryPreview}
+        valePreview={valePreview}
+        includeOpenFinance={includeOpenFinance}
+        onToggleOpenFinance={handleToggleOpenFinance}
+      />
 
-            {/* Fatura Anterior */}
-            <TouchableOpacity
-              style={[
-                modalOptionStyles.itemContainer,
-                selectedCardModalPeriod === 'past' && modalOptionStyles.itemContainerSelected,
-              ]}
-              onPress={() => handleInvoicePeriodChange('past')}
-            >
-              <View style={modalOptionStyles.itemContent}>
-                <View style={modalOptionStyles.itemTextBlock}>
-                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'past' && modalOptionStyles.itemTitleSelected]}>Anterior</Text>
-                  <Text style={modalOptionStyles.itemSubtitle}>Visualizar fatura passada</Text>
-                </View>
-                <Text style={modalOptionStyles.itemValue}>
-                  R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.past : invoiceData.pastTotal))}
-                </Text>
-              </View>
-              <View style={modalOptionStyles.itemSeparator} />
-            </TouchableOpacity>
+      {/* Invoice Period Bottom Sheet */}
+      <InvoicePeriodSheet
+        visible={invoiceModalVisible}
+        onVisibleChange={setInvoiceModalVisible}
+        cardName={selectedCardForModalData?.name?.trim() || ''}
+        selectedPeriod={selectedCardModalPeriod}
+        pastTotal={selectedCardForModalData ? selectedCardForModalData.past : invoiceData.pastTotal}
+        currentTotal={selectedCardForModalData ? selectedCardForModalData.current : invoiceData.currentTotal}
+        totalUsed={selectedCardForModalData ? selectedCardForModalData.used : creditCardData.totalUsed}
+        onPeriodChange={handleInvoicePeriodChange}
+      />
 
-            {/* Fatura Atual */}
-            <TouchableOpacity
-              style={[
-                modalOptionStyles.itemContainer,
-                selectedCardModalPeriod === 'current' && modalOptionStyles.itemContainerSelected,
-              ]}
-              onPress={() => handleInvoicePeriodChange('current')}
-            >
-              <View style={modalOptionStyles.itemContent}>
-                <View style={modalOptionStyles.itemTextBlock}>
-                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'current' && modalOptionStyles.itemTitleSelected]}>Atual</Text>
-                  <Text style={modalOptionStyles.itemSubtitle}>Visualizar mês vigente</Text>
-                </View>
-                <Text style={modalOptionStyles.itemValue}>
-                  R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.current : invoiceData.currentTotal))}
-                </Text>
-              </View>
-              <View style={modalOptionStyles.itemSeparator} />
-            </TouchableOpacity>
-
-            {/* Limite Utilizado */}
-            <TouchableOpacity
-              style={[
-                modalOptionStyles.itemContainer,
-                selectedCardModalPeriod === 'total_used' && modalOptionStyles.itemContainerSelected,
-              ]}
-              onPress={() => handleInvoicePeriodChange('total_used')}
-            >
-              <View style={modalOptionStyles.itemContent}>
-                <View style={modalOptionStyles.itemTextBlock}>
-                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'total_used' && modalOptionStyles.itemTitleSelected]}>Total Usado</Text>
-                  <Text style={modalOptionStyles.itemSubtitle}>Soma de todas as faturas abertas</Text>
-                </View>
-                <Text style={modalOptionStyles.itemValue}>
-                  R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(selectedCardForModalData ? selectedCardForModalData.used : creditCardData.totalUsed))}
-                </Text>
-              </View>
-              <View style={modalOptionStyles.itemSeparator} />
-            </TouchableOpacity>
-
-            {/* Nenhuma Fatura */}
-            <TouchableOpacity
-              style={[
-                modalOptionStyles.itemContainer,
-                selectedCardModalPeriod === 'none' && modalOptionStyles.itemContainerSelectedDanger,
-              ]}
-              onPress={() => handleInvoicePeriodChange('none')}
-            >
-              <View style={modalOptionStyles.itemContent}>
-                <View style={modalOptionStyles.itemTextBlock}>
-                  <Text style={[modalOptionStyles.itemTitle, selectedCardModalPeriod === 'none' && modalOptionStyles.itemTitleDanger]}>Não considerar</Text>
-                  <Text style={modalOptionStyles.itemSubtitle}>Ocultar faturas do resumo</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </ModalPadrao >
-      )}
-
-      {/* Balance Accounts Configuration Modal */}
-      {balanceModalVisible && (
-        < BalanceAccountsModal
-          visible={balanceModalVisible}
-          onClose={() => setBalanceModalVisible(false)}
-          userId={user?.uid || ''}
-          accounts={allBankAccounts}
-          selectedAccountIds={selectedBalanceAccountIds ?? allBankAccounts.map(a => a.id)}
-          onSave={(selectedIds: string[]) => {
-            setSelectedBalanceAccountIds(selectedIds);
-          }}
-        />
-      )}
+      {/* Balance Accounts Bottom Sheet */}
+      <BalanceAccountsSheet
+        visible={balanceModalVisible}
+        onVisibleChange={setBalanceModalVisible}
+        userId={user?.uid || ''}
+        accounts={allBankAccounts}
+        selectedAccountIds={selectedBalanceAccountIds ?? allBankAccounts.map(a => a.id)}
+        onSave={(selectedIds: string[]) => {
+          setSelectedBalanceAccountIds(selectedIds);
+        }}
+      />
 
       {/* Extra Income Modal */}
       {extraModalVisible && (
@@ -1434,69 +1335,6 @@ export default function DashboardScreen() {
   );
 }
 
-const modalOptionStyles = StyleSheet.create({
-  sectionCard: {
-    backgroundColor: '#111111',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#161616',
-    overflow: 'hidden',
-  },
-  itemContainer: {
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-    position: 'relative',
-    backgroundColor: 'transparent',
-  },
-  itemContainerSelected: {
-    backgroundColor: 'transparent',
-  },
-  itemContainerSelectedDanger: {
-    backgroundColor: 'transparent',
-  },
-  itemContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 16,
-  },
-  itemTextBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemTitle: {
-    fontSize: 15,
-    color: '#FFFFFF',
-    fontFamily: 'AROneSans_400Regular',
-  },
-  itemTitleSelected: {
-    color: '#D97757',
-  },
-  itemTitleDanger: {
-    color: '#FF6B6B',
-  },
-  itemSubtitle: {
-    fontSize: 12,
-    color: '#606060',
-    marginTop: 1,
-  },
-  itemValue: {
-    color: '#AAAAAA',
-    fontSize: 14,
-    fontFamily: 'AROneSans_400Regular',
-    textAlign: 'right',
-    minWidth: 104,
-  },
-  itemSeparator: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: '#161616',
-  },
-});
-
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
@@ -1510,8 +1348,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingTop: 60,
     paddingHorizontal: 20,
-    zIndex: 10,
-    elevation: 10,
   },
   header: {
     flexDirection: 'row',

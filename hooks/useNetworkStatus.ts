@@ -19,7 +19,12 @@ interface NetworkStatus {
  * Hook to detect network connectivity status.
  * Uses fetch to ping a reliable endpoint instead of @react-native-community/netinfo.
  */
-export function useNetworkStatus() {
+interface UseNetworkStatusOptions {
+    enabled?: boolean;
+}
+
+export function useNetworkStatus(options: UseNetworkStatusOptions = {}) {
+    const enabled = options.enabled ?? true;
     const [status, setStatus] = useState<NetworkStatus>({
         isOnline: true, // Assume online initially
         isChecking: false,
@@ -31,10 +36,18 @@ export function useNetworkStatus() {
     const checkInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const isMounted = useRef(true);
     const checkInFlight = useRef(false);
+    const enabledRef = useRef(enabled);
+
+    useEffect(() => {
+        enabledRef.current = enabled;
+        if (!enabled) {
+            setStatus(prev => prev.isChecking ? { ...prev, isChecking: false } : prev);
+        }
+    }, [enabled]);
 
     const checkConnectivity = useCallback(async (options: { showChecking?: boolean } = {}) => {
         const appState = AppState.currentState;
-        if (!isMounted.current || checkInFlight.current || appState === 'background' || appState === 'inactive') return;
+        if (!enabledRef.current || !isMounted.current || checkInFlight.current || appState === 'background' || appState === 'inactive') return;
 
         const showChecking = options.showChecking === true;
         checkInFlight.current = true;
@@ -113,6 +126,17 @@ export function useNetworkStatus() {
     useEffect(() => {
         isMounted.current = true;
 
+        if (!enabled) {
+            if (checkInterval.current) {
+                clearInterval(checkInterval.current);
+                checkInterval.current = null;
+            }
+
+            return () => {
+                isMounted.current = false;
+            };
+        }
+
         // Initial check
         checkConnectivity();
 
@@ -135,7 +159,7 @@ export function useNetworkStatus() {
             }
             subscription.remove();
         };
-    }, [checkConnectivity]);
+    }, [checkConnectivity, enabled]);
 
     // Manual refresh
     const refresh = useCallback(() => {

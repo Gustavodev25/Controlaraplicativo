@@ -3,7 +3,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { databaseService } from '@/services/firebase';
 import { Stack, useRouter } from 'expo-router';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -181,7 +181,7 @@ export default function PersonalDataScreen() {
                             style={styles.backButton}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            <ChevronRight size={24} color="#E0E0E0" style={{ transform: [{ rotate: '180deg' }] }} />
+                            <ChevronLeft size={24} color="#E0E0E0" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>Dados Pessoais</Text>
                         <View style={styles.headerSpacer} />

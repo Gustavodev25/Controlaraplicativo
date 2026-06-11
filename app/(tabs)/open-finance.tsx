@@ -14,6 +14,7 @@ import { databaseService } from '@/services/firebase';
 import { notificationService } from '@/services/notifications';
 import { openFinanceConnectionState } from '@/services/openFinanceConnectionState';
 import { getConnectorLogoUrl, normalizeHexColor } from '@/utils/connectorLogo';
+import { useIsFocused } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
@@ -25,6 +26,7 @@ import {
     Animated,
     AppState,
     Image,
+    InteractionManager,
     Keyboard,
     LayoutAnimation,
     Platform,
@@ -55,6 +57,7 @@ import Reanimated, {
     withSequence,
     withSpring,
     withTiming,
+    cancelAnimation,
 } from 'react-native-reanimated';
 
 if (Platform.OS === 'android') {
@@ -69,15 +72,6 @@ const SPRING_ENTRY = {
     damping: 16,
     stiffness: 195,
     mass: 1.05,
-    overshootClamping: false,
-    restDisplacementThreshold: 0.001,
-    restSpeedThreshold: 0.001,
-} as const;
-
-const SPRING_MORPH = {
-    damping: 15,
-    stiffness: 185,
-    mass: 1.08,
     overshootClamping: false,
     restDisplacementThreshold: 0.001,
     restSpeedThreshold: 0.001,
@@ -471,6 +465,7 @@ export default function OpenFinanceScreen() {
     const cpfModalOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastOAuthCallbackRef = useRef<{ url: string; receivedAt: number } | null>(null);
     const handleOAuthCallbackRef = useRef<((url: string) => Promise<void>) | null>(null);
+    const fetchAccountsRef = useRef<() => Promise<void>>(async () => undefined);
 
     useEffect(() => {
         pendingItemIdRef.current = pendingItemId;
@@ -844,7 +839,21 @@ export default function OpenFinanceScreen() {
 
     useEffect(() => {
         if (user) {
-            fetchAccounts();
+            let cancelled = false;
+            let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+            const timer = setTimeout(() => {
+                task = InteractionManager.runAfterInteractions(() => {
+                    if (!cancelled) {
+                        void fetchAccountsRef.current();
+                    }
+                });
+            }, 180);
+
+            return () => {
+                cancelled = true;
+                clearTimeout(timer);
+                task?.cancel?.();
+            };
         }
     }, [user]);
 
@@ -915,6 +924,7 @@ export default function OpenFinanceScreen() {
             setRefreshing(false);
         }
     };
+    fetchAccountsRef.current = fetchAccounts;
 
     const handleOAuthCallback = useCallback(async (url: string) => {
         const now = Date.now();
@@ -2290,7 +2300,7 @@ export default function OpenFinanceScreen() {
                             style={styles.connectorsErrorContainer}
                         >
                             <View pointerEvents="none" style={styles.cardBlurLayer}>
-                                <BlurView intensity={22} tint="dark" style={StyleSheet.absoluteFillObject} />
+                                <BlurView intensity={22} tint="dark" style={StyleSheet.absoluteFill} />
                             </View>
 
                             <View pointerEvents="none" style={styles.cardTint}>
@@ -2303,7 +2313,7 @@ export default function OpenFinanceScreen() {
                                     locations={[0, 0.48, 1]}
                                     start={{ x: 0.5, y: 0 }}
                                     end={{ x: 0.5, y: 1 }}
-                                    style={StyleSheet.absoluteFillObject}
+                                    style={StyleSheet.absoluteFill}
                                 />
                             </View>
 
@@ -2533,11 +2543,12 @@ export default function OpenFinanceScreen() {
                     visible={showCpfModal}
                     onClose={handleCloseCpfModal}
                     title={cpfModalStep === 'cpf' ? 'Confirme seu CPF' : 'Confirmar conexão'}
-                    presentation="center"
+                    presentation="bottom"
                     size="md"
                     maxWidth={Math.min(390, width - 24)}
                     scrollable={false}
-                    enableDragToClose={false}
+                    enableDragToClose={true}
+                    showHandle={true}
                     footerBorder={false}
                     contentStyle={styles.cpfModalContent}
                     headerStyle={styles.cpfModalHeader}
@@ -2755,23 +2766,38 @@ const SearchInputShell = ({ searchQuery, setSearchQuery, styles }: any) => {
 const EmptyAccountsState = ({ styles }: any) => {
     const entranceStyle = useElasticEntrance(120, 18);
     const pulse = useSharedValue(0);
+    const isFocused = useIsFocused();
 
     useEffect(() => {
-        pulse.value = withRepeat(
-            withSequence(
-                withTiming(1, {
-                    duration: 1700,
-                    easing: Easing.inOut(Easing.quad),
-                }),
-                withTiming(0, {
-                    duration: 1700,
-                    easing: Easing.inOut(Easing.quad),
-                })
+        cancelAnimation(pulse);
+
+        if (!isFocused) {
+            pulse.value = 0;
+            return;
+        }
+
+        pulse.value = withDelay(
+            450,
+            withRepeat(
+                withSequence(
+                    withTiming(1, {
+                        duration: 1700,
+                        easing: Easing.inOut(Easing.quad),
+                    }),
+                    withTiming(0, {
+                        duration: 1700,
+                        easing: Easing.inOut(Easing.quad),
+                    })
+                ),
+                -1,
+                false
             ),
-            -1,
-            false
         );
-    }, [pulse]);
+
+        return () => {
+            cancelAnimation(pulse);
+        };
+    }, [isFocused, pulse]);
 
     const glowStyle = useAnimatedStyle(() => ({
         opacity: interpolate(pulse.value, [0, 1], [0.12, 0.26], Extrapolation.CLAMP),
@@ -2785,7 +2811,7 @@ const EmptyAccountsState = ({ styles }: any) => {
     return (
         <Reanimated.View style={[styles.emptyState, entranceStyle]}>
             <View pointerEvents="none" style={styles.emptyStateCardBase}>
-                <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
+                <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
             </View>
 
             <View pointerEvents="none" style={styles.emptyStateTint}>
@@ -2798,7 +2824,7 @@ const EmptyAccountsState = ({ styles }: any) => {
                     locations={[0, 0.48, 1]}
                     start={{ x: 0.5, y: 0 }}
                     end={{ x: 0.5, y: 1 }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                 />
             </View>
 
@@ -3064,13 +3090,13 @@ const styles = StyleSheet.create({
     },
 
     cardBlurLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
         overflow: 'hidden',
     },
 
     cardTint: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 1,
         opacity: 0.92,
         backgroundColor: 'rgba(16, 16, 16, 0.92)',
@@ -3242,13 +3268,13 @@ const styles = StyleSheet.create({
     },
 
     emptyStateCardBase: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
         overflow: 'hidden',
     },
 
     emptyStateTint: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 1,
         opacity: 0.9,
     },
@@ -3316,13 +3342,13 @@ const styles = StyleSheet.create({
     },
 
     searchBlurLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
         overflow: 'hidden',
     },
 
     searchTintLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 1,
         opacity: 0.92,
     },

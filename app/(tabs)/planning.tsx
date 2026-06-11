@@ -2,16 +2,15 @@ import { InvestmentDetailsModal } from '@/components/InvestmentDetailsModal';
 import { InvestmentModal } from '@/components/InvestmentModal';
 import { InvestmentStatementModal } from '@/components/InvestmentStatementModal';
 
-import { DelayedLoopLottie } from '@/components/ui/DelayedLoopLottie';
 import { DeleteConfirmationModal } from '@/components/ui/DeleteConfirmationModal';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { MorphTouchable } from '@/components/ui/MorphTouchable';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
-import { MoreVertical, Plus } from 'lucide-react-native';
+import { MoreVertical, PiggyBank, Plus } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated as NativeAnimated, Easing as RNEasing, FlatList, Image, StyleSheet, Text, View } from 'react-native';
+import { Animated as NativeAnimated, Easing as RNEasing, FlatList, Image, InteractionManager, StyleSheet, Text, View } from 'react-native';
 import { TextInput } from 'react-native-gesture-handler'; // Ensure TextInput is available or use standard RN
 import Animated, { Easing, FadeInUp, runOnJS, useAnimatedProps, useAnimatedReaction, useAnimatedStyle, useDerivedValue, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
@@ -19,18 +18,6 @@ import { BlurView } from 'expo-blur';
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 const HEADER_CONTROL_HEIGHT = 36;
 
-
-const IntervalLottie = ({ source, size, interval = 5000 }: { source: any, size: number, interval?: number }) => {
-    return (
-        <DelayedLoopLottie
-            source={source}
-            style={{ width: size, height: size }}
-            delay={interval}
-            initialDelay={100}
-            jitterRatio={0.15}
-        />
-    );
-};
 
 interface Investment {
     id: string;
@@ -408,15 +395,31 @@ export default function PlanningScreen() {
     useEffect(() => {
         if (!user) return;
 
-        const unsubscribe = databaseService.onInvestmentsChange(user.uid, (data) => {
-            setInvestments(data as Investment[]);
-            setLoading(false);
-        });
+        let cancelled = false;
+        let unsubscribe: (() => void) | null = null;
+        let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
 
-        // Trigger the migration logic inside getInvestments to sweep for missing connected accounts
-        databaseService.getInvestments(user.uid).catch(console.error);
+        const timer = setTimeout(() => {
+            task = InteractionManager.runAfterInteractions(() => {
+                if (cancelled) return;
 
-        return () => unsubscribe();
+                unsubscribe = databaseService.onInvestmentsChange(user.uid, (data) => {
+                    if (cancelled) return;
+                    setInvestments(data as Investment[]);
+                    setLoading(false);
+                });
+
+                // Trigger the migration logic inside getInvestments to sweep for missing connected accounts.
+                databaseService.getInvestments(user.uid).catch(console.error);
+            });
+        }, 180);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            task?.cancel?.();
+            unsubscribe?.();
+        };
     }, [user]);
 
     const [isSaving, setIsSaving] = useState(false);
@@ -432,7 +435,7 @@ export default function PlanningScreen() {
                 currentAmount: 0.01, // Começa com 0.01 para ser visível no filtro de "apenas com movimentação"
                 deadline: data.deadline,
                 color: '#D97757', // Default color
-                icon: 'caixinhasamarelo.json' // Default icon ref
+                icon: 'piggy-bank'
             });
 
             if (result.success && result.id) {
@@ -618,11 +621,7 @@ export default function PlanningScreen() {
                 ) : (
                     <View style={styles.emptyContainer}>
                         <View style={styles.emptyIconWrapper}>
-                            <IntervalLottie
-                                source={require('../../assets/caixinhas.json')}
-                                size={48}
-                                interval={3000}
-                            />
+                            <PiggyBank size={44} color="#D97757" strokeWidth={1.8} />
                         </View>
 
                         <Text style={styles.emptyTitle}>
@@ -997,7 +996,7 @@ const styles = StyleSheet.create({
         elevation: 12,
     },
     investmentDropdownOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(17, 17, 17, 0.94)',
     },
     investmentDropdownContent: {
