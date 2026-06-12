@@ -20,7 +20,7 @@ import {
 } from '@/services/iapService';
 import { safeBack } from '@/utils/navigation';
 import { useFocusEffect, useRouter, useLocalSearchParams, type Href } from 'expo-router';
-import { Check, LogOut, RefreshCw, Shield, X } from 'lucide-react-native';
+import { Check, LogOut, Shield, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -58,6 +58,25 @@ const isDuplicatePurchaseUpdateError = (error: any) => {
         message.includes('already owned') ||
         message.includes('already subscribed') ||
         (message.includes('restorepurchases') && message.includes('getavailablepurchases'))
+    );
+};
+
+const isPurchaseLinkedToAnotherAccount = (value: any) => {
+    const code = String(value?.errorCode || value?.code || '').toLowerCase();
+    const message = String(value?.error || value?.message || value || '').toLowerCase();
+    return (
+        code === 'apple_purchase_linked_to_another_account' ||
+        message.includes('already linked to another account') ||
+        message.includes('linked to another account') ||
+        message.includes('vinculada a outra conta')
+    );
+};
+
+const showPurchaseLinkedToAnotherAccountAlert = (storeName: string) => {
+    Alert.alert(
+        'Assinatura em outra conta',
+        `Essa assinatura da ${storeName} ja esta vinculada a outra conta Controlar+. Entre com a conta correta ou use outro Apple ID Sandbox para testar.`,
+        [{ text: 'OK' }]
     );
 };
 
@@ -228,7 +247,7 @@ export default function PlansScreen() {
             setIapReady(true);
         });
         return () => { cancelled = true; };
-    }, [user?.uid]));
+    }, [user]));
 
     const recoverExistingStorePurchase = useCallback(async () => {
         if (!user?.uid) return false;
@@ -260,7 +279,7 @@ export default function PlansScreen() {
             [{ text: 'Continuar', onPress: () => isForced ? router.replace('/(tabs)/dashboard') : safeBack(router) }]
         );
         return true;
-    }, [clearPurchaseFallbackTimer, isForced, router, shouldSetupPayment, storeName, user?.uid]);
+    }, [clearPurchaseFallbackTimer, isForced, router, shouldSetupPayment, storeName, user]);
 
     const activateStorePurchase = useCallback(async (
         purchase: SubscriptionPurchase,
@@ -290,6 +309,15 @@ export default function PlansScreen() {
                 return true;
             }
 
+            if (isPurchaseLinkedToAnotherAccount(result)) {
+                if (!purchaseErrorHandledRef.current) {
+                    purchaseErrorHandledRef.current = true;
+                    showPurchaseLinkedToAnotherAccountAlert(storeName);
+                }
+                purchaseFlowActiveRef.current = false;
+                return false;
+            }
+
             if (showFailureAlert) {
                 Alert.alert(
                     'Falha na ativaÃ§Ã£o',
@@ -310,7 +338,7 @@ export default function PlansScreen() {
             purchaseFlowActiveRef.current = false;
             return false;
         }
-    }, [clearPurchaseFallbackTimer, isForced, router, user?.uid]);
+    }, [clearPurchaseFallbackTimer, isForced, router, storeName, user]);
 
     // Listeners nativos do StoreKit
     useEffect(() => {
@@ -344,6 +372,13 @@ export default function PlansScreen() {
                     );
                     purchaseFlowActiveRef.current = false;
                 } else {
+                    if (isPurchaseLinkedToAnotherAccount(result)) {
+                        if (!purchaseErrorHandledRef.current) {
+                            purchaseErrorHandledRef.current = true;
+                            showPurchaseLinkedToAnotherAccountAlert(storeName);
+                        }
+                        return;
+                    }
                     Alert.alert(
                         'Falha na ativação',
                         result.error ?? 'Não foi possível ativar a assinatura. Tente novamente.',
@@ -464,6 +499,11 @@ export default function PlansScreen() {
                     setIapLoading(false);
                     return;
                 }
+                if (purchaseErrorHandledRef.current) {
+                    purchaseFlowActiveRef.current = false;
+                    setIapLoading(false);
+                    return;
+                }
             }
 
             // O resultado normalmente chega pelo listener. Este fallback cobre casos
@@ -566,6 +606,10 @@ export default function PlansScreen() {
         setRestoring(true);
         try {
             const result = await restorePurchases(user.uid);
+            if (isPurchaseLinkedToAnotherAccount(result)) {
+                showPurchaseLinkedToAnotherAccountAlert(storeName);
+                return;
+            }
             const statusResult = await syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true, syncActivePurchase: true });
             const hasStorePurchaseRestored =
                 result.hasPro ||
@@ -622,8 +666,6 @@ export default function PlansScreen() {
     const mainCardTranslateY = useSharedValue(30);
     const featuresCardOpacity = useSharedValue(0);
     const featuresCardTranslateY = useSharedValue(30);
-    const guaranteeCardOpacity = useSharedValue(0);
-    const guaranteeCardTranslateY = useSharedValue(30);
     const securityOpacity = useSharedValue(0);
     const heroOpacity = useSharedValue(0);
     const buttonOpacity = useSharedValue(0);
@@ -633,12 +675,18 @@ export default function PlansScreen() {
         mainCardTranslateY.value = withDelay(100, withTiming(0, { duration: 450, easing: Easing.out(Easing.cubic) }));
         featuresCardOpacity.value = withDelay(200, withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) }));
         featuresCardTranslateY.value = withDelay(200, withTiming(0, { duration: 450, easing: Easing.out(Easing.cubic) }));
-        guaranteeCardOpacity.value = withDelay(300, withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) }));
-        guaranteeCardTranslateY.value = withDelay(300, withTiming(0, { duration: 450, easing: Easing.out(Easing.cubic) }));
         securityOpacity.value = withDelay(450, withTiming(1, { duration: 350, easing: Easing.out(Easing.quad) }));
         heroOpacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) });
         buttonOpacity.value = withDelay(500, withTiming(1, { duration: 350, easing: Easing.out(Easing.quad) }));
-    }, []);
+    }, [
+        buttonOpacity,
+        featuresCardOpacity,
+        featuresCardTranslateY,
+        heroOpacity,
+        mainCardOpacity,
+        mainCardTranslateY,
+        securityOpacity,
+    ]);
 
     const mainCardStyle = useAnimatedStyle(() => ({
         opacity: mainCardOpacity.value,
@@ -647,10 +695,6 @@ export default function PlansScreen() {
     const featuresCardStyle = useAnimatedStyle(() => ({
         opacity: featuresCardOpacity.value,
         transform: [{ translateY: featuresCardTranslateY.value }],
-    }));
-    const guaranteeCardStyle = useAnimatedStyle(() => ({
-        opacity: guaranteeCardOpacity.value,
-        transform: [{ translateY: guaranteeCardTranslateY.value }],
     }));
     const securityStyle = useAnimatedStyle(() => ({ opacity: securityOpacity.value }));
     const heroStyle = useAnimatedStyle(() => ({ opacity: heroOpacity.value }));

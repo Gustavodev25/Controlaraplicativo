@@ -114,12 +114,14 @@ export interface PurchaseResult {
     cancelAtPeriodEnd?: boolean;
     autoRenewStatus?: string | null;
     error?: string;
+    errorCode?: string;
 }
 
 export interface RestoreResult {
     success: boolean;
     hasPro: boolean;
     error?: string;
+    errorCode?: string;
 }
 
 export interface OfferingsResult {
@@ -170,22 +172,30 @@ const getProPurchaseFromRequestResult = (result: any): StorePurchase | null => {
 };
 
 type ExpoCryptoModule = typeof import('expo-crypto');
-let cryptoModulePromise: Promise<ExpoCryptoModule> | null = null;
+let cryptoModule: ExpoCryptoModule | null | undefined;
 
-const getCryptoModule = (): Promise<ExpoCryptoModule> => {
-    if (!cryptoModulePromise) {
-        cryptoModulePromise = import('expo-crypto');
+const getCryptoModule = (): ExpoCryptoModule | null => {
+    if (cryptoModule === undefined) {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            cryptoModule = require('expo-crypto') as ExpoCryptoModule;
+        } catch (error) {
+            console.warn('[IAP] expo-crypto unavailable:', error);
+            cryptoModule = null;
+        }
     }
-    return cryptoModulePromise;
+    return cryptoModule;
 };
 
 const getGooglePlayAccountId = async (firebaseUid: string): Promise<string> => {
-    const Crypto = await getCryptoModule();
+    const Crypto = getCryptoModule();
+    if (!Crypto) throw new Error('Expo Crypto indisponivel neste ambiente.');
     return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
 };
 
 const getAppleAppAccountToken = async (firebaseUid: string): Promise<string> => {
-    const Crypto = await getCryptoModule();
+    const Crypto = getCryptoModule();
+    if (!Crypto) throw new Error('Expo Crypto indisponivel neste ambiente.');
     const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
     const chars = hash.slice(0, 32).split('');
     chars[12] = '5';
@@ -210,6 +220,21 @@ const getPurchaseOriginalTransactionId = (purchase?: any): string | null => {
         purchase?.transactionId ||
         purchase?.id ||
         null
+    );
+};
+
+const APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_CODE = 'apple_purchase_linked_to_another_account';
+const APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_MESSAGE =
+    'Esta assinatura da App Store ja esta vinculada a outra conta Controlar+. Entre com a conta correta ou use outro Apple ID Sandbox para testar.';
+
+const isPurchaseLinkedToAnotherAccountError = (error: any): boolean => {
+    const code = String(error?.code || error?.errorCode || '').toLowerCase();
+    const message = String(error?.message || error || '').toLowerCase();
+    return (
+        code === APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_CODE ||
+        message.includes('already linked to another account') ||
+        message.includes('linked to another account') ||
+        message.includes('vinculada a outra conta')
     );
 };
 
@@ -394,7 +419,7 @@ export async function initializePurchases(_userId?: string): Promise<void> {
             timeoutPromise,
         ]).catch((e) => {
             connectionPromise = null;
-            console.error('[IAP] initConnection error:', e);
+            console.warn('[IAP] initConnection warning:', e);
         });
     }
 
@@ -502,7 +527,7 @@ export async function getProOffering(): Promise<OfferingsResult> {
             };
         }
     } catch (e) {
-        console.error('[IAP] fetchProducts error:', e);
+        console.warn('[IAP] fetchProducts warning:', e);
     }
     return { priceString: PRO_PRICE_STRING };
 }
@@ -666,7 +691,11 @@ export async function syncStoreKitPurchaseWithBackend(
         });
 
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Erro ao sincronizar compra Apple');
+        if (!response.ok) {
+            const error = new Error(data.error || 'Erro ao sincronizar compra Apple') as Error & { code?: string };
+            error.code = data.code || data.errorCode || undefined;
+            throw error;
+        }
 
         return {
             success: data.hasPro === true,
@@ -679,11 +708,17 @@ export async function syncStoreKitPurchaseWithBackend(
             error: data.error,
         };
     } catch (e: any) {
-        console.error('[IAP] sync-storekit-purchase error:', e);
+        const linkedToAnotherAccount = isPurchaseLinkedToAnotherAccountError(e);
+        console.warn('[IAP] sync-storekit-purchase warning:', e);
         return {
             success: false,
             hasPro: false,
-            error: e?.message || 'Erro ao sincronizar compra Apple',
+            error: linkedToAnotherAccount
+                ? APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_MESSAGE
+                : e?.message || 'Erro ao sincronizar compra Apple',
+            errorCode: linkedToAnotherAccount
+                ? APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_CODE
+                : e?.code || e?.errorCode,
         };
     }
 }
@@ -746,7 +781,7 @@ export async function syncGooglePlayPurchaseWithBackend(
             autoRenewStatus: data.autoRenewStatus || null,
         };
     } catch (e: any) {
-        console.error('[IAP] google validate-purchase error:', e);
+        console.warn('[IAP] google validate-purchase warning:', e);
         return {
             success: false,
             hasPro: false,
@@ -848,7 +883,11 @@ export async function validateReceiptWithBackend(
             }),
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Erro ao validar recibo');
+        if (!response.ok) {
+            const error = new Error(data.error || 'Erro ao validar recibo') as Error & { code?: string };
+            error.code = data.code || data.errorCode || undefined;
+            throw error;
+        }
         return {
             success: data.hasPro === true,
             hasPro: data.hasPro === true,
@@ -858,8 +897,18 @@ export async function validateReceiptWithBackend(
             autoRenewStatus: data.autoRenewStatus || null,
         };
     } catch (e: any) {
-        console.error('[IAP] validate-receipt error:', e);
-        return { success: false, error: e?.message || 'Erro ao validar recibo' };
+        const linkedToAnotherAccount = isPurchaseLinkedToAnotherAccountError(e);
+        console.warn('[IAP] validate-receipt warning:', e);
+        return {
+            success: false,
+            hasPro: false,
+            error: linkedToAnotherAccount
+                ? APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_MESSAGE
+                : e?.message || 'Erro ao validar recibo',
+            errorCode: linkedToAnotherAccount
+                ? APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_CODE
+                : e?.code || e?.errorCode,
+        };
     }
 }
 
@@ -904,7 +953,7 @@ async function getReceiptDataForValidation(
         const receiptData = await iap.getReceiptDataIOS();
         return receiptData || null;
     } catch (e) {
-        console.error('[IAP] getReceiptDataIOS failed:', e);
+        console.warn('[IAP] getReceiptDataIOS failed:', e);
         return null;
     }
 }
@@ -919,6 +968,9 @@ export async function validatePurchaseWithBackend(
 
     const storeKitResult = await syncStoreKitPurchaseWithBackend(firebaseUid, purchase);
     if (storeKitResult.success) {
+        return storeKitResult;
+    }
+    if (isPurchaseLinkedToAnotherAccountError(storeKitResult)) {
         return storeKitResult;
     }
 
@@ -939,6 +991,7 @@ export async function validatePurchaseWithBackend(
         success: false,
         hasPro: false,
         error: storeKitResult.error || 'Compra feita na Apple, mas ainda nao foi possivel ativar o Pro. Toque em Restaurar compras.',
+        errorCode: storeKitResult.errorCode,
     };
 }
 
@@ -990,10 +1043,16 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
         const result = await validatePurchaseWithBackend(firebaseUid, proPurchase);
         if (result.success) {
             await iap.finishTransaction({ purchase: proPurchase as any, isConsumable: false });
+            return { success: true, hasPro: true };
         }
-        return { success: true, hasPro: result.success };
+        return {
+            success: false,
+            hasPro: false,
+            error: result.error,
+            errorCode: result.errorCode,
+        };
     } catch (e: any) {
-        console.error('[IAP] restorePurchases error:', e);
+        console.warn('[IAP] restorePurchases warning:', e);
         return { success: false, hasPro: false, error: e.message };
     }
 }

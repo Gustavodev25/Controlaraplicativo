@@ -5,27 +5,33 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 type LocalAuthenticationModule = typeof import('expo-local-authentication');
 type SecureStoreModule = typeof import('expo-secure-store');
 
-let localAuthenticationPromise: Promise<LocalAuthenticationModule | null> | null = null;
-let secureStorePromise: Promise<SecureStoreModule | null> | null = null;
+let localAuthenticationModule: LocalAuthenticationModule | null | undefined;
+let secureStoreModule: SecureStoreModule | null | undefined;
 
-const getLocalAuthentication = () => {
-    if (!localAuthenticationPromise) {
-        localAuthenticationPromise = import('expo-local-authentication').catch((error) => {
+const getLocalAuthentication = (): LocalAuthenticationModule | null => {
+    if (localAuthenticationModule === undefined) {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            localAuthenticationModule = require('expo-local-authentication') as LocalAuthenticationModule;
+        } catch (error) {
             console.warn('[Biometric] expo-local-authentication unavailable:', error);
-            return null;
-        });
+            localAuthenticationModule = null;
+        }
     }
-    return localAuthenticationPromise;
+    return localAuthenticationModule;
 };
 
-const getSecureStore = () => {
-    if (!secureStorePromise) {
-        secureStorePromise = import('expo-secure-store').catch((error) => {
+const getSecureStore = (): SecureStoreModule | null => {
+    if (secureStoreModule === undefined) {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            secureStoreModule = require('expo-secure-store') as SecureStoreModule;
+        } catch (error) {
             console.warn('[Biometric] expo-secure-store unavailable:', error);
-            return null;
-        });
+            secureStoreModule = null;
+        }
     }
-    return secureStorePromise;
+    return secureStoreModule;
 };
 
 // Storage key generators - chaves vinculadas ao userId para segurança
@@ -64,7 +70,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
     // Verificar disponibilidade de biometria no dispositivo
     const checkBiometricAvailability = useCallback(async () => {
         try {
-            const LocalAuthentication = await getLocalAuthentication();
+            const LocalAuthentication = getLocalAuthentication();
             if (!LocalAuthentication) {
                 return {
                     hasHardware: false,
@@ -109,7 +115,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
     const saveAuthTimestamp = useCallback(async () => {
         if (!userId) return; // Sem userId, não salva
         try {
-            const SecureStore = await getSecureStore();
+            const SecureStore = getSecureStore();
             if (!SecureStore) return;
             await SecureStore.setItemAsync(getLastAuthTimeKey(userId), Date.now().toString());
         } catch (error) {
@@ -125,7 +131,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
         setState(prev => ({ ...prev, error: null }));
 
         try {
-            const LocalAuthentication = await getLocalAuthentication();
+            const LocalAuthentication = getLocalAuthentication();
             if (!LocalAuthentication) {
                 setState(prev => ({
                     ...prev,
@@ -191,7 +197,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
             // Tenta autenticar primeiro para confirmar que é o dono
             const success = await authenticate();
             if (success) {
-                const SecureStore = await getSecureStore();
+                const SecureStore = getSecureStore();
                 if (!SecureStore) return false;
                 await SecureStore.setItemAsync(getBiometricEnabledKey(userId), 'true');
                 setState(prev => ({
@@ -210,7 +216,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
     const disableBiometric = useCallback(async (): Promise<void> => {
         if (!userId) return; // Sem userId, não pode desabilitar
         try {
-            const SecureStore = await getSecureStore();
+            const SecureStore = getSecureStore();
             if (!SecureStore) return;
             await SecureStore.setItemAsync(getBiometricEnabledKey(userId), 'false');
             setState(prev => ({
@@ -247,7 +253,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
             // Verificar preferência salva no SecureStore PARA ESTE USUÁRIO
             let isEnabled = false;
             try {
-                const SecureStore = await getSecureStore();
+                const SecureStore = getSecureStore();
                 const storedEnabled = await SecureStore?.getItemAsync(getBiometricEnabledKey(userId));
                 isEnabled = storedEnabled === 'true';
             } catch (e) {
@@ -308,7 +314,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
                         // Se por acaso perdeu o timer, assume que precisa (segurança)
                         // Check last saved in secure store?
                         try {
-                            const SecureStore = await getSecureStore();
+                            const SecureStore = getSecureStore();
                             const lastStr = await SecureStore?.getItemAsync(getLastAuthTimeKey(userId));
                             if (lastStr) {
                                 const lastTime = parseInt(lastStr, 10);
