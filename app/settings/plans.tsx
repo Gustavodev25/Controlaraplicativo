@@ -187,7 +187,7 @@ export default function PlansScreen() {
             const [statusResult, offeringResult] = await Promise.all([
                 withTimeout(
                     initializePurchases(user.uid)
-                        .then(() => syncStoreSubscriptionStatus(user.uid)),
+                        .then(() => syncStoreSubscriptionStatus(user.uid, { syncActivePurchase: true })),
                     10000,
                     'Initial store status sync'
                 ),
@@ -240,7 +240,7 @@ export default function PlansScreen() {
             'Restore existing store purchase'
         );
         const statusResult = await withTimeout(
-            syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true }),
+            syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true, syncActivePurchase: true }),
             8000,
             'Post-restore store status sync'
         );
@@ -279,7 +279,7 @@ export default function PlansScreen() {
                 purchaseHandledRef.current = true;
                 clearPurchaseFallbackTimer();
                 await finishTransaction({ purchase, isConsumable: false });
-                const statusResult = await syncStoreSubscriptionStatus(user.uid);
+                const statusResult = await syncStoreSubscriptionStatus(user.uid, { syncActivePurchase: true });
                 setAlreadyPro(statusResult.hasPro || result.success);
                 await refreshProfileRef.current();
                 Alert.alert(
@@ -334,7 +334,7 @@ export default function PlansScreen() {
                     purchaseHandledRef.current = true;
                     clearPurchaseFallbackTimer();
                     await finishTransaction({ purchase, isConsumable: false });
-                    const statusResult = await syncStoreSubscriptionStatus(user.uid);
+                    const statusResult = await syncStoreSubscriptionStatus(user.uid, { syncActivePurchase: true });
                     setAlreadyPro(statusResult.hasPro || result.success);
                     await refreshProfileRef.current();
                     Alert.alert(
@@ -475,7 +475,7 @@ export default function PlansScreen() {
                 }
 
                 const statusResult = await withTimeout(
-                    syncStoreSubscriptionStatus(user.uid),
+                    syncStoreSubscriptionStatus(user.uid, { syncActivePurchase: true }),
                     8000,
                     'Post-purchase store status sync'
                 );
@@ -566,7 +566,7 @@ export default function PlansScreen() {
         setRestoring(true);
         try {
             const result = await restorePurchases(user.uid);
-            const statusResult = await syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true });
+            const statusResult = await syncStoreSubscriptionStatus(user.uid, { refreshServerStatus: true, syncActivePurchase: true });
             const hasStorePurchaseRestored =
                 result.hasPro ||
                 (statusResult.hasPro && isNativeStoreProviderValue(statusResult.provider));
@@ -601,7 +601,7 @@ export default function PlansScreen() {
         try {
             await openSubscriptionManagement();
             if (user?.uid) {
-                const statusResult = await syncStoreSubscriptionStatus(user.uid);
+                const statusResult = await syncStoreSubscriptionStatus(user.uid, { syncActivePurchase: true });
                 setAlreadyPro(statusResult.hasPro);
                 if (statusResult.success) await refreshProfile();
             }

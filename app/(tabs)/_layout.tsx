@@ -1,5 +1,4 @@
 import { GlobalSyncBanner } from '@/components/ui/GlobalSyncBanner';
-import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Redirect, Tabs } from 'expo-router';
@@ -15,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator } from 'react-native';
 import {
   AccessibilityInfo,
   Platform,
@@ -223,7 +223,7 @@ function CustomTabBar({ state, navigation }: { state: any; navigation: any }) {
 
   const reducedMotionRef = useRef(false);
 
-  const barProgress = useSharedValue(0);
+  const barProgress = useSharedValue(1);
   const indicatorX = useSharedValue(0);
   const menuProgress = useSharedValue(0);
 
@@ -275,13 +275,8 @@ function CustomTabBar({ state, navigation }: { state: any; navigation: any }) {
     };
   }, []);
 
-  useEffect(() => {
-    const reduced = reducedMotionRef.current;
-
-    barProgress.value = reduced
-      ? withTiming(1, { duration: 120 })
-      : withSpring(1, SPRING_SOFT);
-  }, [barProgress]);
+  // barProgress starts at 1 — the tab bar is always visible immediately.
+  // No entrance animation needed.
 
   useEffect(() => {
     if (!visibleMenu) {
@@ -580,11 +575,17 @@ function CustomTabBar({ state, navigation }: { state: any; navigation: any }) {
   );
 }
 
+const renderTabBar = (props: any) => <CustomTabBar {...props} />;
+
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuthContext();
 
   if (isLoading) {
-    return <IosCoreLoader style={styles.loadingContainer} />;
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#F5F5F7" />
+      </View>
+    );
   }
 
   if (!isAuthenticated) {
@@ -593,12 +594,10 @@ export default function TabLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => <CustomTabBar {...props} />}
-      detachInactiveScreens
+      tabBar={renderTabBar}
       screenOptions={{
         headerShown: false,
         animation: 'none',
-        freezeOnBlur: true,
         lazy: true,
       }}
     >

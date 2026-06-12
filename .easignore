@@ -11,12 +11,22 @@ server/
 .expo-build-check/
 dist/
 
+# Version control and local agent files
+.git
+.git/
+.git/**
+/.git
+/.git/**
+**/.git
+**/.git/**
+.codex/
+.agents/
+
 # Dev/IDE files
 .vscode/
 .openclaude/
 .agent/
 .claude/
-.git/
 docs/
 
 # Logs and temp

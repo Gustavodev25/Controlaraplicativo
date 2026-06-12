@@ -8,32 +8,58 @@
  */
 
 import { Platform } from 'react-native';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
-import * as Crypto from 'expo-crypto';
-import { auth } from '@/services/firebase';
+import {
+    getAppleSubscriptionStatus,
+    getFirebaseAuthorizationHeaders,
+    getGooglePlaySubscriptionStatus,
+    getStoreSubscriptionStatus,
+    type AppleSubscriptionStatusOptions,
+    type AppleSubscriptionStatusResult,
+    type StoreSubscriptionStatusOptions,
+    type StoreSubscriptionStatusResult,
+} from '@/services/storeSubscriptionStatus';
 
 // ---------------------------------------------------------------------------
-// Expo Go detection — MUST happen before any require of react-native-iap
+// Expo Go detection — keep lazy so importing this file during app startup does
+// not initialize extra native modules.
 // ---------------------------------------------------------------------------
 
-const isExpoGo =
-    Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+let isExpoGoCache: boolean | null = null;
+
+function isRunningInExpoGo(): boolean {
+    if (isExpoGoCache !== null) return isExpoGoCache;
+
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const Constants = require('expo-constants').default;
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const ExecutionEnvironment = require('expo-constants').ExecutionEnvironment;
+        isExpoGoCache = Constants?.executionEnvironment === ExecutionEnvironment?.StoreClient;
+    } catch (e) {
+        console.warn('[IAP] expo-constants unavailable, disabling IAP:', e);
+        isExpoGoCache = true;
+    }
+
+    return isExpoGoCache;
+}
 
 // ---------------------------------------------------------------------------
 // Lazy module reference (only loaded in native builds)
 // ---------------------------------------------------------------------------
 
 let _iap: typeof import('react-native-iap') | null = null;
+let _iapLoadFailed = false;
 
 function getIAP(): typeof import('react-native-iap') | null {
-    if (isExpoGo) return null;
+    if (isRunningInExpoGo() || _iapLoadFailed) return null;
     if (_iap) return _iap;
 
     try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         _iap = require('react-native-iap') as typeof import('react-native-iap');
         return _iap;
     } catch (e) {
+        _iapLoadFailed = true;
         console.warn('[IAP] react-native-iap could not be loaded:', e);
         return null;
     }
@@ -108,47 +134,17 @@ export interface OfferingsResult {
     error?: string;
 }
 
-export interface AppleSubscriptionSnapshot {
-    plan: string;
-    status: string;
-    provider?: string | null;
-    paymentProvider?: string | null;
-    iapSource?: string | null;
-    productId?: string | null;
-    billingCycle?: 'monthly' | 'yearly' | null;
-    price?: number | null;
-    currency?: string | null;
-    expiresAt?: string | null;
-    nextBillingDate?: string | null;
-    renewalDate?: string | null;
-    startedAt?: string | null;
-    cancelledAt?: string | null;
-    cancelAtPeriodEnd?: boolean;
-    autoRenewStatus?: string | null;
-    transactionId?: string | null;
-    originalTransactionId?: string | null;
-    updatedAt?: string | null;
-}
-
-export interface AppleSubscriptionStatusResult {
-    success: boolean;
-    hasPro: boolean;
-    plan: string;
-    status: string;
-    provider: string | null;
-    expiresAt: string | null;
-    cancelAtPeriodEnd: boolean;
-    autoRenewStatus?: string | null;
-    subscription: AppleSubscriptionSnapshot | null;
-    error?: string;
-}
-
-interface AppleSubscriptionStatusOptions {
-    refreshServerStatus?: boolean;
-}
-
-export type StoreSubscriptionStatusResult = AppleSubscriptionStatusResult;
-export type StoreSubscriptionStatusOptions = AppleSubscriptionStatusOptions;
+export {
+    getAppleSubscriptionStatus,
+    getGooglePlaySubscriptionStatus,
+    getStoreSubscriptionStatus,
+};
+export type {
+    AppleSubscriptionStatusOptions,
+    AppleSubscriptionStatusResult,
+    StoreSubscriptionStatusOptions,
+    StoreSubscriptionStatusResult,
+};
 
 let connectionPromise: Promise<void> | null = null;
 let googlePlayOfferToken: string | null = null;
@@ -173,16 +169,23 @@ const getProPurchaseFromRequestResult = (result: any): StorePurchase | null => {
     return purchases.find((item: StorePurchase) => item?.productId === PRO_PRODUCT_ID) || null;
 };
 
-const getFirebaseAuthorizationHeaders = async (): Promise<Record<string, string>> => {
-    const idToken = await auth.currentUser?.getIdToken();
-    return idToken ? { Authorization: `Bearer ${idToken}` } : {};
+type ExpoCryptoModule = typeof import('expo-crypto');
+let cryptoModulePromise: Promise<ExpoCryptoModule> | null = null;
+
+const getCryptoModule = (): Promise<ExpoCryptoModule> => {
+    if (!cryptoModulePromise) {
+        cryptoModulePromise = import('expo-crypto');
+    }
+    return cryptoModulePromise;
 };
 
 const getGooglePlayAccountId = async (firebaseUid: string): Promise<string> => {
+    const Crypto = await getCryptoModule();
     return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
 };
 
 const getAppleAppAccountToken = async (firebaseUid: string): Promise<string> => {
+    const Crypto = await getCryptoModule();
     const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, firebaseUid);
     const chars = hash.slice(0, 32).split('');
     chars[12] = '5';
@@ -370,7 +373,7 @@ export async function finishTransaction(opts: {
 
 export async function initializePurchases(_userId?: string): Promise<void> {
     if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
-    if (isExpoGo) {
+    if (isRunningInExpoGo()) {
         console.log('[IAP] Skipping — running in Expo Go');
         return;
     }
@@ -379,13 +382,20 @@ export async function initializePurchases(_userId?: string): Promise<void> {
     if (!iap) return;
 
     if (!connectionPromise) {
-        connectionPromise = iap
-            .initConnection()
-            .then(() => undefined)
-            .catch((e) => {
-                connectionPromise = null;
-                console.error('[IAP] initConnection error:', e);
-            });
+        // Wrap initConnection with a timeout to prevent startup deadlock.
+        // iOS watchdog kills apps that take too long to become responsive.
+        const INIT_TIMEOUT_MS = 10000;
+        const timeoutPromise = new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error('[IAP] initConnection timed out')), INIT_TIMEOUT_MS)
+        );
+
+        connectionPromise = Promise.race([
+            iap.initConnection().then(() => undefined),
+            timeoutPromise,
+        ]).catch((e) => {
+            connectionPromise = null;
+            console.error('[IAP] initConnection error:', e);
+        });
     }
 
     await connectionPromise;
@@ -465,7 +475,7 @@ function extractIntroductoryOfferInfo(product: ProductSubscription): Partial<Off
 }
 
 export async function getProOffering(): Promise<OfferingsResult> {
-    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) {
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isRunningInExpoGo()) {
         return { priceString: PRO_PRICE_STRING };
     }
 
@@ -497,96 +507,6 @@ export async function getProOffering(): Promise<OfferingsResult> {
     return { priceString: PRO_PRICE_STRING };
 }
 
-function createFallbackStatus(error?: string): AppleSubscriptionStatusResult {
-    return {
-        success: false,
-        hasPro: false,
-        plan: 'free',
-        status: 'inactive',
-        provider: null,
-        expiresAt: null,
-        cancelAtPeriodEnd: false,
-        subscription: null,
-        error,
-    };
-}
-
-export async function getAppleSubscriptionStatus(
-    firebaseUid: string,
-    options: AppleSubscriptionStatusOptions = {}
-): Promise<AppleSubscriptionStatusResult> {
-    try {
-        const refreshParam = options.refreshServerStatus ? '&refresh=true' : '';
-        const authorizationHeaders = await getFirebaseAuthorizationHeaders();
-        const response = await fetch(
-            `${BACKEND_URL}/api/apple/subscription-status?firebaseUid=${encodeURIComponent(firebaseUid)}${refreshParam}`,
-            { headers: authorizationHeaders }
-        );
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(data.error || 'Erro ao consultar assinatura Apple');
-        }
-
-        return {
-            success: true,
-            hasPro: data.hasPro === true,
-            plan: String(data.plan || data.subscription?.plan || 'free').trim().toLowerCase(),
-            status: String(data.status || data.subscription?.status || 'inactive').trim().toLowerCase(),
-            provider: data.provider || data.subscription?.provider || null,
-            expiresAt: data.expiresAt || data.subscription?.expiresAt || null,
-            cancelAtPeriodEnd: data.cancelAtPeriodEnd === true || data.subscription?.cancelAtPeriodEnd === true,
-            autoRenewStatus: data.autoRenewStatus || data.subscription?.autoRenewStatus || null,
-            subscription: data.subscription || null,
-        };
-    } catch (e: any) {
-        console.warn('[IAP] subscription-status unavailable:', e);
-        return createFallbackStatus(e?.message || 'Erro ao consultar assinatura Apple');
-    }
-}
-
-export async function getGooglePlaySubscriptionStatus(
-    firebaseUid: string,
-    options: StoreSubscriptionStatusOptions = {}
-): Promise<StoreSubscriptionStatusResult> {
-    try {
-        const refreshParam = options.refreshServerStatus ? '&refresh=true' : '';
-        const authorizationHeaders = await getFirebaseAuthorizationHeaders();
-        const response = await fetch(
-            `${BACKEND_URL}/api/google/subscription-status?firebaseUid=${encodeURIComponent(firebaseUid)}${refreshParam}`,
-            { headers: authorizationHeaders }
-        );
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(data.error || 'Erro ao consultar assinatura Google Play');
-        }
-
-        return {
-            success: true,
-            hasPro: data.hasPro === true,
-            plan: String(data.plan || data.subscription?.plan || 'free').trim().toLowerCase(),
-            status: String(data.status || data.subscription?.status || 'inactive').trim().toLowerCase(),
-            provider: data.provider || data.subscription?.provider || null,
-            expiresAt: data.expiresAt || data.subscription?.expiresAt || null,
-            cancelAtPeriodEnd: data.cancelAtPeriodEnd === true || data.subscription?.cancelAtPeriodEnd === true,
-            autoRenewStatus: data.autoRenewStatus || data.subscription?.autoRenewStatus || null,
-            subscription: data.subscription || null,
-        };
-    } catch (e: any) {
-        console.warn('[IAP] google subscription-status unavailable:', e);
-        return createFallbackStatus(e?.message || 'Erro ao consultar assinatura Google Play');
-    }
-}
-
-export async function getStoreSubscriptionStatus(
-    firebaseUid: string,
-    options: StoreSubscriptionStatusOptions = {}
-): Promise<StoreSubscriptionStatusResult> {
-    if (Platform.OS === 'android') {
-        return getGooglePlaySubscriptionStatus(firebaseUid, options);
-    }
-    return getAppleSubscriptionStatus(firebaseUid, options);
-}
-
 async function getStoreKitSignedTransaction(purchase?: Partial<StorePurchase> | Record<string, any> | null): Promise<string | null> {
     const purchaseToken = (purchase as any)?.purchaseToken;
     if (isJws(purchaseToken)) return purchaseToken;
@@ -607,7 +527,7 @@ async function getStoreKitSignedTransaction(purchase?: Partial<StorePurchase> | 
 }
 
 async function getActiveStoreKitPurchase(): Promise<Record<string, any> | null> {
-    if (Platform.OS !== 'ios' || isExpoGo) return null;
+    if (Platform.OS !== 'ios' || isRunningInExpoGo()) return null;
 
     const iap = getIAP();
     if (!iap) return null;
@@ -672,7 +592,7 @@ async function getActiveStoreKitPurchase(): Promise<Record<string, any> | null> 
 }
 
 async function getActiveGooglePlayPurchase(): Promise<Record<string, any> | null> {
-    if (Platform.OS !== 'android' || isExpoGo) return null;
+    if (Platform.OS !== 'android' || isRunningInExpoGo()) return null;
 
     const iap = getIAP();
     if (!iap) return null;
@@ -716,7 +636,7 @@ export async function syncStoreKitPurchaseWithBackend(
     firebaseUid: string,
     purchase?: Partial<StorePurchase> | Record<string, any> | null
 ): Promise<PurchaseResult> {
-    if (Platform.OS !== 'ios' || isExpoGo) {
+    if (Platform.OS !== 'ios' || isRunningInExpoGo()) {
         return { success: false, hasPro: false, error: 'StoreKit indisponivel neste ambiente' };
     }
 
@@ -781,7 +701,7 @@ export async function syncGooglePlayPurchaseWithBackend(
     firebaseUid: string,
     purchase?: Partial<StorePurchase> | Record<string, any> | null
 ): Promise<PurchaseResult> {
-    if (Platform.OS !== 'android' || isExpoGo) {
+    if (Platform.OS !== 'android' || isRunningInExpoGo()) {
         return { success: false, hasPro: false, error: 'Google Play Billing indisponivel neste ambiente' };
     }
 
@@ -857,7 +777,7 @@ export async function syncAppleSubscriptionStatus(
 ): Promise<AppleSubscriptionStatusResult> {
     const currentStatus = await getAppleSubscriptionStatus(firebaseUid, options);
 
-    if (Platform.OS !== 'ios' || isExpoGo) {
+    if (Platform.OS !== 'ios' || isRunningInExpoGo() || options.syncActivePurchase !== true) {
         return currentStatus;
     }
 
@@ -879,7 +799,7 @@ export async function syncGooglePlaySubscriptionStatus(
 ): Promise<StoreSubscriptionStatusResult> {
     const currentStatus = await getGooglePlaySubscriptionStatus(firebaseUid, options);
 
-    if (Platform.OS !== 'android' || isExpoGo || currentStatus.hasPro) {
+    if (Platform.OS !== 'android' || isRunningInExpoGo() || currentStatus.hasPro || options.syncActivePurchase !== true) {
         return currentStatus;
     }
 
@@ -946,7 +866,7 @@ export async function validateReceiptWithBackend(
 async function getReceiptDataForValidation(
     options: { refreshIfMissing?: boolean; attempts?: number; retryDelayMs?: number } = {}
 ): Promise<string | null> {
-    if (Platform.OS !== 'ios' || isExpoGo) return null;
+    if (Platform.OS !== 'ios' || isRunningInExpoGo()) return null;
 
     const iap = getIAP();
     if (!iap) return null;
@@ -1028,7 +948,7 @@ export async function restorePurchases(firebaseUid: string): Promise<RestoreResu
         return { success: true, hasPro: true };
     }
 
-    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) {
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isRunningInExpoGo()) {
         return {
             success: accountStatus.success,
             hasPro: false,
@@ -1082,7 +1002,7 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<Sto
     if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
         throw new Error('Assinaturas nativas nao sao suportadas nesta plataforma.');
     }
-    if (isExpoGo) {
+    if (isRunningInExpoGo()) {
         throw new Error('Compras não são suportadas no Expo Go. Use um build nativo (EAS).');
     }
     const iap = getIAP();
@@ -1143,7 +1063,7 @@ export async function purchaseProSubscription(firebaseUid?: string): Promise<Sto
 }
 
 export async function openSubscriptionManagement(): Promise<void> {
-    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isExpoGo) return;
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || isRunningInExpoGo()) return;
 
     const iap = getIAP();
     if (!iap) throw new Error('IAP nao disponivel neste ambiente');

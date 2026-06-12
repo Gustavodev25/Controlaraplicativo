@@ -22,7 +22,7 @@ import {
 } from '@/services/performance/types';
 
 const DEFAULT_FLAGS: PerformanceFeatureFlags = DEFAULT_PERFORMANCE_FLAGS;
-const IS_DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__;
+const IS_DEV_RUNTIME = ((): boolean => { try { return typeof __DEV__ !== 'undefined' && !!__DEV__; } catch { return false; } })();
 const ADAPTIVE_FPS_RUNTIME_ENABLED = process.env.EXPO_PUBLIC_ENABLE_ADAPTIVE_FPS === '1';
 const RUNTIME_MONITOR_ENABLED =
   process.env.EXPO_PUBLIC_ENABLE_PERF_MONITOR === '1' ||
@@ -117,7 +117,7 @@ export function PerformanceProvider({ children }: { children: React.ReactNode })
         if (!mounted) {
           return;
         }
-        if (__DEV__) {
+        if (IS_DEV_RUNTIME) {
           console.warn('[Performance] Failed to detect device tier. Using fallback tier.', error);
         }
         setTierInfo(FALLBACK_TIER);

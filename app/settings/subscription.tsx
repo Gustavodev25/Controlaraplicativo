@@ -3,6 +3,7 @@ import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
 import { openSubscriptionManagement, restorePurchases, syncStoreSubscriptionStatus } from '@/services/iapService';
+import { getStoreSubscriptionStatus } from '@/services/storeSubscriptionStatus';
 import { safeBack } from '@/utils/navigation';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
@@ -177,6 +178,7 @@ const getStatusConfig = (status: string) => {
 export default function SubscriptionSettingsScreen() {
     const router = useRouter();
     const { user, profile, refreshProfile, signOut } = useAuthContext();
+    const userId = user?.uid;
     const insets = useSafeAreaInsets();
 
     // State
@@ -194,7 +196,7 @@ export default function SubscriptionSettingsScreen() {
 
     // Load subscription data from Firebase
     const loadSubscriptionData = useCallback(async (options: { syncStoreStatus?: boolean } = {}) => {
-        if (!user?.uid) {
+        if (!userId) {
             setIsLoading(false);
             setIsRefreshing(false);
             return;
@@ -203,7 +205,7 @@ export default function SubscriptionSettingsScreen() {
         try {
             if (options.syncStoreStatus !== false) {
                 const statusResult = await withTimeout(
-                    syncStoreSubscriptionStatus(user.uid),
+                    getStoreSubscriptionStatus(userId, { syncActivePurchase: false }),
                     8000,
                     'Store subscription sync'
                 );
@@ -218,8 +220,8 @@ export default function SubscriptionSettingsScreen() {
 
             const subscriptionDataResult = await withTimeout(
                 Promise.all([
-                    databaseService.getFullSubscription(user.uid),
-                    databaseService.getPaymentHistory(user.uid, 10),
+                    databaseService.getFullSubscription(userId),
+                    databaseService.getPaymentHistory(userId, 10),
                 ]),
                 10000,
                 'Subscription data load'
@@ -243,7 +245,7 @@ export default function SubscriptionSettingsScreen() {
             setIsLoading(false);
             setIsRefreshing(false);
         }
-    }, [user?.uid]);
+    }, [userId]);
 
     // Reload when the screen is opened again from App Store management or purchase flow
     useFocusEffect(useCallback(() => {
@@ -358,7 +360,10 @@ export default function SubscriptionSettingsScreen() {
         try {
             await openSubscriptionManagement();
             if (user?.uid) {
-                const statusResult = await syncStoreSubscriptionStatus(user.uid);
+                const statusResult = await syncStoreSubscriptionStatus(user.uid, {
+                    refreshServerStatus: true,
+                    syncActivePurchase: true,
+                });
                 if (statusResult.success) await refreshProfile();
                 await loadSubscriptionData({ syncStoreStatus: false });
             }

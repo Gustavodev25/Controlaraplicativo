@@ -4,7 +4,7 @@ import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ORANGE_GLOW_COLOR = '#D97757';
-const IS_DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__;
+const IS_DEV_RUNTIME = ((): boolean => { try { return typeof __DEV__ !== 'undefined' && !!__DEV__; } catch { return false; } })();
 const SHOULD_PULSE_GLOW_BY_DEFAULT =
     process.env.EXPO_PUBLIC_ENABLE_GLOW_PULSE === '1' ||
     (IS_DEV_RUNTIME && process.env.EXPO_PUBLIC_DEV_GLOW_PULSE === '1');

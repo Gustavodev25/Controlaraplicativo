@@ -713,11 +713,12 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase - singleton pattern
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
+let app: FirebaseApp = undefined!;
+let auth: Auth = undefined!;
+let db: Firestore = undefined!;
 
-if (getApps().length === 0) {
+try {
+  if (getApps().length === 0) {
     app = initializeApp(firebaseConfig);
 
     const getReactNativePersistence = (FirebaseAuth as FirebaseAuthModuleWithRnPersistence).getReactNativePersistence;
@@ -729,16 +730,31 @@ if (getApps().length === 0) {
         auth = initializeAuth(app, {
             persistence: inMemoryPersistence
         });
-        if (__DEV__) {
-            console.warn('[Firebase] React Native persistence unavailable. Using in-memory auth persistence.');
-        }
+        try {
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+                console.warn('[Firebase] React Native persistence unavailable. Using in-memory auth persistence.');
+            }
+        } catch { /* __DEV__ not defined */ }
     }
 
     db = getFirestore(app);
-} else {
+  } else {
     app = getApps()[0];
     auth = getAuth(app);
     db = getFirestore(app);
+  }
+} catch (firebaseInitError) {
+  // Firebase initialization failed — attempt minimal fallback
+  console.error('[Firebase] Initialization failed:', firebaseInitError);
+  if (!app) {
+    app = getApps()[0] || initializeApp(firebaseConfig);
+  }
+  if (!auth) {
+    try { auth = getAuth(app); } catch { auth = initializeAuth(app, { persistence: inMemoryPersistence }); }
+  }
+  if (!db) {
+    db = getFirestore(app);
+  }
 }
 
 export { app, auth, db };

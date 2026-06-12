@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
         fontFamily: 'AROneSans_400Regular',
     },
     loadingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         justifyContent: 'center',
         alignItems: 'center',
         borderRadius: 22,

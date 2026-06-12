@@ -40,11 +40,17 @@ export default function OpenFinanceCallbackScreen() {
             });
 
             if (!mounted) return;
-            router.replace('/(tabs)/open-finance');
+            try { router.replace('/(tabs)/open-finance'); } catch (e) {
+                console.warn('[Callback] Navigation failed:', e);
+            }
         };
 
         persistAndRedirect().catch(() => {
-            if (mounted) router.replace('/(tabs)/open-finance');
+            if (mounted) {
+                try { router.replace('/(tabs)/open-finance'); } catch (e) {
+                    console.warn('[Callback] Fallback navigation failed:', e);
+                }
+            }
         });
 
         return () => {

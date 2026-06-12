@@ -1,11 +1,12 @@
 import { useAuthContext } from '@/contexts/AuthContext';
-import { syncStoreSubscriptionStatus } from '@/services/iapService';
+import { getStoreSubscriptionStatus } from '@/services/storeSubscriptionStatus';
 import { usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 
 const ACTIVE_PRO_STATUSES = new Set(['active', 'trial', 'trialing']);
 const NATIVE_STORE_PROVIDERS = new Set(['apple', 'app_store', 'storekit', 'google', 'google_play', 'play_store']);
 const STORE_STATUS_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+const STARTUP_TIME_MS = Date.now();
 
 const parseSubscriptionDateMs = (value: any): number | null => {
     if (!value) return null;
@@ -75,7 +76,7 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
             !expiresMs ||
             status === 'trial' ||
             status === 'trialing' ||
-            expiresMs <= Date.now() + STORE_STATUS_REFRESH_WINDOW_MS
+            expiresMs <= STARTUP_TIME_MS + STORE_STATUS_REFRESH_WINDOW_MS
         );
 
     useEffect(() => {
@@ -90,18 +91,20 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
         let cancelled = false;
         syncInFlightKeyRef.current = subscriptionKey;
 
-        syncStoreSubscriptionStatus(user.uid, {
-            refreshServerStatus: !expiresMs || expiresMs <= Date.now() + STORE_STATUS_REFRESH_WINDOW_MS,
-        })
-            .then(async (statusResult) => {
+        // Startup must stay backend-only here. Native StoreKit/Google Billing
+        // is loaded later from explicit purchase/restore flows.
+        const safeSync = async () => {
+            try {
+                const statusResult = await getStoreSubscriptionStatus(user.uid, {
+                    refreshServerStatus: !expiresMs || expiresMs <= Date.now() + STORE_STATUS_REFRESH_WINDOW_MS,
+                    syncActivePurchase: false,
+                });
                 if (!cancelled && statusResult.success) {
                     await refreshProfile();
                 }
-            })
-            .catch((error) => {
+            } catch (error) {
                 console.warn('[SubscriptionBlocker] Store subscription sync failed:', error);
-            })
-            .finally(() => {
+            } finally {
                 if (syncInFlightKeyRef.current === subscriptionKey) {
                     syncInFlightKeyRef.current = null;
                 }
@@ -109,7 +112,10 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
                 if (!cancelled) {
                     forceStoreSyncRender((value) => value + 1);
                 }
-            });
+            }
+        };
+
+        safeSync();
 
         return () => {
             cancelled = true;
@@ -163,7 +169,17 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
         if (hasRedirectedRef.current) return;
         hasRedirectedRef.current = true;
 
-        router.replace('/settings/subscription');
+        // Defer navigation to next tick to ensure navigator is fully mounted.
+        // Calling router.replace synchronously in an effect can crash expo-router
+        // when the Stack navigator has not finished its initial render.
+        setTimeout(() => {
+            try {
+                router.replace('/settings/subscription');
+            } catch (e) {
+                console.warn('[SubscriptionBlocker] Navigation failed:', e);
+                hasRedirectedRef.current = false;
+            }
+        }, 0);
     }, [
         expiresMs,
         isActiveStatus,

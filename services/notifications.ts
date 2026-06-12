@@ -1,8 +1,43 @@
-﻿﻿
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { databaseService } from './firebase';
-import { CreditCardAccount, formatCurrency } from './invoiceBuilder';
+
+// ---------------------------------------------------------------------------
+// Lazy imports — databaseService and invoiceBuilder are heavy modules (they
+// transitively load Firebase + native modules). If they throw during module
+// evaluation the entire app would crash at startup. By deferring their load
+// to first use we isolate potential failures to the notification functions
+// that actually need them (which already have try-catch).
+// ---------------------------------------------------------------------------
+let _databaseService: any = null;
+function getDatabaseService() {
+    if (!_databaseService) {
+        try {
+            _databaseService = require('./firebase').databaseService;
+        } catch (e) {
+            console.warn('[NotificationService] Failed to load databaseService:', e);
+        }
+    }
+    return _databaseService;
+}
+
+let _invoiceBuilderCache: { CreditCardAccount: any; formatCurrency: any } | null = null;
+function getInvoiceBuilder() {
+    if (!_invoiceBuilderCache) {
+        try {
+            const mod = require('./invoiceBuilder');
+            _invoiceBuilderCache = { CreditCardAccount: mod.CreditCardAccount, formatCurrency: mod.formatCurrency };
+        } catch (e) {
+            console.warn('[NotificationService] Failed to load invoiceBuilder:', e);
+            _invoiceBuilderCache = { CreditCardAccount: null, formatCurrency: (v: number) => String(v) };
+        }
+    }
+    return _invoiceBuilderCache;
+}
+
+// Re-export the type so callers keep working
+import type { CreditCardAccount } from './invoiceBuilder';
+export type { CreditCardAccount as CreditCardAccountType };
 
 // Types (mirrored from RecurrenceView for consistency)
 export interface RecurrenceItem {
@@ -867,7 +902,7 @@ export const notificationService = {
                 if (preferences.showAmount) {
                     const amount = account.currentBill?.totalAmount || account.balance || 0;
                     if (amount > 0) {
-                        amountStr = formatCurrency(amount);
+                        amountStr = getInvoiceBuilder().formatCurrency(amount);
                     }
                 }
 
@@ -1087,7 +1122,8 @@ export const notificationService = {
 
             let recurrences = params.recurrences;
             if (!recurrences) {
-                const recurrencesResult = await databaseService.getRecurrences(userId);
+                const db = getDatabaseService();
+                const recurrencesResult = db ? await db.getRecurrences(userId) : { success: false };
                 recurrences = (recurrencesResult.success && Array.isArray(recurrencesResult.data))
                     ? recurrencesResult.data
                     : [];
@@ -1095,7 +1131,8 @@ export const notificationService = {
 
             let accounts = params.accounts;
             if (!accounts) {
-                const accountsResult = await databaseService.getAccounts(userId);
+                const db = getDatabaseService();
+                const accountsResult = db ? await db.getAccounts(userId) : { success: false };
                 const rawAccounts = (accountsResult.success && Array.isArray(accountsResult.data))
                     ? accountsResult.data
                     : [];
@@ -1104,7 +1141,8 @@ export const notificationService = {
 
             let plan = params.plan;
             if (!plan) {
-                const subscriptionResult = await databaseService.getSubscription(userId);
+                const db = getDatabaseService();
+                const subscriptionResult = db ? await db.getSubscription(userId) : { success: false };
                 plan = subscriptionResult.success ? subscriptionResult.data : null;
             }
 
@@ -1131,12 +1169,15 @@ export const notificationService = {
         const hasLogged = await AsyncStorage.getItem(logKey);
 
         if (!hasLogged) {
-            await databaseService.logNotification(userId, {
-                recurrenceId: account.id, // Reusing field for ID
-                name: `Fatura ${account.name}`,
-                dueDate: dateStr,
-                type: 'invoice'
-            });
+            const db = getDatabaseService();
+            if (db) {
+                await db.logNotification(userId, {
+                    recurrenceId: account.id, // Reusing field for ID
+                    name: `Fatura ${account.name}`,
+                    dueDate: dateStr,
+                    type: 'invoice'
+                });
+            }
             await AsyncStorage.setItem(logKey, 'true');
         }
     },
@@ -1147,12 +1188,15 @@ export const notificationService = {
         const hasLogged = await AsyncStorage.getItem(logKey);
 
         if (!hasLogged) {
-            await databaseService.logNotification(userId, {
-                recurrenceId: `plan_${triggerKey}`,
-                name: 'Plano Controlar+',
-                dueDate: dateStr,
-                type: 'plan'
-            });
+            const db = getDatabaseService();
+            if (db) {
+                await db.logNotification(userId, {
+                    recurrenceId: `plan_${triggerKey}`,
+                    name: 'Plano Controlar+',
+                    dueDate: dateStr,
+                    type: 'plan'
+                });
+            }
             await AsyncStorage.setItem(logKey, 'true');
         }
     },
@@ -1175,12 +1219,15 @@ export const notificationService = {
                 return;
             }
 
-            await databaseService.logNotification(userId, {
-                recurrenceId: item.id,
-                name: item.name,
-                dueDate: dateStr,
-                type: type
-            });
+            const db = getDatabaseService();
+            if (db) {
+                await db.logNotification(userId, {
+                    recurrenceId: item.id,
+                    name: item.name,
+                    dueDate: dateStr,
+                    type: type
+                });
+            }
             await AsyncStorage.setItem(logKey, 'true');
         }
     }

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Controlar+",
     "slug": "controlarapp",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "controlarapp",
@@ -17,8 +17,7 @@
         "NSMicrophoneUsageDescription": "Acesso ao microfone necessário para algumas funcionalidades de mídia.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.gustavodev25.controlarapp",
-      "buildNumber": "7"
+      "bundleIdentifier": "com.gustavodev25.controlarapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -68,7 +67,7 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": false
     },
     "extra": {
       "router": {},

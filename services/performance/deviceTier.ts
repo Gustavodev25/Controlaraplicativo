@@ -29,9 +29,12 @@ function getExpoDevice(): ExpoDeviceModule | null {
     cachedExpoDevice = null;
   }
 
-  if (__DEV__ && !cachedExpoDevice && !hasWarnedMissingExpoDevice) {
-    hasWarnedMissingExpoDevice = true;
-    console.warn('[Performance] expo-device unavailable. Using fallback device tier.');
+  if (!cachedExpoDevice && !hasWarnedMissingExpoDevice) {
+    const isDev = (() => { try { return typeof __DEV__ !== 'undefined' && !!__DEV__; } catch { return false; } })();
+    if (isDev) {
+      hasWarnedMissingExpoDevice = true;
+      console.warn('[Performance] expo-device unavailable. Using fallback device tier.');
+    }
   }
 
   return cachedExpoDevice;

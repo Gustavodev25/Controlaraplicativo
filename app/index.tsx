@@ -37,7 +37,9 @@ export default function Index() {
 
         // User is not logged in, go to welcome screen
         if (!isFirebaseAuth) {
-            router.replace('/(public)/welcome');
+            try { router.replace('/(public)/welcome'); } catch (e) {
+                console.warn('[Index] Navigation to welcome failed:', e);
+            }
             return;
         }
 
@@ -50,7 +52,9 @@ export default function Index() {
         }
 
         // Tudo ok, vai pro dashboard
-        router.replace('/(tabs)/dashboard');
+        try { router.replace('/(tabs)/dashboard'); } catch (e) {
+            console.warn('[Index] Navigation to dashboard failed:', e);
+        }
     }, [
         isAuthLoading,
         isBiometricLoading,
