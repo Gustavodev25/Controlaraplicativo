@@ -1,8 +1,32 @@
 // Biometric Authentication Hook
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
+
+type LocalAuthenticationModule = typeof import('expo-local-authentication');
+type SecureStoreModule = typeof import('expo-secure-store');
+
+let localAuthenticationPromise: Promise<LocalAuthenticationModule | null> | null = null;
+let secureStorePromise: Promise<SecureStoreModule | null> | null = null;
+
+const getLocalAuthentication = () => {
+    if (!localAuthenticationPromise) {
+        localAuthenticationPromise = import('expo-local-authentication').catch((error) => {
+            console.warn('[Biometric] expo-local-authentication unavailable:', error);
+            return null;
+        });
+    }
+    return localAuthenticationPromise;
+};
+
+const getSecureStore = () => {
+    if (!secureStorePromise) {
+        secureStorePromise = import('expo-secure-store').catch((error) => {
+            console.warn('[Biometric] expo-secure-store unavailable:', error);
+            return null;
+        });
+    }
+    return secureStorePromise;
+};
 
 // Storage key generators - chaves vinculadas ao userId para segurança
 const getBiometricEnabledKey = (userId: string) => `biometric_enabled_${userId}`;
@@ -40,6 +64,16 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
     // Verificar disponibilidade de biometria no dispositivo
     const checkBiometricAvailability = useCallback(async () => {
         try {
+            const LocalAuthentication = await getLocalAuthentication();
+            if (!LocalAuthentication) {
+                return {
+                    hasHardware: false,
+                    isEnrolled: false,
+                    biometricType: 'none' as const,
+                    isAvailable: false,
+                };
+            }
+
             const hasHardware = await LocalAuthentication.hasHardwareAsync();
             const isEnrolled = await LocalAuthentication.isEnrolledAsync();
             const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
@@ -75,6 +109,8 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
     const saveAuthTimestamp = useCallback(async () => {
         if (!userId) return; // Sem userId, não salva
         try {
+            const SecureStore = await getSecureStore();
+            if (!SecureStore) return;
             await SecureStore.setItemAsync(getLastAuthTimeKey(userId), Date.now().toString());
         } catch (error) {
             console.error('Error saving auth timestamp:', error);
@@ -89,6 +125,17 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
         setState(prev => ({ ...prev, error: null }));
 
         try {
+            const LocalAuthentication = await getLocalAuthentication();
+            if (!LocalAuthentication) {
+                setState(prev => ({
+                    ...prev,
+                    isAuthenticated: false,
+                    isLoading: false,
+                    error: 'Biometria indisponivel neste dispositivo',
+                }));
+                return false;
+            }
+
             const type = biometricTypeRef.current;
             const biometricName = type === 'facial'
                 ? (Platform.OS === 'ios' ? 'Face ID' : 'Reconhecimento Facial')
@@ -144,6 +191,8 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
             // Tenta autenticar primeiro para confirmar que é o dono
             const success = await authenticate();
             if (success) {
+                const SecureStore = await getSecureStore();
+                if (!SecureStore) return false;
                 await SecureStore.setItemAsync(getBiometricEnabledKey(userId), 'true');
                 setState(prev => ({
                     ...prev,
@@ -161,6 +210,8 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
     const disableBiometric = useCallback(async (): Promise<void> => {
         if (!userId) return; // Sem userId, não pode desabilitar
         try {
+            const SecureStore = await getSecureStore();
+            if (!SecureStore) return;
             await SecureStore.setItemAsync(getBiometricEnabledKey(userId), 'false');
             setState(prev => ({
                 ...prev,
@@ -196,7 +247,8 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
             // Verificar preferência salva no SecureStore PARA ESTE USUÁRIO
             let isEnabled = false;
             try {
-                const storedEnabled = await SecureStore.getItemAsync(getBiometricEnabledKey(userId));
+                const SecureStore = await getSecureStore();
+                const storedEnabled = await SecureStore?.getItemAsync(getBiometricEnabledKey(userId));
                 isEnabled = storedEnabled === 'true';
             } catch (e) {
                 console.error('Error reading biometric preference', e);
@@ -237,7 +289,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
         // Reset hasTriedAuth quando userId muda (para permitir re-init ao trocar de conta)
         hasTriedAuth.current = false;
         init();
-    }, [userId, checkBiometricAvailability]); // Removed authenticate from deps
+    }, [userId, checkBiometricAvailability, autoAuthenticate, authenticate]);
 
     // Monitorar AppState para timeout de background
     useEffect(() => {
@@ -256,13 +308,14 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
                         // Se por acaso perdeu o timer, assume que precisa (segurança)
                         // Check last saved in secure store?
                         try {
-                            const lastStr = await SecureStore.getItemAsync(getLastAuthTimeKey(userId));
+                            const SecureStore = await getSecureStore();
+                            const lastStr = await SecureStore?.getItemAsync(getLastAuthTimeKey(userId));
                             if (lastStr) {
                                 const lastTime = parseInt(lastStr, 10);
                                 const diff = (Date.now() - lastTime) / (1000 * 60);
                                 if (diff >= BIOMETRIC_TIMEOUT_MINUTES) shouldReauth = true;
                             }
-                        } catch (e) { }
+                        } catch { }
                     }
 
                     if (shouldReauth) {
@@ -289,7 +342,7 @@ export function useBiometricAuth(userId?: string, autoAuthenticate = true) {
         return () => {
             subscription.remove();
         };
-    }, [state.isBiometricEnabled, authenticate]);
+    }, [state.isBiometricEnabled, authenticate, userId]);
 
     return {
         ...state,
