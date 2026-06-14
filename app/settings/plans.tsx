@@ -75,7 +75,7 @@ const isPurchaseLinkedToAnotherAccount = (value: any) => {
 const showPurchaseLinkedToAnotherAccountAlert = (storeName: string) => {
     Alert.alert(
         'Assinatura em outra conta',
-        `Essa assinatura da ${storeName} ja esta vinculada a outra conta Controlar+. Entre com a conta correta ou use outro Apple ID Sandbox para testar.`,
+        `Essa assinatura da ${storeName} já está vinculada a outra conta Controlar+. Entre com a conta correta para acessar.`,
         [{ text: 'OK' }]
     );
 };
@@ -469,7 +469,7 @@ export default function PlansScreen() {
         if (!user?.uid || !user?.email) {
             Alert.alert(
                 'Autenticação necessária',
-                'Faça login com sua conta Controlar+ para assinar o Plano Pro. A Apple Sandbox só entra na tela de compra da App Store.',
+                'Faça login com sua conta Controlar+ para assinar o Plano Pro.',
                 [{ text: 'OK' }]
             );
             return;
@@ -548,7 +548,7 @@ export default function PlansScreen() {
                 } else {
                     Alert.alert(
                         'Compra nao concluida',
-                        `A ${storeName} nao retornou uma transacao desta vez. Use Apple Sandbox apenas quando a folha da App Store pedir login. Expo Go nao testa IAP; use TestFlight, um build nativo ou StoreKit local no Xcode.`,
+                        `A ${storeName} não retornou uma transação desta vez. Tente novamente em alguns instantes.`,
                         [{ text: 'OK' }]
                     );
                 }
@@ -814,38 +814,7 @@ export default function PlansScreen() {
                     </View>
                 </Animated.View>
 
-                {isIOS ? (
-                    <Animated.View style={[styles.iapCredentialCard, securityStyle]}>
-                        <View style={styles.iapCredentialHeader}>
-                            <View style={styles.iapCredentialIcon}>
-                                <Shield size={18} color="#F2B8A0" />
-                            </View>
-                            <View style={styles.iapCredentialTitleWrap}>
-                                <Text style={styles.iapCredentialTitle}>
-                                    {isForced ? 'Cadastro concluído: continue no Controlar+' : 'Use a credencial certa no iOS'}
-                                </Text>
-                                <Text style={styles.iapCredentialAccount} numberOfLines={1} ellipsizeMode="middle">
-                                    Conta Controlar+: {user?.email || 'e-mail usado no app'}
-                                </Text>
-                            </View>
-                        </View>
 
-                        <View style={styles.iapCredentialRows}>
-                            <View style={styles.iapCredentialRow}>
-                                <Text style={styles.iapCredentialLabel}>Controlar+</Text>
-                                <Text style={styles.iapCredentialText}>login, cadastro e acesso ao app.</Text>
-                            </View>
-                            <View style={styles.iapCredentialRow}>
-                                <Text style={styles.iapCredentialLabel}>Apple Sandbox</Text>
-                                <Text style={styles.iapCredentialText}>somente quando a App Store abrir a compra ou restauração.</Text>
-                            </View>
-                            <View style={styles.iapCredentialRow}>
-                                <Text style={styles.iapCredentialLabel}>Expo Go</Text>
-                                <Text style={styles.iapCredentialText}>não testa IAP; use TestFlight, build nativo ou StoreKit.</Text>
-                            </View>
-                        </View>
-                    </Animated.View>
-                ) : null}
 
                 {/* Botão de Compra */}
                 {isMobileStore && (

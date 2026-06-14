@@ -2,12 +2,13 @@
   "expo": {
     "name": "Controlar+",
     "slug": "controlarapp",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "controlarapp",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "newArchEnabled": true,
       "supportsTablet": true,
       "infoPlist": {
         "CFBundleDisplayName": "Controlar+",
@@ -59,7 +60,7 @@
       ],
       "expo-secure-store",
       "expo-notifications",
-      "react-native-iap",
+      ["react-native-iap", { "paymentProvider": "Apple" }],
       "expo-font",
       "expo-image",
       "expo-web-browser",
@@ -80,6 +81,15 @@
     },
     "runtimeVersion": {
       "policy": "appVersion"
+    },
+    "autolinking": {
+      "exclude": ["expo-glass-effect"],
+      "ios": {
+        "buildFromSource": [
+          "react-native-reanimated",
+          "react-native-worklets"
+        ]
+      }
     }
   }
 }

@@ -56,10 +56,10 @@ export function ConnectAccountModal({
             onClose={handleClose}
             title={CustomTitle}
             presentation="bottom"
-            scrollable={false}
+            scrollable={true}
             enableDragToClose={true}
             showHandle={true}
-            maxHeightRatio={0.92}
+            maxHeightRatio={0.75}
             onAfterClose={onDismiss}
             bodyStyle={styles.modalBody}
         >

@@ -225,7 +225,7 @@ const getPurchaseOriginalTransactionId = (purchase?: any): string | null => {
 
 const APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_CODE = 'apple_purchase_linked_to_another_account';
 const APPLE_PURCHASE_LINKED_TO_ANOTHER_ACCOUNT_MESSAGE =
-    'Esta assinatura da App Store ja esta vinculada a outra conta Controlar+. Entre com a conta correta ou use outro Apple ID Sandbox para testar.';
+    'Esta assinatura da App Store já está vinculada a outra conta Controlar+. Entre com a conta correta para acessar.';
 
 const isPurchaseLinkedToAnotherAccountError = (error: any): boolean => {
     const code = String(error?.code || error?.errorCode || '').toLowerCase();

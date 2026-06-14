@@ -4,7 +4,6 @@ import { BankConnectorLogo } from '@/components/open-finance/BankConnectorLogo';
 import { ConnectedBankCard, BankSyncStatus as SyncStatus } from '@/components/open-finance/ConnectedBankCard';
 import { SyncCreditsDisplay, useSyncCredits } from '@/components/open-finance/SyncCreditsDisplay';
 import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
-import { DeleteConfirmationModal } from '@/components/ui/DeleteConfirmationModal';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { useAuthContext as useAuth } from '@/contexts/AuthContext';
@@ -22,7 +21,6 @@ import * as WebBrowser from 'expo-web-browser';
 import { ChevronRight, Landmark, Search } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Alert,
     Animated,
     AppState,
     Image,
@@ -385,6 +383,59 @@ const getApiErrorText = (payload: any | null, fallback: string): string => (
     fallback
 );
 
+type PersistStepResult = {
+    success?: boolean;
+    error?: string;
+    [key: string]: any;
+};
+
+const PERSIST_RETRY_ATTEMPTS = 3;
+const PERSIST_RETRY_BASE_DELAY_MS = 450;
+
+const isRetryablePersistError = (error: any): boolean => {
+    const normalized = String(error?.message || error || '').toLowerCase();
+
+    return [
+        'aborted',
+        'deadline-exceeded',
+        'internal',
+        'network',
+        'resource-exhausted',
+        'timeout',
+        'timed out',
+        'unavailable'
+    ].some((token) => normalized.includes(token));
+};
+
+const runPersistStepWithRetry = async (
+    operation: () => Promise<PersistStepResult>
+): Promise<PersistStepResult> => {
+    let lastResult: PersistStepResult = { success: false, error: 'Falha ao salvar dados.' };
+
+    for (let attempt = 1; attempt <= PERSIST_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            lastResult = await operation();
+        } catch (error: any) {
+            lastResult = {
+                success: false,
+                error: error?.message || 'Falha ao salvar dados.'
+            };
+        }
+
+        if (lastResult?.success !== false) {
+            return lastResult;
+        }
+
+        if (!isRetryablePersistError(lastResult.error) || attempt >= PERSIST_RETRY_ATTEMPTS) {
+            return lastResult;
+        }
+
+        await sleep(PERSIST_RETRY_BASE_DELAY_MS * attempt + Math.random() * 250);
+    }
+
+    return lastResult;
+};
+
 const OAUTH_REDIRECT_URI = Linking.createURL('open-finance/callback');
 
 export default function OpenFinanceScreen() {
@@ -402,6 +453,7 @@ export default function OpenFinanceScreen() {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [itemToDelete, setItemToDelete] = useState<any>(null);
+    const [deleteInProgress, setDeleteInProgress] = useState(false);
     const [accounts, setAccounts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [dataRefreshKey, setDataRefreshKey] = useState(0);
@@ -626,18 +678,40 @@ export default function OpenFinanceScreen() {
             return;
         }
 
-        const authResult = await WebBrowser.openAuthSessionAsync(
-            url,
-            OAUTH_REDIRECT_URI,
-            { preferEphemeralSession: false }
-        );
+        let authResult: Awaited<ReturnType<typeof WebBrowser.openAuthSessionAsync>>;
+
+        try {
+            authResult = await WebBrowser.openAuthSessionAsync(
+                url,
+                OAUTH_REDIRECT_URI,
+                { preferEphemeralSession: false }
+            );
+        } catch (error: any) {
+            const code = String(error?.code || '').toUpperCase();
+            const message = String(error?.message || '');
+            const wasDismissed = code.includes('CANCEL') ||
+                code.includes('DISMISS') ||
+                /cancel|dismiss/i.test(message);
+
+            if (wasDismissed) {
+                console.info('[OpenFinance] OAuth session was dismissed on iOS; keeping pending item active.');
+                return;
+            }
+
+            throw error;
+        }
 
         if (authResult.type === 'success') {
             await handleOAuthCallbackRef.current?.(authResult.url);
             return;
         }
 
-        throw new Error('Autorizacao cancelada antes do retorno do banco.');
+        if (authResult.type === 'cancel' || authResult.type === 'dismiss') {
+            console.info(`[OpenFinance] OAuth session ended as ${authResult.type}; keeping pending item active.`);
+            return;
+        }
+
+        throw new Error('Autorizacao nao concluida pelo banco.');
     }, []);
 
     const extractItemIdFromDeepLink = useCallback((url: string): string | null => {
@@ -778,20 +852,24 @@ export default function OpenFinanceScreen() {
             0
         );
 
-        const accountErrors: any[] = Array.isArray(syncData?.accountErrors) ? [...syncData.accountErrors] : [];
+        const serverAccountErrors: any[] = Array.isArray(syncData?.accountErrors) ? [...syncData.accountErrors] : [];
+        const accountWarnings: any[] = Array.isArray(syncData?.accountWarnings) ? [...syncData.accountWarnings] : [];
+        const localPersistErrors: any[] = [];
 
         if (syncedAccounts.length > 0) {
             setStatusText?.(`Organizando ${syncedAccounts.length} contas...`);
 
             const accountResults = await Promise.all(
                 syncedAccounts.map((account: any) =>
-                    databaseService.saveAccount(user.uid, account, connector)
+                    runPersistStepWithRetry(() =>
+                        databaseService.saveAccount(user.uid, account, connector)
+                    )
                 )
             );
 
             accountResults.forEach((result: any, index: number) => {
                 if (!result?.success) {
-                    accountErrors.push({
+                    localPersistErrors.push({
                         stage: 'local_account_save',
                         accountId: syncedAccounts[index]?.id || null,
                         accountName: syncedAccounts[index]?.name || null,
@@ -817,7 +895,7 @@ export default function OpenFinanceScreen() {
             const transactionErrors = transactionResult?.details?.errors || [];
 
             if (transactionErrorCount > 0 || transactionErrors.length > 0) {
-                accountErrors.push({
+                localPersistErrors.push({
                     stage: 'local_transaction_save',
                     error: 'Algumas transacoes nao foram salvas.',
                     retryable: true,
@@ -828,8 +906,9 @@ export default function OpenFinanceScreen() {
 
         return {
             totalTx,
-            partial: syncData?.partial === true || accountErrors.length > 0,
-            accountErrors,
+            partial: syncData?.partial === true || serverAccountErrors.length > 0 || localPersistErrors.length > 0,
+            accountErrors: [...serverAccountErrors, ...localPersistErrors],
+            accountWarnings,
         };
     }, [user]);
 
@@ -1715,8 +1794,14 @@ export default function OpenFinanceScreen() {
     };
 
     const handleCloseModal = () => {
-        pendingCpfAfterBankDismissRef.current = false;
-        clearCpfModalOpenTimer();
+        // If a CPF modal transition is pending (user just selected a bank on iOS),
+        // preserve the pending state so the CPF modal can still open.
+        const isCpfTransition = pendingCpfAfterBankDismissRef.current;
+
+        if (!isCpfTransition) {
+            pendingCpfAfterBankDismissRef.current = false;
+            clearCpfModalOpenTimer();
+        }
 
         const isActiveConnection =
             ['connecting', 'oauth_pending'].includes(connectionStep) &&
@@ -1724,11 +1809,15 @@ export default function OpenFinanceScreen() {
 
         openedOAuthUrlRef.current = false;
         setIsModalVisible(false);
-        setShowCpfModal(false);
-        setCpfInput('');
-        setCpfConnector(null);
         setSearchQuery('');
         setConnectorsFetchError(null);
+
+        // Don't clear CPF state if we're transitioning to the CPF modal
+        if (!isCpfTransition) {
+            setShowCpfModal(false);
+            setCpfInput('');
+            setCpfConnector(null);
+        }
 
         if (isActiveConnection) {
             return;
@@ -1759,7 +1848,16 @@ export default function OpenFinanceScreen() {
             pendingCpfAfterBankDismissRef.current = true;
             setIsModalVisible(false);
 
-            schedulePendingCpfModal(CPF_MODAL_IOS_DISMISS_FALLBACK_MS);
+            // Direct fallback: open CPF modal after a delay, regardless of
+            // whether the BottomSheet onDismiss callback fires or not.
+            // This bypasses the fragile dismiss callback chain.
+            clearCpfModalOpenTimer();
+            cpfModalOpenTimerRef.current = setTimeout(() => {
+                if (pendingCpfAfterBankDismissRef.current) {
+                    pendingCpfAfterBankDismissRef.current = false;
+                    setShowCpfModal(true);
+                }
+            }, CPF_MODAL_IOS_DISMISS_FALLBACK_MS);
 
             return;
         }
@@ -1801,6 +1899,12 @@ export default function OpenFinanceScreen() {
     const handleStartConnection = async () => {
         if (!cpfConnector) return;
 
+        if (!hasCredits) {
+            const resetTime = databaseService.getTimeUntilReset();
+            showWarning('Creditos esgotados', `Seus creditos renovam em ${resetTime.formatted}.`);
+            return;
+        }
+
         pendingCpfAfterBankDismissRef.current = false;
         clearCpfModalOpenTimer();
         setSelectedConnector(cpfConnector);
@@ -1831,20 +1935,40 @@ export default function OpenFinanceScreen() {
     };
 
     const handleConfirmDelete = async () => {
-        if (!user || !itemToDelete) return;
+        if (!user || !itemToDelete || deleteInProgress) return;
 
-        setLoading(true);
+        const groupToDelete = itemToDelete;
+        const bankName = groupToDelete?.connector?.name || 'Banco';
+        const previousAccounts = accounts;
+        const accountIds = (groupToDelete.accounts || [])
+            .map((acc: any) => acc?.id)
+            .filter(Boolean);
+        const accountIdSet = new Set(accountIds);
+        const accountWithItem = (groupToDelete.accounts || [])
+            .find((account: any) => account?.pluggyItemId || account?.itemId);
+        const itemId = accountWithItem?.pluggyItemId || accountWithItem?.itemId || null;
+        let didStartLocalDelete = false;
+
+        setDeleteInProgress(true);
         setDeleteModalVisible(false);
+        setItemToDelete(null);
+        clearBankSyncBannerTimer();
+        setBankSyncBanner({
+            step: 'connecting',
+            statusText: `Desconectando ${bankName}...`,
+            error: null
+        });
+
+        if (accountIdSet.size > 0) {
+            triggerBankCardMorph();
+            setAccounts((current) => current.filter((account) => !accountIdSet.has(account.id)));
+            setDataRefreshKey((prev) => prev + 1);
+        }
 
         try {
-            const accountIds = (itemToDelete.accounts || [])
-                .map((acc: any) => acc?.id)
-                .filter(Boolean);
-            const accountWithItem = (itemToDelete.accounts || [])
-                .find((account: any) => account?.pluggyItemId || account?.itemId);
-            const itemId = accountWithItem?.pluggyItemId || accountWithItem?.itemId || null;
+            const remoteDeletePromise = (async () => {
+                if (!itemId) return;
 
-            if (itemId) {
                 const token = await user.getIdToken();
                 const deleteResponse = await apiFetch(`/api/pluggy/items/${itemId}`, {
                     method: 'DELETE',
@@ -1858,16 +1982,51 @@ export default function OpenFinanceScreen() {
                     const deletePayload = await readApiPayload(deleteResponse);
                     throw new Error(getApiErrorText(deletePayload, 'Nao foi possivel desconectar no banco.'));
                 }
+            })();
+
+            didStartLocalDelete = true;
+            const localDeletePromise = databaseService.deleteOpenFinanceConnection(user.uid, accountIds, {
+                deleteAccountsFirst: true
+            });
+
+            const [remoteDeleteResult, localDeleteResult] = await Promise.allSettled([
+                remoteDeletePromise,
+                localDeletePromise
+            ]);
+
+            if (remoteDeleteResult.status === 'rejected') {
+                throw remoteDeleteResult.reason;
             }
 
-            await databaseService.deleteOpenFinanceConnection(user.uid, accountIds);
-            await fetchAccounts();
+            if (localDeleteResult.status === 'rejected') {
+                throw localDeleteResult.reason;
+            }
 
-            setItemToDelete(null);
-        } catch {
-            Alert.alert('Erro', 'Não foi possível desconectar.');
+            const deleteResult = localDeleteResult.value;
+            if (!deleteResult.success) {
+                throw new Error(deleteResult.error || 'Nao foi possivel concluir a limpeza local.');
+            }
+
+            setBankSyncBanner({
+                step: 'success',
+                statusText: `${bankName} desconectado.`,
+                error: null
+            });
+            bankSyncBannerTimerRef.current = setTimeout(hideBankSyncBanner, 3000);
+        } catch (error) {
+            console.error('handleConfirmDelete error:', error);
+            if (!didStartLocalDelete) {
+                setAccounts(previousAccounts);
+                setDataRefreshKey((prev) => prev + 1);
+            }
+            setBankSyncBanner({
+                step: 'error',
+                statusText: '',
+                error: 'Não foi possível desconectar.'
+            });
+            bankSyncBannerTimerRef.current = setTimeout(hideBankSyncBanner, 4000);
         } finally {
-            setLoading(false);
+            setDeleteInProgress(false);
         }
     };
 
@@ -1927,8 +2086,10 @@ export default function OpenFinanceScreen() {
                 }
             });
 
-            if (!refreshResponse.ok && !isRetryableApiResponse(refreshResponse, await readApiPayload(refreshResponse))) {
-                const refreshError = await readApiPayload(refreshResponse);
+            const refreshPayload = await readApiPayload(refreshResponse);
+
+            if (!refreshResponse.ok && !isRetryableApiResponse(refreshResponse, refreshPayload)) {
+                const refreshError = refreshPayload;
                 throw new Error(refreshError?.error || 'Falha ao iniciar atualização no banco.');
             }
 
@@ -1949,12 +2110,14 @@ export default function OpenFinanceScreen() {
                     timeout: 15000
                 });
 
-                if (!statusResponse.ok && !isRetryableApiResponse(statusResponse, await readApiPayload(statusResponse))) {
-                    const statusError = await readApiPayload(statusResponse);
+                const statusPayload = await readApiPayload(statusResponse);
+
+                if (!statusResponse.ok && !isRetryableApiResponse(statusResponse, statusPayload)) {
+                    const statusError = statusPayload;
                     throw new Error(statusError?.error || 'Falha ao consultar status da atualização.');
                 }
 
-                const statusData = await readApiPayload(statusResponse);
+                const statusData = statusPayload;
                 const item = statusData?.item || statusData;
                 const normalizedStatus = String(item?.status || '').toUpperCase();
 
@@ -2487,15 +2650,6 @@ export default function OpenFinanceScreen() {
                     )}
                 </Reanimated.View>
 
-                <DeleteConfirmationModal
-                    visible={deleteModalVisible}
-                    title={`Excluir ${itemToDelete?.connector?.name || 'Conta'}?`}
-                    onCancel={() => setDeleteModalVisible(false)}
-                    onConfirm={handleConfirmDelete}
-                    confirmText="Excluir"
-                    cancelText="Cancelar"
-                />
-
                 <ConnectAccountModal
                     visible={isModalVisible}
                     onClose={handleCloseModal}
@@ -2692,15 +2846,42 @@ export default function OpenFinanceScreen() {
 
                 <AnimatedInlineBanner
                     show={
+                        deleteModalVisible ||
                         bankSyncBanner.step !== 'idle' ||
                         (
                             ['connecting', 'oauth_pending', 'success', 'error'].includes(connectionStep) &&
                             !isModalVisible
                         )
                     }
-                    step={bankSyncBanner.step !== 'idle' ? bankSyncBanner.step : connectionStep}
-                    error={bankSyncBanner.step !== 'idle' ? bankSyncBanner.error : connectionError}
+                    step={
+                        deleteModalVisible
+                            ? 'error'
+                            : bankSyncBanner.step !== 'idle'
+                                ? bankSyncBanner.step
+                                : connectionStep
+                    }
+                    error={
+                        deleteModalVisible
+                            ? `Excluir ${itemToDelete?.connector?.name || 'Conta'}?`
+                            : bankSyncBanner.step !== 'idle'
+                                ? bankSyncBanner.error
+                                : connectionError
+                    }
                     statusText={bankSyncBanner.step !== 'idle' ? bankSyncBanner.statusText : connectionStatusText}
+                    actions={
+                        deleteModalVisible
+                            ? {
+                                cancelLabel: 'Cancelar',
+                                confirmLabel: 'Excluir',
+                                onCancel: () => {
+                                    setDeleteModalVisible(false);
+                                    setItemToDelete(null);
+                                },
+                                onConfirm: handleConfirmDelete,
+                                disabled: deleteInProgress
+                            }
+                            : undefined
+                    }
                 />
             </View>
         </View>
@@ -2810,24 +2991,6 @@ const EmptyAccountsState = ({ styles }: any) => {
 
     return (
         <Reanimated.View style={[styles.emptyState, entranceStyle]}>
-            <View pointerEvents="none" style={styles.emptyStateCardBase}>
-                <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-            </View>
-
-            <View pointerEvents="none" style={styles.emptyStateTint}>
-                <LinearGradient
-                    colors={[
-                        'rgba(255,255,255,0.022)',
-                        'rgba(20,20,20,0.04)',
-                        'rgba(0,0,0,0.12)',
-                    ]}
-                    locations={[0, 0.48, 1]}
-                    start={{ x: 0.5, y: 0 }}
-                    end={{ x: 0.5, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                />
-            </View>
-
             <View style={styles.emptyIconShell}>
                 <Reanimated.View pointerEvents="none" style={[styles.emptyIconGlow, glowStyle]} />
                 <Landmark size={20} color="#A1A1AA" strokeWidth={1.7} />
@@ -3260,11 +3423,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 32,
         paddingVertical: 42,
         marginHorizontal: 4,
-        borderRadius: 30,
-        overflow: 'hidden',
-        backgroundColor: '#111111',
-        borderWidth: 1,
-        borderColor: '#2B2B2B',
     },
 
     emptyStateCardBase: {
@@ -3283,9 +3441,6 @@ const styles = StyleSheet.create({
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: 'rgba(255, 255, 255, 0.035)',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 12,

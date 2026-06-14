@@ -22,13 +22,17 @@ const DEFAULT_BACKEND_URL = 'https://backendcontrolarapp-production.up.railway.a
 const DEFAULT_APP_REDIRECT_URI = 'controlarapp://open-finance/callback';
 const PLUGGY_WEBHOOK_IPS = ['177.71.238.212'];
 const PUBLIC_ROUTES = ['/webhook', '/ping', '/connectors', '/oauth-callback'];
+const ACCOUNTS_PAGE_SIZE = 100;
+const MAX_ACCOUNT_PAGES = 10;
 const TRANSACTIONS_PAGE_SIZE = 500;
 const MAX_TRANSACTION_PAGES_DEFAULT = 2;
-const MAX_TRANSACTION_PAGES_FULL_HISTORY = 6;
+const MAX_TRANSACTION_PAGES_FULL_HISTORY = 50;
 const FULL_HISTORY_FROM_DATE = '1970-01-01';
 const FETCH_TIMEOUT_MS = 25000;
 const AUTH_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 const AUTH_TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+const ACCOUNT_ENRICH_RETRY_ATTEMPTS = 3;
+const ACCOUNT_ENRICH_RETRY_BASE_DELAY_MS = 900;
 
 const normalizeUrlBase = (value) => String(value || '').trim().replace(/\/+$/, '');
 
@@ -270,6 +274,15 @@ const sendPluggyError = async (res, response, fallbackMessage, fallbackCode = nu
     return res.status(normalized.status).json(normalized.body);
 };
 
+const shouldRetrySyncError = (error) => (
+    error?.retryable !== false &&
+    error?.actionRequired !== true
+);
+
+const getAccountRetryDelay = (attempt) => (
+    ACCOUNT_ENRICH_RETRY_BASE_DELAY_MS * attempt + Math.random() * 350
+);
+
 const mapItemOwnershipError = (err) => {
     if (err && typeof err === 'object' && 'status' in err && 'message' in err) {
         return {
@@ -369,6 +382,61 @@ const ensureItemOwnership = async (itemId, expectedUserId) => {
     return item;
 };
 
+const fetchAccountsForItem = async (itemId) => {
+    const accounts = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && page <= MAX_ACCOUNT_PAGES) {
+        const params = new URLSearchParams({
+            itemId,
+            pageSize: ACCOUNTS_PAGE_SIZE.toString(),
+            page: page.toString(),
+        });
+
+        const accountsRes = await pluggy.safeFetch(`${PLUGGY_API_URL}/accounts?${params}`);
+        if (!accountsRes.ok) {
+            const payload = await readResponseBody(accountsRes);
+            const normalized = buildErrorResponse(
+                accountsRes.status,
+                payload,
+                'Erro ao buscar contas do item',
+                'ACCOUNTS_FETCH_FAILED'
+            );
+            throw {
+                stage: 'accounts',
+                status: normalized.status,
+                ...normalized.body,
+            };
+        }
+
+        const payload = await readResponseBody(accountsRes);
+        const pageAccounts = Array.isArray(payload?.results)
+            ? payload.results
+            : (Array.isArray(payload) ? payload : []);
+
+        accounts.push(...pageAccounts);
+
+        const totalPages = Number(payload?.totalPages || 0);
+        const totalResults = Number(payload?.total || payload?.totalResults || 0);
+
+        if (totalPages > 0) {
+            hasMore = page < totalPages;
+        } else if (totalResults > 0) {
+            hasMore = accounts.length < totalResults;
+        } else {
+            hasMore = pageAccounts.length >= ACCOUNTS_PAGE_SIZE;
+        }
+
+        page += 1;
+    }
+
+    return {
+        accounts,
+        truncatedByPageLimit: hasMore,
+    };
+};
+
 const buildItemStateError = (item) => {
     const status = String(item?.status || '').toUpperCase();
     const snapshot = extractItemErrorSnapshot(item);
@@ -450,14 +518,26 @@ const enrichAccount = async (account, fromDate, maxTransactionPages) => {
                 stage: 'transactions',
                 accountId: account.id,
                 accountName: account.name || null,
+                status: normalized.status,
                 ...normalized.body,
             };
         }
 
         const txData = await readResponseBody(txRes);
-        allTx = allTx.concat(Array.isArray(txData?.results) ? txData.results : []);
+        const pageTransactions = Array.isArray(txData?.results) ? txData.results : [];
+        allTx = allTx.concat(pageTransactions);
 
-        if (Number(txData?.totalPages || 0) <= page) hasMore = false;
+        const totalPages = Number(txData?.totalPages || 0);
+        const totalResults = Number(txData?.total || txData?.totalResults || 0);
+
+        if (totalPages > 0) {
+            hasMore = page < totalPages;
+        } else if (totalResults > 0) {
+            hasMore = allTx.length < totalResults;
+        } else {
+            hasMore = pageTransactions.length >= TRANSACTIONS_PAGE_SIZE;
+        }
+
         page += 1;
     }
 
@@ -482,6 +562,7 @@ const enrichAccount = async (account, fromDate, maxTransactionPages) => {
                 stage: 'bills',
                 accountId: account.id,
                 accountName: account.name || null,
+                status: normalized.status,
                 ...normalized.body,
             };
         }
@@ -491,6 +572,40 @@ const enrichAccount = async (account, fromDate, maxTransactionPages) => {
         account: { ...account, transactions: allTx, bills, truncatedByPageLimit },
         billError,
     };
+};
+
+const enrichAccountWithRetry = async (account, fromDate, maxTransactionPages) => {
+    let latestResult = null;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= ACCOUNT_ENRICH_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            const result = await enrichAccount(account, fromDate, maxTransactionPages);
+            latestResult = result;
+
+            if (
+                result.billError &&
+                shouldRetrySyncError(result.billError) &&
+                attempt < ACCOUNT_ENRICH_RETRY_ATTEMPTS
+            ) {
+                await pluggy.delay(getAccountRetryDelay(attempt));
+                continue;
+            }
+
+            return result;
+        } catch (error) {
+            lastError = error;
+
+            if (!shouldRetrySyncError(error) || attempt >= ACCOUNT_ENRICH_RETRY_ATTEMPTS) {
+                throw error;
+            }
+
+            await pluggy.delay(getAccountRetryDelay(attempt));
+        }
+    }
+
+    if (latestResult) return latestResult;
+    throw lastError;
 };
 
 const enforceUser = async (req, res, next) => {
@@ -808,13 +923,20 @@ router.post('/sync', async (req, res) => {
             console.info(`[Pluggy Sync] Ignoring autoRefresh inside /sync for item ${itemId}; refresh must be explicit.`);
         }
 
-        const accountsRes = await pluggy.safeFetch(`${PLUGGY_API_URL}/accounts?itemId=${itemId}`);
-        if (!accountsRes.ok) {
-            return sendPluggyError(res, accountsRes, 'Erro ao buscar contas do item', 'ACCOUNTS_FETCH_FAILED');
+        let accountFetch;
+        try {
+            accountFetch = await fetchAccountsForItem(itemId);
+        } catch (error) {
+            return res.status(error?.status || 502).json({
+                success: false,
+                error: error?.error || 'Erro ao buscar contas do item',
+                errorCode: error?.errorCode || 'ACCOUNTS_FETCH_FAILED',
+                retryable: error?.retryable !== false,
+                actionRequired: error?.actionRequired === true,
+            });
         }
 
-        const accountsPayload = await readResponseBody(accountsRes);
-        const accountsList = Array.isArray(accountsPayload?.results) ? accountsPayload.results : [];
+        const accountsList = accountFetch.accounts;
         const fromDate = from || (
             fullHistory
                 ? FULL_HISTORY_FROM_DATE
@@ -826,14 +948,38 @@ router.post('/sync', async (req, res) => {
 
         const enrichedAccounts = [];
         const accountErrors = [];
+        const accountWarnings = [];
         const concurrentAccounts = 3;
+
+        if (accountFetch.truncatedByPageLimit) {
+            accountErrors.push({
+                stage: 'accounts_truncated',
+                success: false,
+                error: 'Nem todas as contas foram retornadas pela Pluggy.',
+                errorCode: 'ACCOUNTS_PAGE_LIMIT_REACHED',
+                retryable: false,
+                actionRequired: false,
+            });
+        }
 
         for (let i = 0; i < accountsList.length; i += concurrentAccounts) {
             const batch = accountsList.slice(i, i + concurrentAccounts);
             const batchResults = await Promise.all(batch.map(async (account) => {
                 try {
-                    const result = await enrichAccount(account, fromDate, maxTransactionPages);
-                    if (result.billError) accountErrors.push(result.billError);
+                    const result = await enrichAccountWithRetry(account, fromDate, maxTransactionPages);
+                    if (result.billError) accountWarnings.push(result.billError);
+                    if (result.account?.truncatedByPageLimit) {
+                        accountErrors.push({
+                            stage: 'transactions_truncated',
+                            accountId: account.id,
+                            accountName: account.name || null,
+                            success: false,
+                            error: 'O historico de transacoes excedeu o limite de paginas da sincronizacao.',
+                            errorCode: 'TRANSACTIONS_PAGE_LIMIT_REACHED',
+                            retryable: false,
+                            actionRequired: false,
+                        });
+                    }
                     return result.account;
                 } catch (error) {
                     accountErrors.push({
@@ -868,6 +1014,7 @@ router.post('/sync', async (req, res) => {
             success: true,
             partial: accountErrors.length > 0,
             accountErrors,
+            accountWarnings,
             itemStatus: itemData.status,
             lastUpdatedAt: itemData.updatedAt,
             isRefreshing: false,

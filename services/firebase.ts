@@ -98,6 +98,21 @@ const deleteDocRefsInChunks = async (docRefs: any[], chunkSize: number = 200): P
     return deleted;
 };
 
+const removeAccountsFromCache = async (userId: string, accountIds: string[]): Promise<void> => {
+    try {
+        const accountIdSet = new Set(accountIds);
+        const cached = await offlineStorage.getAccounts(userId);
+        if (!cached) return;
+
+        await offlineStorage.saveAccounts(
+            userId,
+            cached.filter((account: any) => !accountIdSet.has(account?.id))
+        );
+    } catch (error) {
+        console.warn('[Firebase] Error removing accounts from cache:', error);
+    }
+};
+
 const removeRecurrenceFromCache = async (
     userId: string,
     recurrenceId: string,
@@ -118,6 +133,52 @@ const removeRecurrenceFromCache = async (
 const FIRESTORE_WRITE_BATCH_LIMIT = 450;
 const FIRESTORE_ID_LOOKUP_CHUNK_SIZE = 30;
 const FIRESTORE_ID_LOOKUP_CONCURRENCY = 6;
+const FIRESTORE_WRITE_RETRY_ATTEMPTS = 3;
+const FIRESTORE_WRITE_RETRY_BASE_DELAY_MS = 450;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableFirestoreError = (error: any): boolean => {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+
+    return [
+        'aborted',
+        'cancelled',
+        'deadline-exceeded',
+        'internal',
+        'resource-exhausted',
+        'unavailable'
+    ].some((token) => code.includes(token) || message.includes(token)) ||
+        message.includes('network') ||
+        message.includes('timeout') ||
+        message.includes('timed out');
+};
+
+const runFirestoreWriteWithRetry = async <T>(
+    operation: () => Promise<T>,
+    label: string
+): Promise<T> => {
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= FIRESTORE_WRITE_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+
+            if (!isRetryableFirestoreError(error) || attempt >= FIRESTORE_WRITE_RETRY_ATTEMPTS) {
+                throw error;
+            }
+
+            const delayMs = FIRESTORE_WRITE_RETRY_BASE_DELAY_MS * attempt + Math.random() * 250;
+            console.warn(`[Firebase] Retrying ${label} (${attempt}/${FIRESTORE_WRITE_RETRY_ATTEMPTS}) after transient error:`, error);
+            await sleep(delayMs);
+        }
+    }
+
+    throw lastError;
+};
 
 const splitIntoChunks = <T>(items: T[], chunkSize: number): T[][] => {
     if (!Array.isArray(items) || items.length === 0 || chunkSize <= 0) return [];
@@ -234,7 +295,11 @@ const commitSetDocsInBatches = async (
 
     const flushBatch = () => {
         if (opCount === 0) return;
-        commitPromises.push(batch.commit());
+        const batchToCommit = batch;
+        commitPromises.push(runFirestoreWriteWithRetry(
+            () => batchToCommit.commit(),
+            'open finance transaction batch'
+        ));
         batch = writeBatch(firestore);
         opCount = 0;
     };
@@ -1292,7 +1357,11 @@ export const databaseService = {
     },
 
     // Disconnect Open Finance bank and remove all linked data
-    deleteOpenFinanceConnection: async (userId: string, accountIds: string[]) => {
+    deleteOpenFinanceConnection: async (
+        userId: string,
+        accountIds: string[],
+        options: { deleteAccountsFirst?: boolean } = {}
+    ) => {
         try {
             const normalizedAccountIds = Array.from(
                 new Set((accountIds || []).filter(Boolean).map((id) => String(id)))
@@ -1307,6 +1376,14 @@ export const databaseService = {
                         creditCardTransactions: 0
                     }
                 };
+            }
+
+            const accountDocRefs = normalizedAccountIds.map((accountId) => doc(db, 'users', userId, 'accounts', accountId));
+            let deletedAccounts = 0;
+
+            if (options.deleteAccountsFirst) {
+                deletedAccounts = await deleteDocRefsInChunks(accountDocRefs);
+                await removeAccountsFromCache(userId, normalizedAccountIds);
             }
 
             const transactionsRef = collection(db, 'users', userId, 'transactions');
@@ -1368,8 +1445,11 @@ export const databaseService = {
             const deletedCreditCardTransactions = await deleteDocRefsInChunks([...creditDocRefs.values()]);
             const deletedInvestmentHistory = await deleteDocRefsInChunks([...investmentHistoryDocRefs.values()]);
             const deletedInvestments = await deleteDocRefsInChunks([...investmentDocRefs.values()]);
-            const accountDocRefs = normalizedAccountIds.map((accountId) => doc(db, 'users', userId, 'accounts', accountId));
-            const deletedAccounts = await deleteDocRefsInChunks(accountDocRefs);
+
+            if (!options.deleteAccountsFirst) {
+                deletedAccounts = await deleteDocRefsInChunks(accountDocRefs);
+                await removeAccountsFromCache(userId, normalizedAccountIds);
+            }
 
             return {
                 success: true,
@@ -1421,7 +1501,10 @@ export const databaseService = {
             // Use Pluggy account ID as document ID for consistency
             const accountId = accountData.id;
             const docRef = doc(db, 'users', userId, 'accounts', accountId);
-            const existingAccountSnap = await getDoc(docRef);
+            const existingAccountSnap = await runFirestoreWriteWithRetry(
+                () => getDoc(docRef),
+                'open finance account lookup'
+            );
             const existingAccountData = existingAccountSnap.exists() ? existingAccountSnap.data() : null;
             const effectiveConnector = accountData.connector ?? connector ?? null;
             const normalizedConnector = normalizeConnectorForStorage(effectiveConnector);
@@ -1563,7 +1646,10 @@ export const databaseService = {
                 updatedAt: Timestamp.now()
             };
 
-            await setDoc(docRef, accountDoc, { merge: true });
+            await runFirestoreWriteWithRetry(
+                () => setDoc(docRef, accountDoc, { merge: true }),
+                'open finance account save'
+            );
 
             return { success: true, id: accountId };
         } catch (error: any) {
@@ -2237,12 +2323,21 @@ export const databaseService = {
             const creditRef = collection(db, 'users', userId, 'creditCardTransactions');
 
             const [existingCheckingIds, existingCreditIds] = await Promise.all([
-                getExistingDocumentIds(checkingRef, checkingCandidates.map((candidate) => candidate.id)),
-                getExistingDocumentIds(creditRef, creditCandidates.map((candidate) => candidate.id))
+                runFirestoreWriteWithRetry(
+                    () => getExistingDocumentIds(checkingRef, checkingCandidates.map((candidate) => candidate.id)),
+                    'open finance checking transaction lookup'
+                ),
+                runFirestoreWriteWithRetry(
+                    () => getExistingDocumentIds(creditRef, creditCandidates.map((candidate) => candidate.id)),
+                    'open finance credit transaction lookup'
+                )
             ]);
-            const existingCreditDocsById = await getExistingDocumentsById(
-                creditRef,
-                Array.from(existingCreditIds)
+            const existingCreditDocsById = await runFirestoreWriteWithRetry(
+                () => getExistingDocumentsById(
+                    creditRef,
+                    Array.from(existingCreditIds)
+                ),
+                'open finance credit transaction detail lookup'
             );
 
             const checkingWrites: { docRef: any; data: Record<string, any>; merge?: boolean }[] = [];

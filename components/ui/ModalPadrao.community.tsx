@@ -4,9 +4,11 @@ import {
     type BottomSheetMethods,
 } from '@expo/ui/community/bottom-sheet';
 import React, { useCallback, useEffect, useRef } from 'react';
-import { ScrollView, View, Text } from 'react-native';
+import { Dimensions, ScrollView, View, Text } from 'react-native';
 import { ModalPadraoFallback } from './ModalPadraoFallback';
 import type { ModalPadraoProps } from './ModalPadrao.types';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 export function ModalPadrao(props: ModalPadraoProps) {
     const {
@@ -19,6 +21,7 @@ export function ModalPadrao(props: ModalPadraoProps) {
         onAfterClose,
         bodyStyle,
         contentStyle,
+        maxHeightRatio = 0.75,
     } = props;
 
     const sheetRef = useRef<BottomSheetMethods>(null);
@@ -44,12 +47,19 @@ export function ModalPadrao(props: ModalPadraoProps) {
         return <ModalPadraoFallback {...props} />;
     }
 
+    const maxSheetHeight = SCREEN_HEIGHT * maxHeightRatio;
+    // Reserve space for header (~62px) + footer (~60px if present) + padding
+    const headerHeight = title ? 62 : 0;
+    const footerHeight = props.footer ? 60 : 0;
+    const bodyMaxHeight = maxSheetHeight - headerHeight - footerHeight - 20;
+
     return (
         <BottomSheet
             ref={sheetRef}
             index={-1}
             enablePanDownToClose
             enableDynamicSizing
+            maxDynamicContentSize={maxSheetHeight}
             backgroundStyle={{ backgroundColor: '#111111' }}
             onDismiss={handleDismiss}
         >
@@ -88,13 +98,13 @@ export function ModalPadrao(props: ModalPadraoProps) {
                             showsVerticalScrollIndicator={false}
                             keyboardShouldPersistTaps="handled"
                             contentContainerStyle={[{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 34 }, bodyStyle]}
-                            style={{ maxHeight: 600 }}
+                            style={{ maxHeight: bodyMaxHeight }}
                             {...props.scrollViewProps}
                         >
                             {children}
                         </ScrollView>
                     ) : (
-                        <View style={[{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 34 }, bodyStyle]}>
+                        <View style={[{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 34, maxHeight: bodyMaxHeight }, bodyStyle]}>
                             {children}
                         </View>
                     )}
@@ -118,3 +128,4 @@ export function ModalPadrao(props: ModalPadraoProps) {
     );
 }
 export default ModalPadrao;
+
