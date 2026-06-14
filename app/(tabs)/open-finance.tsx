@@ -673,18 +673,15 @@ export default function OpenFinanceScreen() {
             throw new Error('Não foi possível abrir o link de autorização do banco.');
         }
 
-        if (Platform.OS !== 'ios') {
-            await WebBrowser.openBrowserAsync(url);
-            return;
-        }
-
         let authResult: Awaited<ReturnType<typeof WebBrowser.openAuthSessionAsync>>;
 
         try {
             authResult = await WebBrowser.openAuthSessionAsync(
                 url,
                 OAUTH_REDIRECT_URI,
-                { preferEphemeralSession: false }
+                Platform.OS === 'ios'
+                    ? { preferEphemeralSession: false }
+                    : undefined
             );
         } catch (error: any) {
             const code = String(error?.code || '').toUpperCase();

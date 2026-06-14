@@ -20,6 +20,7 @@ const env = envSchema.parse(process.env);
 const PLUGGY_API_URL = 'https://api.pluggy.ai';
 const DEFAULT_BACKEND_URL = 'https://backendcontrolarapp-production.up.railway.app';
 const DEFAULT_APP_REDIRECT_URI = 'controlarapp://open-finance/callback';
+const ANDROID_APP_PACKAGE = 'com.gustavodev25.controlarapp';
 const PLUGGY_WEBHOOK_IPS = ['177.71.238.212'];
 const PUBLIC_ROUTES = ['/webhook', '/ping', '/connectors', '/oauth-callback'];
 const ACCOUNTS_PAGE_SIZE = 100;
@@ -80,34 +81,81 @@ const escapeHtml = (unsafe = '') => String(unsafe).replace(/[&<>"']/g, (match) =
     "'": '&#039;',
 }[match]));
 
-const renderOAuthRedirectPage = (redirectUrl) => `<!DOCTYPE html>
+const buildAndroidIntentUrl = (redirectUrl) => {
+    try {
+        const parsed = new URL(redirectUrl);
+        if (parsed.protocol !== 'controlarapp:') return null;
+
+        const intentPath = `${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        return `intent://${intentPath}#Intent;scheme=controlarapp;package=${ANDROID_APP_PACKAGE};end`;
+    } catch {
+        return null;
+    }
+};
+
+const renderOAuthRedirectPage = (redirectUrl) => {
+    let hasError = false;
+    try {
+        const parsed = new URL(redirectUrl);
+        hasError = Boolean(parsed.searchParams.get('error'));
+    } catch { }
+
+    const androidIntentUrl = buildAndroidIntentUrl(redirectUrl);
+    const title = hasError ? 'Autorizacao nao concluida' : 'Conexao autorizada';
+    const message = hasError
+        ? 'Estamos voltando para o Controlar+ para voce tentar novamente.'
+        : 'Tudo certo. Estamos voltando para o Controlar+ para finalizar a sincronizacao.';
+
+    return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Retornando ao aplicativo</title>
-  <meta http-equiv="refresh" content="0;url=${escapeHtml(redirectUrl)}" />
+  <title>${escapeHtml(title)}</title>
+  <meta http-equiv="refresh" content="1;url=${escapeHtml(redirectUrl)}" />
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; background: #0f0f10; color: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-    .card { width: min(92vw, 460px); background: #19191b; border: 1px solid #2a2a2f; border-radius: 16px; padding: 24px; text-align: center; }
-    .spinner { width: 34px; height: 34px; border-radius: 999px; border: 3px solid #3a3a40; border-top-color: #d97757; margin: 0 auto 16px; animation: spin 0.9s linear infinite; }
-    a { color: #f29f7d; word-break: break-all; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0c0c0d; color: #f6f6f7; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+    .card { width: min(100%, 440px); background: #171719; border: 1px solid #2c2c31; border-radius: 18px; padding: 28px 24px; text-align: center; box-shadow: 0 24px 64px rgba(0,0,0,0.35); }
+    .status { width: 48px; height: 48px; border-radius: 999px; display: grid; place-items: center; margin: 0 auto 16px; background: ${hasError ? '#3a1f1f' : '#1f3328'}; color: ${hasError ? '#ffb4a8' : '#91e6ad'}; font-size: 26px; line-height: 1; }
+    h1 { font-size: 22px; line-height: 1.2; margin: 0 0 10px; font-weight: 700; }
+    p { color: #c9c9cf; font-size: 15px; line-height: 1.5; margin: 0 0 18px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; width: 100%; border-radius: 12px; background: #d97757; color: #111113; text-decoration: none; font-weight: 700; margin-top: 4px; }
+    .hint { display: block; color: #8f8f98; font-size: 12px; line-height: 1.4; margin-top: 14px; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="spinner"></div>
-    <h2>Autorizacao recebida</h2>
-    <p>Estamos retornando voce para o app.</p>
-    <p>Se nao abrir automaticamente, toque no link:</p>
-    <p><a href="${escapeHtml(redirectUrl)}">${escapeHtml(redirectUrl)}</a></p>
+    <div class="status">${hasError ? '!' : '&#10003;'}</div>
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(message)}</p>
+    <a class="button" id="open-app" href="${escapeHtml(redirectUrl)}">Voltar para o app</a>
+    <span class="hint">Se nada acontecer automaticamente, toque no botao acima.</span>
   </div>
   <script>
-    setTimeout(function() { window.location.href = ${JSON.stringify(redirectUrl)}; }, 400);
+    const appUrl = ${JSON.stringify(redirectUrl)};
+    const androidIntentUrl = ${JSON.stringify(androidIntentUrl)};
+    const isAndroid = /Android/i.test(navigator.userAgent || '');
+
+    function openApp() {
+      window.location.href = appUrl;
+      if (isAndroid && androidIntentUrl) {
+        setTimeout(function() { window.location.href = androidIntentUrl; }, 900);
+      }
+    }
+
+    document.getElementById('open-app').addEventListener('click', function(event) {
+      event.preventDefault();
+      openApp();
+    });
+
+    setTimeout(openApp, 250);
+    setTimeout(openApp, 1500);
   </script>
 </body>
 </html>`;
+};
 
 const normalizeIp = (value) => String(value || '').trim().replace(/^::ffff:/, '');
 
