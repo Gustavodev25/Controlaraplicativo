@@ -436,7 +436,10 @@ const runPersistStepWithRetry = async (
     return lastResult;
 };
 
-const OAUTH_REDIRECT_URI = Linking.createURL('open-finance/callback');
+const OAUTH_CALLBACK_PATH = 'open-finance/callback';
+const OAUTH_REDIRECT_URI = Platform.OS === 'web'
+    ? Linking.createURL(OAUTH_CALLBACK_PATH)
+    : `controlarapp:///${OAUTH_CALLBACK_PATH}`;
 
 export default function OpenFinanceScreen() {
     const { user, profile, refreshProfile } = useAuth();
@@ -673,15 +676,23 @@ export default function OpenFinanceScreen() {
             throw new Error('Não foi possível abrir o link de autorização do banco.');
         }
 
+        if (!isWebUrl) {
+            await Linking.openURL(url);
+            return;
+        }
+
+        if (Platform.OS !== 'ios') {
+            await WebBrowser.openBrowserAsync(url);
+            return;
+        }
+
         let authResult: Awaited<ReturnType<typeof WebBrowser.openAuthSessionAsync>>;
 
         try {
             authResult = await WebBrowser.openAuthSessionAsync(
                 url,
                 OAUTH_REDIRECT_URI,
-                Platform.OS === 'ios'
-                    ? { preferEphemeralSession: false }
-                    : undefined
+                { preferEphemeralSession: false }
             );
         } catch (error: any) {
             const code = String(error?.code || '').toUpperCase();
@@ -1011,6 +1022,10 @@ export default function OpenFinanceScreen() {
         }
 
         lastOAuthCallbackRef.current = { url, receivedAt: now };
+
+        try {
+            WebBrowser.dismissBrowser();
+        } catch { }
 
         const parsedItemId = extractItemIdFromDeepLink(url);
         const fallbackItemId = pendingItemIdRef.current;

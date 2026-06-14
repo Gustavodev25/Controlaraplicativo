@@ -25,6 +25,9 @@ export default function OpenFinanceCallbackScreen() {
         let mounted = true;
 
         WebBrowser.maybeCompleteAuthSession({ skipRedirectCheck: true });
+        try {
+            WebBrowser.dismissBrowser();
+        } catch { }
 
         const persistAndRedirect = async () => {
             const itemId = normalizeParam(params.itemId);

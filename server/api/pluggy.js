@@ -19,7 +19,7 @@ const env = envSchema.parse(process.env);
 
 const PLUGGY_API_URL = 'https://api.pluggy.ai';
 const DEFAULT_BACKEND_URL = 'https://backendcontrolarapp-production.up.railway.app';
-const DEFAULT_APP_REDIRECT_URI = 'controlarapp://open-finance/callback';
+const DEFAULT_APP_REDIRECT_URI = 'controlarapp:///open-finance/callback';
 const ANDROID_APP_PACKAGE = 'com.gustavodev25.controlarapp';
 const PLUGGY_WEBHOOK_IPS = ['177.71.238.212'];
 const PUBLIC_ROUTES = ['/webhook', '/ping', '/connectors', '/oauth-callback'];
@@ -86,7 +86,8 @@ const buildAndroidIntentUrl = (redirectUrl) => {
         const parsed = new URL(redirectUrl);
         if (parsed.protocol !== 'controlarapp:') return null;
 
-        const intentPath = `${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        const routePath = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+/, '');
+        const intentPath = `${routePath || 'open-finance/callback'}${parsed.search}${parsed.hash}`;
         return `intent://${intentPath}#Intent;scheme=controlarapp;package=${ANDROID_APP_PACKAGE};end`;
     } catch {
         return null;
@@ -112,7 +113,6 @@ const renderOAuthRedirectPage = (redirectUrl) => {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(title)}</title>
-  <meta http-equiv="refresh" content="1;url=${escapeHtml(redirectUrl)}" />
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0c0c0d; color: #f6f6f7; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -130,7 +130,7 @@ const renderOAuthRedirectPage = (redirectUrl) => {
     <div class="status">${hasError ? '!' : '&#10003;'}</div>
     <h1>${escapeHtml(title)}</h1>
     <p>${escapeHtml(message)}</p>
-    <a class="button" id="open-app" href="${escapeHtml(redirectUrl)}">Voltar para o app</a>
+    <a class="button" id="open-app" href="${escapeHtml(androidIntentUrl || redirectUrl)}">Voltar para o app</a>
     <span class="hint">Se nada acontecer automaticamente, toque no botao acima.</span>
   </div>
   <script>
@@ -139,10 +139,11 @@ const renderOAuthRedirectPage = (redirectUrl) => {
     const isAndroid = /Android/i.test(navigator.userAgent || '');
 
     function openApp() {
+      window.location.href = isAndroid && androidIntentUrl ? androidIntentUrl : appUrl;
+    }
+
+    function openAppFallback() {
       window.location.href = appUrl;
-      if (isAndroid && androidIntentUrl) {
-        setTimeout(function() { window.location.href = androidIntentUrl; }, 900);
-      }
     }
 
     document.getElementById('open-app').addEventListener('click', function(event) {
@@ -151,7 +152,7 @@ const renderOAuthRedirectPage = (redirectUrl) => {
     });
 
     setTimeout(openApp, 250);
-    setTimeout(openApp, 1500);
+    setTimeout(openAppFallback, 1800);
   </script>
 </body>
 </html>`;
