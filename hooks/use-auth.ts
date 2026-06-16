@@ -2,11 +2,26 @@
 import { authService, databaseService, User } from '@/services/firebase';
 import { offlineStorage } from '@/services/offlineStorage';
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
+
+type SignupPlatform = 'android' | 'iphone' | 'web' | 'unknown';
+
+const getSignupPlatform = (): SignupPlatform => {
+    if (Platform.OS === 'android') return 'android';
+    if (Platform.OS === 'ios') return 'iphone';
+    if (Platform.OS === 'web') return 'web';
+    return 'unknown';
+};
+
+const isNativeMobile = () => Platform.OS === 'android' || Platform.OS === 'ios';
 
 interface UserProfile {
     name?: string;
     email?: string;
     phone?: string;
+    signupPlatform?: SignupPlatform;
+    signupSource?: 'mobile' | 'web';
+    createdFromMobile?: boolean;
     subscription?: {
         plan: string;
         status: string;
@@ -160,11 +175,16 @@ export function useAuth() {
         const result = await authService.signUp(email, password);
 
         if (result.success && result.user) {
+            const createdFromMobile = isNativeMobile();
+
             // Create user profile
             await databaseService.setUserProfile(result.user.uid, {
                 name,
                 email,
                 phone: phone || null,
+                signupPlatform: getSignupPlatform(),
+                signupSource: createdFromMobile ? 'mobile' : 'web',
+                createdFromMobile,
                 createdAt: new Date(),
                 subscription: {
                     plan: 'starter',

@@ -2,8 +2,9 @@ import { UniversalBackground } from '@/components/UniversalBackground';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { databaseService } from '@/services/firebase';
-import { openSubscriptionManagement, restorePurchases, syncStoreSubscriptionStatus } from '@/services/iapService';
+import { restorePurchases } from '@/services/iapService';
 import { getStoreSubscriptionStatus } from '@/services/storeSubscriptionStatus';
+import { openCancellationWhatsApp } from '@/services/whatsappSupport';
 import { safeBack } from '@/utils/navigation';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
@@ -333,6 +334,8 @@ export default function SubscriptionSettingsScreen() {
         ['google', 'google_play', 'play_store'].includes(subscriptionProvider);
     const isNativeStoreSubscription = isAppleSubscription || isGooglePlaySubscription;
     const nativeStoreName = isGooglePlaySubscription ? 'Google Play' : 'App Store';
+    const cancelNativeSubscriptionLabel = 'Cancelar assinatura pelo WhatsApp';
+    const canCancelNativeSubscription = isNativeStoreSubscription && isPro && !isCancelled && !isExpired;
     const isManualSubscription =
         subscriptionProvider === 'manual' ||
         subscriptionProvider === 'admin' ||
@@ -356,21 +359,16 @@ export default function SubscriptionSettingsScreen() {
         } as any);
     };
 
-    const handleManageNativeSubscription = async () => {
+    const handleContactCancellationSupport = async () => {
         try {
-            await openSubscriptionManagement();
-            if (user?.uid) {
-                const statusResult = await syncStoreSubscriptionStatus(user.uid, {
-                    refreshServerStatus: true,
-                    syncActivePurchase: true,
-                });
-                if (statusResult.success) await refreshProfile();
-                await loadSubscriptionData({ syncStoreStatus: false });
-            }
+            await openCancellationWhatsApp({
+                email: user?.email,
+                platform: nativeStoreName,
+            });
         } catch (error: any) {
             Alert.alert(
-                `Assinaturas da ${nativeStoreName}`,
-                error?.message || 'Nao foi possivel abrir o gerenciamento de assinaturas.',
+                'WhatsApp',
+                error?.message || 'Nao foi possivel abrir o WhatsApp agora.',
                 [{ text: 'OK' }]
             );
         }
@@ -519,6 +517,22 @@ export default function SubscriptionSettingsScreen() {
                             </View>
                         )}
 
+                        {canCancelNativeSubscription && (
+                            <TouchableOpacity
+                                style={styles.cancelSubscriptionButton}
+                                onPress={handleContactCancellationSupport}
+                                activeOpacity={0.75}
+                            >
+                                <Text
+                                    style={styles.cancelSubscriptionButtonText}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                >
+                                    {cancelNativeSubscriptionLabel}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
                         {!hasKnownProSubscription ? (
                             <View style={styles.planFooterRow}>
                                 <View>
@@ -577,10 +591,10 @@ export default function SubscriptionSettingsScreen() {
                                         </View>
                                         <TouchableOpacity
                                             style={styles.editButton}
-                                            onPress={handleManageNativeSubscription}
+                                            onPress={handleContactCancellationSupport}
                                             activeOpacity={0.75}
                                         >
-                                            <Text style={styles.editButtonText}>Gerenciar</Text>
+                                            <Text style={styles.editButtonText}>WhatsApp</Text>
                                         </TouchableOpacity>
                                     </View>
                                 ) : needsPaymentSetup ? (
@@ -822,6 +836,22 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '500',
         color: '#A1A1A6',
+    },
+    cancelSubscriptionButton: {
+        marginTop: 14,
+        paddingVertical: 11,
+        paddingHorizontal: 14,
+        borderRadius: 10,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255, 69, 58, 0.32)',
+        backgroundColor: 'rgba(255, 69, 58, 0.08)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cancelSubscriptionButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#FF453A',
     },
     // Section Headers
     sectionHeader: {

@@ -5,7 +5,6 @@ import {
     finishTransaction,
     getProOffering,
     initializePurchases,
-    openSubscriptionManagement,
     PRO_PRODUCT_ID,
     PRO_PRICE_STRING,
     PRO_TRIAL_DAYS,
@@ -18,6 +17,7 @@ import {
     type PurchaseError,
     type SubscriptionPurchase,
 } from '@/services/iapService';
+import { openCancellationWhatsApp } from '@/services/whatsappSupport';
 import { safeBack } from '@/utils/navigation';
 import { useFocusEffect, useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { Check, LogOut, Shield, X } from 'lucide-react-native';
@@ -160,6 +160,7 @@ export default function PlansScreen() {
     const isAndroid = Platform.OS === 'android';
     const isMobileStore = isIOS || isAndroid;
     const storeName = isAndroid ? 'Google Play' : 'App Store';
+    const cancelSubscriptionLabel = 'Cancelar assinatura pelo WhatsApp';
     const currentPlan = String(profile?.subscription?.plan ?? 'free').trim().toLowerCase();
     const currentStatus = String(profile?.subscription?.status ?? '').trim().toLowerCase();
     const currentProvider = String(
@@ -641,18 +642,16 @@ export default function PlansScreen() {
         }
     };
 
-    const handleManageSubscription = async () => {
+    const handleContactCancellationSupport = async () => {
         try {
-            await openSubscriptionManagement();
-            if (user?.uid) {
-                const statusResult = await syncStoreSubscriptionStatus(user.uid, { syncActivePurchase: true });
-                setAlreadyPro(statusResult.hasPro);
-                if (statusResult.success) await refreshProfile();
-            }
+            await openCancellationWhatsApp({
+                email: user?.email,
+                platform: storeName,
+            });
         } catch (error: any) {
             Alert.alert(
-                `Assinaturas da ${storeName}`,
-                error?.message || 'Nao foi possivel abrir o gerenciamento de assinaturas.',
+                'WhatsApp',
+                error?.message || 'Nao foi possivel abrir o WhatsApp agora.',
                 [{ text: 'OK' }]
             );
         }
@@ -829,10 +828,12 @@ export default function PlansScreen() {
                                 </View>
                                 <TouchableOpacity
                                     style={styles.restoreButton}
-                                    onPress={handleManageSubscription}
+                                    onPress={handleContactCancellationSupport}
                                     activeOpacity={0.7}
                                 >
-                                    <Text style={styles.restoreText}>Gerenciar assinatura na {storeName}</Text>
+                                    <Text style={styles.restoreText} numberOfLines={1} adjustsFontSizeToFit>
+                                        {cancelSubscriptionLabel}
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
                         ) : (

@@ -7,6 +7,9 @@ interface UserProfile {
     name?: string;
     email?: string;
     phone?: string;
+    signupPlatform?: 'android' | 'iphone' | 'web' | 'unknown';
+    signupSource?: 'mobile' | 'web';
+    createdFromMobile?: boolean;
     subscription?: {
         plan: string;
         status: string;
