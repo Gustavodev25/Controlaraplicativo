@@ -10,11 +10,13 @@ import { MorphTouchable } from '@/components/ui/MorphTouchable';
 import { OpenFinanceSyncBanner } from '@/components/ui/OpenFinanceSyncBanner';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import { databaseService } from '@/services/firebase';
 import { notificationService } from '@/services/notifications';
-import { DetectedSubscription, detectSubscriptions, formatDetectedSubscription } from '@/services/subscriptionDetector';
+import { DetectedSubscription, detectSubscriptions, formatDetectedSubscription, getDetectedSubscriptionKey } from '@/services/subscriptionDetector';
 import { getCategoryConfig } from '@/utils/categoryUtils';
-import { addMonths } from '@/utils/monthWindow';
+import { addMonths, toMonthKey } from '@/utils/monthWindow';
+import { normalizeMonthKey, projectSubscriptionForMonth, summarizeProjectedSubscriptions } from '@/utils/recurrenceProjection';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import {
@@ -228,6 +230,33 @@ const IOS_FADE_IN = FadeIn.duration(220);
 const IOS_FADE_OUT = FadeOut.duration(140);
 const HEADER_CONTROL_HEIGHT = 36;
 
+const getDismissedDetectionStorageKey = (userId: string) =>
+    `@controlar:recurrence:dismissedDetections:${userId}`;
+
+const loadDismissedDetectionKeys = async (userId: string): Promise<Set<string>> => {
+    try {
+        const stored = await AsyncStorage.getItem(getDismissedDetectionStorageKey(userId));
+        const parsed = stored ? JSON.parse(stored) : [];
+        return new Set(Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []);
+    } catch (error) {
+        console.warn('[RecurrenceView] Error loading dismissed detections:', error);
+        return new Set();
+    }
+};
+
+const saveDismissedDetectionKey = async (userId: string, detectionKey: string): Promise<void> => {
+    try {
+        const dismissed = await loadDismissedDetectionKeys(userId);
+        dismissed.add(detectionKey);
+        await AsyncStorage.setItem(
+            getDismissedDetectionStorageKey(userId),
+            JSON.stringify(Array.from(dismissed))
+        );
+    } catch (error) {
+        console.warn('[RecurrenceView] Error saving dismissed detection:', error);
+    }
+};
+
 const triggerIOSCoreMorph = () => {
     LayoutAnimation.configureNext({
         duration: 420,
@@ -269,6 +298,7 @@ interface RecurrenceItem {
     cancellationDate?: string; // ISO Date
     transactionType?: 'income' | 'expense';
     paidMonths?: string[];
+    paid?: boolean;
     isValidated?: boolean; // Se false ou undefined, não soma nos totais
     isDetected?: boolean; // Se true, mostra botões de confirmar/excluir
     detectedData?: DetectedSubscription; // Dados da detecção original
@@ -552,6 +582,7 @@ const ListItem = ({
                                         item.transactionType === 'income'
                                             ? styles.listItemAmountIncome
                                             : styles.listItemAmountExpense,
+                                        item.status === 'paid' && styles.listItemAmountPaid,
                                     ]}
                                 >
                                     {item.transactionType === 'income' ? '+ ' : '- '}
@@ -724,6 +755,7 @@ const MiniCalendar = ({
 
 export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: RecurrenceTab }) {
     const { user, profile } = useAuthContext();
+    const { showError, showSuccess } = useToast();
     const { getCategoryName } = useCategories();
     const [selectedTab, setSelectedTab] = useState<RecurrenceTab>(initialTab);
     const [items, setItems] = useState<RecurrenceItem[]>([]);
@@ -741,6 +773,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
     // Month Selector State
     const [selectedMonth, setSelectedMonth] = useState(new Date());
+    const selectedMonthKey = useMemo(() => toMonthKey(selectedMonth), [selectedMonth]);
 
     const minDate = useMemo(() => addMonths(new Date(), -60), []); // 5 years back
     const maxDate = useMemo(() => addMonths(new Date(), 60), []); // 5 years forward
@@ -850,6 +883,11 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
     // Detecta assinaturas automaticamente
     useEffect(() => {
+        setDetectedSubscriptions([]);
+    }, [user?.uid, selectedTab, items.length]);
+
+    /*
+    useEffect(() => {
         const detectSubscriptionsAuto = async () => {
             if (!user || loading || selectedTab !== 'subscriptions') return;
 
@@ -884,13 +922,26 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 // Detecta assinaturas
                 const detected = detectSubscriptions(formattedTransactions);
                 console.log('[RecurrenceView] Detected', detected.length, 'subscriptions');
+                const dismissedDetectionKeys = await loadDismissedDetectionKeys(user.uid);
 
                 // Filtra apenas novas (que não existem)
                 const existingNames = items
                     .filter(i => i.type === 'subscription' && i.isValidated !== false)
                     .map(i => i.name.toLowerCase().trim());
+                const existingDetectionKeys = new Set(
+                    items
+                        .filter(i => i.type === 'subscription' && i.isValidated !== false)
+                        .map(i => getDetectedSubscriptionKey({
+                            name: i.name,
+                            frequency: i.frequency || 'monthly',
+                        }))
+                );
 
                 const newDetections = detected.filter((det: DetectedSubscription) => {
+                    const detectionKey = getDetectedSubscriptionKey(det);
+                    if (dismissedDetectionKeys.has(detectionKey)) return false;
+                    if (existingDetectionKeys.has(detectionKey)) return false;
+
                     const detName = det.name.toLowerCase().trim();
                     return !existingNames.some(name =>
                         detName.includes(name) || name.includes(detName)
@@ -916,20 +967,54 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
             clearTimeout(timer);
             task?.cancel?.();
         };
-    }, [user, loading, selectedTab, items]);
+    }, [user?.uid, loading, selectedTab, items]);
+    */
 
     const handleOptionPay = async (item: RecurrenceItem) => {
         if (!user) return;
 
         triggerIOSCoreMorph();
 
-        if (item.status === 'paid') {
-            // Revert to pending (undo payment)
-            await databaseService.unpayRecurrence(user.uid, item);
-        } else {
-            // Process payment
-            await databaseService.payRecurrence(user.uid, item);
+        const nextStatus = item.status === 'paid' ? 'pending' : 'paid';
+        const result = item.status === 'paid'
+            ? await databaseService.unpayRecurrence(user.uid, item)
+            : await databaseService.payRecurrence(user.uid, item);
+
+        if (!result?.success) {
+            showError('Não foi possível atualizar o pagamento', result?.error);
+            return;
         }
+
+        const paymentMonth = normalizeMonthKey(item.dueDate) || selectedMonthKey;
+        setItems(current => current.map(currentItem => {
+            if (!isSameRecurrence(currentItem, item)) return currentItem;
+
+            const updatedItem: RecurrenceItem = {
+                ...currentItem,
+                status: nextStatus,
+                paid: nextStatus === 'paid',
+            };
+
+            if (currentItem.type === 'subscription') {
+                const paidMonths = Array.isArray(currentItem.paidMonths)
+                    ? currentItem.paidMonths
+                    : [];
+
+                updatedItem.paidMonths = nextStatus === 'paid'
+                    ? Array.from(new Set([...paidMonths.map(month => normalizeMonthKey(month) || month), paymentMonth]))
+                    : paidMonths.filter(month => normalizeMonthKey(month) !== paymentMonth);
+            }
+
+            return updatedItem;
+        }));
+
+        showSuccess(
+            item.status === 'paid'
+                ? 'Pagamento revertido'
+                : item.type === 'reminder'
+                    ? 'Lembrete concluído'
+                    : 'Compra marcada como paga'
+        );
     };
 
     const handleOptionDelete = (item: RecurrenceItem) => {
@@ -1128,6 +1213,10 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
             console.log('[RecurrenceView] After dismiss:', filtered.length);
             return filtered;
         });
+
+        if (user?.uid) {
+            await saveDismissedDetectionKey(user.uid, getDetectedSubscriptionKey(detection));
+        }
     };
 
     const onRefresh = () => {
@@ -1149,20 +1238,6 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
         );
 
         // Adiciona detecções como items temporários (apenas para subscriptions)
-        if (selectedTab === 'subscriptions' && detectedSubscriptions.length > 0) {
-            const detectedItems: RecurrenceItem[] = detectedSubscriptions.map(det => {
-                const formatted = formatDetectedSubscription(det);
-                return {
-                    ...formatted,
-                    id: det.id,
-                    isDetected: true,
-                    isValidated: false,
-                    detectedData: det
-                } as RecurrenceItem;
-            });
-            result = [...result, ...detectedItems];
-        }
-
         // Filter and Project by Month
         result = result.map(item => {
             // Se é uma detecção, não precisa projetar
@@ -1170,80 +1245,26 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 return item;
             }
 
-            const [y, m, d] = item.dueDate.split('-').map(Number);
+            if (item.type === 'subscription') {
+                return projectSubscriptionForMonth(item, selectedMonthKey);
+            }
+
+            const [y, m] = item.dueDate.split('-').map(Number);
             const selectedYear = selectedMonth.getFullYear();
             const selectedMonthIndex = selectedMonth.getMonth();
 
-            // Helper to check if item is active in selected month (respecting cancellation)
-            if (item.cancellationDate) {
-                const [cy, cm, cd] = item.cancellationDate.split('-').map(Number);
-                const cancelDate = new Date(cy, cm - 1, cd);
-                const monthStart = new Date(selectedYear, selectedMonthIndex, 1);
-                const dayToUse = Math.min(d, new Date(selectedYear, selectedMonthIndex + 1, 0).getDate()); // Define dayToUse here for cancellation check
-                const dateToCheck = new Date(selectedYear, selectedMonthIndex, dayToUse);
-                if (monthStart > cancelDate) return null;
+            // REMINDERS: Discrete document model (new doc created on payment).
+            // Do NOT project. Strictly filter by stored dueDate.
+            // Include past pending reminders in the current month view.
+            if ((m - 1) === selectedMonthIndex && y === selectedYear) {
+                return item;
             }
 
-            // Logic Split: Subscriptions vs Reminders
-            if (item.type === 'subscription') {
-                // SUBSCRIPTIONS: Single document model. We MUST project.
-                if (item.frequency === 'monthly') {
-                    // Handle days like 31st in Feb
-                    const daysInMonth = new Date(selectedYear, selectedMonthIndex + 1, 0).getDate();
-                    const dayToUse = Math.min(d, daysInMonth);
+            const itemMonthValue = y * 12 + (m - 1);
+            const selectedMonthValue = selectedYear * 12 + selectedMonthIndex;
 
-                    // Create projected date
-                    const projectedIso = `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, '0')}-${String(dayToUse).padStart(2, '0')}`;
-
-                    // Check if this specific month is paid
-                    const monthKey = `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, '0')}`;
-                    const altMonthKey = `${selectedYear}-${selectedMonthIndex + 1}`;
-                    const isPaid = item.paidMonths?.some((m: string) => m === monthKey || m === altMonthKey);
-
-                    return {
-                        ...item,
-                        dueDate: projectedIso,
-                        status: isPaid ? 'paid' : 'pending'
-                    };
-
-                } else if (item.frequency === 'yearly') {
-                    // Only show if month matches
-                    if ((m - 1) === selectedMonthIndex) {
-                        // Project year
-                        const projectedIso = `${selectedYear}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-
-                        // Check if paid
-                        const monthKey = `${selectedYear}-${String(m).padStart(2, '0')}`;
-                        const altMonthKey = `${selectedYear}-${m}`;
-                        const isPaid = item.paidMonths?.some((k: string) => k === monthKey || k === altMonthKey);
-
-                        return {
-                            ...item,
-                            dueDate: projectedIso,
-                            status: isPaid ? 'paid' : 'pending'
-                        };
-                    }
-                    return null;
-                }
-            } else {
-                // REMINDERS: Discrete document model (new doc created on payment).
-                // Do NOT project. Strictly filter by stored dueDate.
-                // Include "past" (overdue) pending reminders in the current month view.
-
-                // Exact match for the selected month
-                if ((m - 1) === selectedMonthIndex && y === selectedYear) {
-                    return item;
-                }
-
-                // If overdue (before the selected month) and unpaid, show it in the current month
-                const itemMonthValue = y * 12 + (m - 1);
-                const selectedMonthValue = selectedYear * 12 + selectedMonthIndex;
-
-                if (item.status !== 'paid' && itemMonthValue < selectedMonthValue) {
-                    return item;
-                }
-
-                return null;
+            if (item.status !== 'paid' && itemMonthValue < selectedMonthValue) {
+                return item;
             }
 
             // Fallback for any other cases (should be covered above)
@@ -1282,7 +1303,15 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
         });
 
         return result;
-    }, [items, filters, activeFilterCount, selectedMonth, selectedTab, detectedSubscriptions]);
+    }, [items, filters, activeFilterCount, selectedMonth, selectedMonthKey, selectedTab]);
+
+    const openActionMenuItem = useMemo(() => {
+        if (!openActionMenuId) return null;
+
+        return filteredItems.find(item => item.id === openActionMenuId)
+            || items.find(item => item.id === openActionMenuId)
+            || null;
+    }, [filteredItems, items, openActionMenuId]);
 
     const groupedItems = useMemo(() => {
         if (filteredItems.length === 0) return [];
@@ -1308,12 +1337,6 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
         return groups;
     }, [filteredItems, getCategoryName]);
-
-    const subscriptionTotal = useMemo(() => {
-        return items
-            .filter(i => i.type === 'subscription')
-            .reduce((acc, curr) => acc + curr.amount, 0);
-    }, [items]);
 
     const reminderCount = useMemo(() => {
         return items.filter(i => i.type === 'reminder' && i.status !== 'paid').length;
@@ -1345,31 +1368,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
 
     const totals = useMemo(() => {
         if (selectedTab === 'subscriptions') {
-            // Filtra apenas assinaturas validadas (isValidated !== false)
-            const validatedItems = filteredItems.filter(item => item.isValidated !== false);
-
-            let expensePending = 0;
-            let expensePaid = 0;
-            let incomePending = 0;
-            let incomeReceived = 0;
-
-            validatedItems.forEach(item => {
-                const amount = Number(item.amount) || 0;
-                const isIncome = item.transactionType === 'income';
-                const isPaid = item.status === 'paid';
-
-                if (isIncome) {
-                    if (isPaid) incomeReceived += amount;
-                    else incomePending += amount;
-                } else {
-                    if (isPaid) expensePaid += amount;
-                    else expensePending += amount;
-                }
-            });
-
-            const monthlyTotal = expensePending + expensePaid;
-            const monthlyPaid = expensePaid;
-            const monthlyRemaining = expensePending;
+            const subscriptionTotals = summarizeProjectedSubscriptions(filteredItems, selectedMonthKey);
 
             const yearlyEstimation = items
                 .filter(i => i.type === 'subscription' && i.isValidated !== false && i.transactionType !== 'income')
@@ -1388,13 +1387,13 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 }, 0);
 
             return {
-                monthlyTotal,
-                monthlyPaid,
-                monthlyRemaining,
+                monthlyTotal: subscriptionTotals.expenseTotal,
+                monthlyPaid: subscriptionTotals.expensePaid,
+                monthlyRemaining: subscriptionTotals.expensePending,
                 yearlyEstimation,
-                incomeTotal: incomePending + incomeReceived,
-                incomeReceived,
-                incomePending,
+                incomeTotal: subscriptionTotals.incomeTotal,
+                incomeReceived: subscriptionTotals.incomeReceived,
+                incomePending: subscriptionTotals.incomePending,
             };
         } else {
             let expensePending = 0;
@@ -1428,7 +1427,7 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 incomePending
             };
         }
-    }, [filteredItems, items, selectedTab]);
+    }, [filteredItems, items, selectedMonthKey, selectedTab]);
 
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -1729,8 +1728,6 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                                         onPay={handleOptionPay}
                                         onEdit={handleOptionEdit}
                                         onDelete={handleOptionDelete}
-                                        onConfirmDetection={handleConfirmDetection}
-                                        onDismissDetection={handleDismissDetection}
                                         isSelectionMode={isSelectionMode}
                                         isSelected={selectedIds.has(item.id)}
                                         onLongPress={handleLongPress}
@@ -1795,8 +1792,6 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                                                 onPay={handleOptionPay}
                                                 onEdit={handleOptionEdit}
                                                 onDelete={handleOptionDelete}
-                                                onConfirmDetection={handleConfirmDetection}
-                                                onDismissDetection={handleDismissDetection}
                                                 isSelectionMode={isSelectionMode}
                                                 isSelected={selectedIds.has(item.id)}
                                                 // Se tem tutorial, intercepta o long press para dispensar
@@ -1902,21 +1897,21 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                 onVisibleChange={(visible) => {
                     if (!visible) closeActionMenu();
                 }}
-                item={items.find(i => i.id === openActionMenuId) || null}
+                item={openActionMenuItem}
                 onPay={() => {
-                    const item = items.find(i => i.id === openActionMenuId);
+                    const item = openActionMenuItem;
                     if (item) {
                         setTimeout(() => handleOptionPay(item), 350);
                     }
                 }}
                 onEdit={() => {
-                    const item = items.find(i => i.id === openActionMenuId);
+                    const item = openActionMenuItem;
                     if (item) {
                         setTimeout(() => handleOptionEdit(item), 350);
                     }
                 }}
                 onDelete={() => {
-                    const item = items.find(i => i.id === openActionMenuId);
+                    const item = openActionMenuItem;
                     if (item) {
                         setTimeout(() => handleOptionDelete(item), 350);
                     }
@@ -2194,6 +2189,9 @@ const styles = StyleSheet.create({
     },
     listItemAmountExpense: {
         color: '#FA5C5C',
+    },
+    listItemAmountPaid: {
+        color: '#32D74B',
     },
     itemMenuButton: {
         width: 28,

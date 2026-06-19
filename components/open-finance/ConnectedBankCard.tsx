@@ -167,7 +167,7 @@ export const ConnectedBankCard = ({
     const { width } = useWindowDimensions();
     const isNarrowPhone = width < 360;
     const isTinyPhone = width < 340;
-    const logoSize = isNarrowPhone ? 38 : 44;
+    const logoSize = isNarrowPhone ? 32 : 36;
     const logoRadius = logoSize / 2;
     const [expanded, setExpanded] = useState(false);
     const [menuVisible, setMenuVisible] = useState(false);
@@ -215,7 +215,7 @@ export const ConnectedBankCard = ({
         const morph = morphProgress.value;
 
         return {
-            borderRadius: 20 + morph * 4 - pressed * 1.2,
+            borderRadius: 16 + morph * 4 - pressed * 1.2,
             transform: [
                 { translateY: pressed * 1.4 },
                 { scaleX: 1 + morph * 0.012 - pressed * 0.012 },
@@ -449,7 +449,7 @@ export const ConnectedBankCard = ({
                         connector={group.connector}
                         size={logoSize}
                         borderRadius={logoRadius}
-                        iconSize={isNarrowPhone ? 16 : 18}
+                        iconSize={isNarrowPhone ? 14 : 16}
                         showBorder={false}
                         backgroundColor="#FFFFFF"
                         containerStyle={styles.connectorLogoContainer}
@@ -464,7 +464,21 @@ export const ConnectedBankCard = ({
                     </View>
                 </View>
 
-                <ChevronRight size={20} color="#68686D" strokeWidth={2} />
+                <View style={styles.bankHeaderRight}>
+                    <View style={styles.headerBalance}>
+                        <Text style={styles.headerBalanceLabel}>Saldo em conta</Text>
+                        <Text
+                            style={[styles.headerBalanceAmount, isNarrowPhone && styles.headerBalanceAmountNarrow]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.72}
+                        >
+                            <Text style={styles.headerBalanceCurrency}>{totalBalanceParts.currency} </Text>
+                            {totalBalanceParts.amount}
+                        </Text>
+                    </View>
+                    <ChevronRight size={16} color="#68686D" strokeWidth={2} />
+                </View>
 
                 <BankActionsSheet
                     visible={menuVisible}
@@ -476,75 +490,63 @@ export const ConnectedBankCard = ({
                 />
             </TouchableOpacity>
 
-            <View style={[styles.balanceSection, isNarrowPhone && styles.balanceSectionNarrow]}>
-                <Text style={styles.balanceLabel}>Saldo em conta</Text>
-                <Text
-                    style={[styles.balanceAmount, isNarrowPhone && styles.balanceAmountNarrow]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                >
-                    <Text style={styles.balanceCurrency}>{totalBalanceParts.currency} </Text>
-                    {totalBalanceParts.amount}
-                </Text>
-            </View>
-
             <View style={styles.cardDivider} />
 
             {expanded && (
-                <View style={styles.accountsGroup}>
-                    {accounts.map((acc: any) => {
-                        const accountTypeLabel = getAccountTypeLabel(acc);
-                        const hasCustomName = acc.name && acc.name !== bankName;
-                        const accountName = hasCustomName ? acc.name : accountTypeLabel;
-                        const numericValue = getAccountNumericValue(acc);
-                        const formattedValue = formatCurrency(numericValue);
-                        const isMuted = hiddenIds.includes(acc.id) || Math.abs(numericValue) === 0;
+                <>
+                    <View style={styles.accountsGroup}>
+                        {accounts.map((acc: any) => {
+                            const accountTypeLabel = getAccountTypeLabel(acc);
+                            const hasCustomName = acc.name && acc.name !== bankName;
+                            const accountName = hasCustomName ? acc.name : accountTypeLabel;
+                            const numericValue = getAccountNumericValue(acc);
+                            const formattedValue = formatCurrency(numericValue);
+                            const isMuted = hiddenIds.includes(acc.id) || Math.abs(numericValue) === 0;
 
-                        return (
-                            <View
-                                key={acc.id || `${accountName}-${formattedValue}`}
-                                style={[styles.accountRow, isNarrowPhone && styles.accountRowNarrow]}
-                            >
-                                <View style={[styles.accountDot, isMuted && styles.accountDotMuted]} />
-                                <View style={[styles.accountTextGroup, isNarrowPhone && styles.accountTextGroupNarrow]}>
+                            return (
+                                <View
+                                    key={acc.id || `${accountName}-${formattedValue}`}
+                                    style={[styles.accountRow, isNarrowPhone && styles.accountRowNarrow]}
+                                >
+                                    <View style={[styles.accountDot, isMuted && styles.accountDotMuted]} />
+                                    <View style={[styles.accountTextGroup, isNarrowPhone && styles.accountTextGroupNarrow]}>
+                                        <Text
+                                            style={[
+                                                styles.accountName,
+                                                isNarrowPhone && styles.accountNameNarrow,
+                                                isMuted && styles.accountTextMuted
+                                            ]}
+                                            numberOfLines={1}
+                                        >
+                                            {accountName}
+                                        </Text>
+                                        <Text
+                                            style={[styles.accountType, isNarrowPhone && styles.accountTypeNarrow]}
+                                            numberOfLines={1}
+                                        >
+                                            {accountTypeLabel}
+                                        </Text>
+                                    </View>
                                     <Text
                                         style={[
-                                            styles.accountName,
-                                            isNarrowPhone && styles.accountNameNarrow,
-                                            isMuted && styles.accountTextMuted
+                                            styles.accountValue,
+                                            isNarrowPhone && styles.accountValueNarrow,
+                                            isTinyPhone && styles.accountValueTiny,
+                                            isMuted && styles.accountValueMuted
                                         ]}
                                         numberOfLines={1}
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.78}
                                     >
-                                        {accountName}
-                                    </Text>
-                                    <Text
-                                        style={[styles.accountType, isNarrowPhone && styles.accountTypeNarrow]}
-                                        numberOfLines={1}
-                                    >
-                                        {accountTypeLabel}
+                                        {formattedValue}
                                     </Text>
                                 </View>
-                                <Text
-                                    style={[
-                                        styles.accountValue,
-                                        isNarrowPhone && styles.accountValueNarrow,
-                                        isTinyPhone && styles.accountValueTiny,
-                                        isMuted && styles.accountValueMuted
-                                    ]}
-                                    numberOfLines={1}
-                                    adjustsFontSizeToFit
-                                    minimumFontScale={0.78}
-                                >
-                                    {formattedValue}
-                                </Text>
-                            </View>
-                        );
-                    })}
-                </View>
+                            );
+                        })}
+                    </View>
+                    <View style={styles.cardDivider} />
+                </>
             )}
-
-            <View style={styles.cardDivider} />
 
             <View style={[styles.syncRow, isNarrowPhone && styles.syncRowNarrow]}>
                 <View style={styles.syncStatusTouch}>
@@ -583,16 +585,16 @@ export const ConnectedBankCard = ({
 const styles = StyleSheet.create({
     connectedBankCard: {
         backgroundColor: '#101010',
-        borderRadius: 20,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#252525',
-        marginBottom: 12,
+        borderColor: '#222222',
+        marginBottom: 10,
         overflow: 'hidden',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.24,
-        shadowRadius: 18,
-        elevation: 8,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.16,
+        shadowRadius: 10,
+        elevation: 4,
     },
     connectedBankBackdrop: {
         ...StyleSheet.absoluteFill,
@@ -612,33 +614,33 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingTop: 19,
-        paddingBottom: 14,
-        minHeight: 67,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 12,
+        minHeight: 56,
     },
     connectedBankHeaderNarrow: {
-        paddingHorizontal: 14,
-        paddingTop: 15,
-        paddingBottom: 12,
-        minHeight: 61,
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 10,
+        minHeight: 50,
     },
     bankHeaderLeft: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 10,
         flex: 1,
         minWidth: 0,
     },
     bankHeaderLeftNarrow: {
-        gap: 10,
+        gap: 8,
     },
     headerInfo: {
         flex: 1,
         minWidth: 0,
     },
     accountCount: {
-        fontSize: 12,
+        fontSize: 11,
         color: '#A0A4AB',
         marginTop: 1,
         fontFamily: 'AROneSans_400Regular',
@@ -665,37 +667,30 @@ const styles = StyleSheet.create({
         marginRight: 3,
     },
 
-    balanceSection: {
-        paddingHorizontal: 20,
-        paddingTop: 18,
-        paddingBottom: 22,
+    headerBalance: {
+        alignItems: 'flex-end',
+        justifyContent: 'center',
     },
-    balanceSectionNarrow: {
-        paddingHorizontal: 14,
-        paddingTop: 14,
-        paddingBottom: 18,
-    },
-    balanceLabel: {
+    headerBalanceLabel: {
         color: '#9EA2AA',
-        fontSize: 11,
-        lineHeight: 14,
+        fontSize: 9,
+        lineHeight: 11,
         fontFamily: 'AROneSans_400Regular',
-        marginBottom: 7,
+        marginBottom: 1,
     },
-    balanceAmount: {
+    headerBalanceAmount: {
         color: '#FFFFFF',
-        fontSize: 20,
-        lineHeight: 24,
-        fontWeight: '800',
+        fontSize: 14,
+        fontWeight: '700',
         fontFamily: 'AROneSans_400Regular',
     },
-    balanceAmountNarrow: {
-        fontSize: 19,
-    },
-    balanceCurrency: {
-        color: '#E6E8EC',
+    headerBalanceAmountNarrow: {
         fontSize: 13,
-        fontWeight: '700',
+    },
+    headerBalanceCurrency: {
+        color: '#E6E8EC',
+        fontSize: 10,
+        fontWeight: '600',
         fontFamily: 'AROneSans_400Regular',
     },
     cardDivider: {
@@ -716,7 +711,7 @@ const styles = StyleSheet.create({
         marginTop: 0,
         marginBottom: 0,
         paddingHorizontal: 0,
-        paddingVertical: 12,
+        paddingVertical: 8,
     },
     accountRowContainer: {
         position: 'relative',
@@ -724,15 +719,15 @@ const styles = StyleSheet.create({
     accountRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        minHeight: 39,
-        paddingVertical: 8,
-        paddingHorizontal: 20,
+        minHeight: 32,
+        paddingVertical: 6,
+        paddingHorizontal: 16,
         backgroundColor: 'transparent',
     },
     accountRowNarrow: {
-        minHeight: 44,
-        paddingHorizontal: 14,
-        paddingVertical: 7,
+        minHeight: 30,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
     },
     accountDot: {
         width: 6,
@@ -784,30 +779,30 @@ const styles = StyleSheet.create({
         paddingRight: 8,
     },
     accountName: {
-        fontSize: 13,
+        fontSize: 12.5,
         color: '#FFFFFF',
         fontFamily: 'AROneSans_400Regular',
         maxWidth: '62%',
     },
     accountNameNarrow: {
         maxWidth: '100%',
-        fontSize: 12,
+        fontSize: 11.5,
     },
     accountTextMuted: {
         color: '#64676D',
     },
     accountType: {
         flexShrink: 1,
-        fontSize: 11,
+        fontSize: 10.5,
         color: '#62666E',
         fontFamily: 'AROneSans_400Regular',
     },
     accountTypeNarrow: {
         maxWidth: '100%',
-        fontSize: 10,
+        fontSize: 9.5,
     },
     accountNumber: {
-        fontSize: 12,
+        fontSize: 11,
         color: '#606060',
         fontFamily: 'AROneSans_400Regular',
     },
@@ -816,16 +811,16 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     accountValue: {
-        fontSize: 12,
+        fontSize: 11.5,
         color: '#FFFFFF',
         fontWeight: '700',
         fontFamily: 'AROneSans_400Regular',
-        minWidth: 83,
+        minWidth: 80,
         textAlign: 'right',
     },
     accountValueNarrow: {
-        minWidth: 76,
-        fontSize: 11,
+        minWidth: 70,
+        fontSize: 10.5,
     },
     accountValueTiny: {
         minWidth: 70,
@@ -865,14 +860,14 @@ const styles = StyleSheet.create({
         paddingBottom: 4,
     },
     syncRow: {
-        height: 43,
-        paddingHorizontal: 20,
+        height: 36,
+        paddingHorizontal: 16,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
     },
     syncRowNarrow: {
-        paddingHorizontal: 14,
+        paddingHorizontal: 12,
     },
     syncStatusTouch: {
         flex: 1,

@@ -29,6 +29,7 @@ const {
   APPLE_MONTHLY_FALLBACK_MS,
   assertAppleAppAccountTokenMatches,
   getExpectedAppleAppAccountToken,
+  getAppleNotificationAutoRenewStatus,
   inferAppleNotificationStatusCode,
   isAppleFreeTrial,
   resolveMonthlyEntitlementPeriod,
@@ -124,6 +125,16 @@ describe('Apple subscription entitlement period', () => {
     expect(inferAppleNotificationStatusCode({ notificationType: 'EXPIRED', data: {} }, {})).toBe(2);
     expect(inferAppleNotificationStatusCode({ notificationType: 'REFUND', data: {} }, {})).toBe(5);
     expect(inferAppleNotificationStatusCode({ notificationType: 'DID_RENEW', data: { status: 4 } }, {})).toBe(4);
+
+    expect(inferAppleNotificationStatusCode(
+      { notificationType: 'DID_CHANGE_RENEWAL_STATUS', subtype: 'AUTO_RENEW_DISABLED', data: {} },
+      { expiresDate: Date.now() + 60 * 60 * 1000 }
+    )).toBe(1);
+    expect(getAppleNotificationAutoRenewStatus(
+      'DID_CHANGE_RENEWAL_STATUS',
+      'AUTO_RENEW_DISABLED',
+      null
+    )).toBe('disabled');
   });
 });
 
@@ -258,6 +269,44 @@ describe('Apple subscription persistence', () => {
       return call[0] && call[0].amount === 0 && call[0].status === 'trialing';
     });
     expect(paymentsCall).toBeDefined();
+  });
+
+  test('keeps a canceled App Store free trial active until the period ends', async () => {
+    const firebaseUid = 'user-server-trial-cancelled';
+    const purchaseMs = Date.now() - 1000;
+    const expiresMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+    const result = await persistAppStoreServerSubscription({
+      firebaseUid,
+      transactionPayload: {
+        transactionId: 'tx-server-trial-cancelled',
+        originalTransactionId: 'tx-server-trial-cancelled',
+        purchaseDate: purchaseMs,
+        expiresDate: expiresMs,
+        offerDiscountType: 'FREE_TRIAL',
+        environment: 'Sandbox',
+      },
+      renewalPayload: null,
+      statusCode: 1,
+      serverEnvironment: 'Sandbox',
+      notificationType: 'DID_CHANGE_RENEWAL_STATUS',
+      notificationSubtype: 'AUTO_RENEW_DISABLED',
+    });
+
+    expect(result.status).toBe('trialing');
+    expect(result.hasPro).toBe(true);
+    expect(result.cancelAtPeriodEnd).toBe(true);
+    expect(result.autoRenewStatus).toBe('disabled');
+
+    const userUpdate = mockFirestore.set.mock.calls.find(call => {
+      return call[0] && call[0].subscription && call[0].subscription.transactionId === 'tx-server-trial-cancelled';
+    });
+    expect(userUpdate).toBeDefined();
+    expect(userUpdate[0].subscription.status).toBe('trialing');
+    expect(userUpdate[0].subscription.cancelAtPeriodEnd).toBe(true);
+    expect(userUpdate[0].subscription.autoRenewStatus).toBe('disabled');
+    expect(userUpdate[0].subscription.lastAppleNotificationType).toBe('DID_CHANGE_RENEWAL_STATUS');
+    expect(userUpdate[0].subscription.lastAppleNotificationSubtype).toBe('AUTO_RENEW_DISABLED');
   });
 });
 

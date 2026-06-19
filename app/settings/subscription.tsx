@@ -166,6 +166,8 @@ const getStatusConfig = (status: string) => {
         case 'trial':
         case 'trialing':
             return { label: 'Período de Teste', color: '#D97757' };
+        case 'ending':
+            return { label: 'Cancela no fim', color: '#FF9500' };
         case 'inactive':
             return { label: 'Inativo', color: '#FF453A' };
         case 'free':
@@ -277,11 +279,12 @@ export default function SubscriptionSettingsScreen() {
     const cancelAtPeriodEnd =
         currentSubscription?.cancelAtPeriodEnd === true ||
         String(currentSubscription?.autoRenewStatus || '').trim().toLowerCase() === 'disabled';
-    const isCancelled = status === 'cancelled' || status === 'canceled' || (cancelAtPeriodEnd && !isExpired);
     const isPro = hasProPlan && (status === 'active' || status === 'trial' || status === 'trialing') && !isExpired;
+    const isEndingAtPeriodEnd = isPro && cancelAtPeriodEnd;
+    const isCancelled = status === 'cancelled' || status === 'canceled' || isEndingAtPeriodEnd;
     const isTrial = isPro && (status === 'trial' || status === 'trialing');
     const hasKnownProSubscription = hasProPlan && (isPro || isCancelled || isExpired);
-    const displayStatus = isExpired ? 'expired' : isCancelled ? 'cancelled' : status;
+    const displayStatus = isExpired ? 'expired' : isEndingAtPeriodEnd ? 'ending' : isCancelled ? 'cancelled' : status;
     const statusConfig = getStatusConfig(displayStatus);
 
     // Content Logic
@@ -503,7 +506,16 @@ export default function SubscriptionSettingsScreen() {
                             </View>
                         )}
 
-                        {(isExpired || isCancelled) && hasKnownProSubscription && (
+                        {isEndingAtPeriodEnd && hasKnownProSubscription && (
+                            <View style={styles.planMetaContainer}>
+                                <Text style={styles.planMetaText}>
+                                    {isTrial ? 'Teste cancelado' : 'Assinatura cancelada'}
+                                    {renewalDateText ? ` - acesso ate ${renewalDateText}` : ' - acesso ate o fim do periodo'}
+                                </Text>
+                            </View>
+                        )}
+
+                        {(isExpired || (isCancelled && !isEndingAtPeriodEnd)) && hasKnownProSubscription && (
                             <View style={styles.planMetaContainer}>
                                 <Text style={styles.planMetaText}>
                                     {isCancelled ? 'Plano cancelado' : 'Plano vencido'}
@@ -511,7 +523,7 @@ export default function SubscriptionSettingsScreen() {
                             </View>
                         )}
 
-                        {isTrial && (
+                        {isTrial && !isEndingAtPeriodEnd && (
                             <View style={styles.planMetaContainer}>
                                 <Text style={styles.planMetaText}>Período de teste em andamento</Text>
                             </View>
@@ -550,7 +562,7 @@ export default function SubscriptionSettingsScreen() {
                         ) : null}
 
                         {/* Renewal / Restore buttons for expired or cancelled plans */}
-                        {(isExpired || isCancelled) && hasKnownProSubscription && (
+                        {(isExpired || (isCancelled && !isEndingAtPeriodEnd)) && hasKnownProSubscription && (
                             <View style={styles.planFooterRow}>
                                 <TouchableOpacity
                                     style={styles.restoreButton}

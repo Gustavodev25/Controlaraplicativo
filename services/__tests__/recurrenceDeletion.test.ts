@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import {
     deleteRecurrenceRecord,
     isRecurrenceSourceCollection,
@@ -32,7 +34,10 @@ describe('recurrence deletion', () => {
             'recurrences',
             'subscription-1'
         );
-        expect(dependencies.addToBlacklist).not.toHaveBeenCalled();
+        expect(dependencies.addToBlacklist).toHaveBeenCalledWith(
+            'subscription-1',
+            'subscription'
+        );
     });
 
     test('deletes a reminder from reminders and the legacy collection', async () => {
@@ -55,6 +60,10 @@ describe('recurrence deletion', () => {
             'recurrences',
             'reminder-1'
         );
+        expect(dependencies.addToBlacklist).toHaveBeenCalledWith(
+            'reminder-1',
+            'reminder'
+        );
     });
 
     test('honors a legacy source without deleting it twice', async () => {
@@ -72,9 +81,13 @@ describe('recurrence deletion', () => {
             'recurrences',
             'legacy-1'
         );
+        expect(dependencies.addToBlacklist).toHaveBeenCalledWith(
+            'legacy-1',
+            'subscription'
+        );
     });
 
-    test.each(['auto_1', 'tx_1', 'bill_1'])(
+    test.each(['auto_1', 'tx_1', 'bill_1', 'detected_netflix_monthly'])(
         'blacklists virtual recurrence %s',
         async recurrenceId => {
             const dependencies = createDependencies();

@@ -36,7 +36,8 @@ export const resolveRecurrenceSourceCollection = (
 export const isVirtualRecurrenceId = (recurrenceId: string): boolean => {
     return recurrenceId.startsWith('auto_')
         || recurrenceId.startsWith('tx_')
-        || recurrenceId.startsWith('bill_');
+        || recurrenceId.startsWith('bill_')
+        || recurrenceId.startsWith('detected_');
 };
 
 export const deleteRecurrenceRecord = async (
@@ -56,6 +57,7 @@ export const deleteRecurrenceRecord = async (
     );
 
     await dependencies.deleteFromCollection(resolvedCollection, recurrenceId);
+    await dependencies.addToBlacklist(recurrenceId, type);
 
     if (resolvedCollection === 'recurrences') return;
 

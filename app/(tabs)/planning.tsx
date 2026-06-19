@@ -1,8 +1,9 @@
 import { InvestmentDetailsModal } from '@/components/InvestmentDetailsModal';
 import { InvestmentModal } from '@/components/InvestmentModal';
 import { InvestmentStatementModal } from '@/components/InvestmentStatementModal';
+import { InvestmentActionsSheet } from '@/components/InvestmentActionsSheet';
 
-import { DeleteConfirmationModal } from '@/components/ui/DeleteConfirmationModal';
+import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { MorphTouchable } from '@/components/ui/MorphTouchable';
@@ -40,192 +41,33 @@ interface Investment {
     lastSyncedAt?: string;
 }
 
-const HoldDeletePill = ({ visible, onComplete }: { visible: boolean; onComplete: () => void }) => {
-    const progress = useSharedValue(0);
-    const visualProgress = useSharedValue(0);
+const getInvestmentRenderKey = (item: Investment): string => [
+    item.id,
+    item.name,
+    item.currentAmount,
+    item.targetAmount,
+    item.color,
+    item.icon,
+    item.deadline || '',
+    item.source || '',
+    item.pluggyAccountId || '',
+    item.connector?.name || '',
+    item.connector?.primaryColor || '',
+    item.connector?.imageUrl || '',
+    item.lastSyncedAt || '',
+].join('|');
 
-    // Reset or Start Animation when visibility changes
-    useEffect(() => {
-        if (visible) {
-            // 1. Kick off master progress (0 -> 1 in 5s)
-            progress.value = withTiming(1, { duration: 5000, easing: Easing.linear }, (finished) => {
-                if (finished) {
-                    runOnJS(onComplete)();
-                }
-            });
-            // 2. Kick off first visual chunk immediately (0 -> 20% in 0.5s)
-            visualProgress.value = withTiming(20, { duration: 500, easing: Easing.out(Easing.quad) });
-        } else {
-            // Reset immediately
-            progress.value = 0;
-            visualProgress.value = 0;
-        }
-    }, [visible]);
+const areInvestmentListsEqual = (current: Investment[], next: Investment[]): boolean => {
+    if (current.length !== next.length) return false;
 
-    // Calculate step (0 to 5) based on progress
-    const stepIndex = useDerivedValue(() => {
-        return Math.floor(progress.value * 5);
-    });
-
-    // React to step changes to animate NEXT visual chunk
-    useAnimatedReaction(
-        () => stepIndex.value,
-        (currentStep: number, previousStep: number | null) => {
-            if (currentStep !== previousStep && currentStep > 0) {
-                // When entering step 1 (1s elapsed), we want to go from 20->40
-                // Target = (step + 1) * 20.
-                // Step 1 -> 40. Step 2 -> 60. Step 4 -> 100.
-                const target = (currentStep + 1) * 20;
-                visualProgress.value = withTiming(target, { duration: 500, easing: Easing.out(Easing.quad) });
-            }
-        },
-        [visible]
-    );
-
-    const progressStyle = useAnimatedStyle(() => ({
-        width: `${visualProgress.value}%`,
-    }));
-
-    const animatedProps = useAnimatedProps(() => {
-        // Countdown from 5 to 0
-        // Sincronized with step: 5 - stepIndex
-        const count = Math.max(0, 5 - stepIndex.value);
-        return {
-            text: `${count}`,
-        } as any;
-    });
-
-    if (!visible) return null;
-
-    return (
-        <Animated.View entering={FadeInUp.duration(200)} style={styles.holdPillContainer}>
-            <View style={styles.holdPill}>
-                {/* Progress Fill */}
-                <Animated.View style={[styles.holdPillFill, progressStyle]} />
-
-                {/* Text & Countdown */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', zIndex: 1, gap: 6 }}>
-                    <Text style={styles.holdPillText}>Segure</Text>
-                    <AnimatedTextInput
-                        underlineColorAndroid="transparent"
-                        editable={false}
-                        value="5"
-                        style={styles.holdPillTimer}
-                        animatedProps={animatedProps}
-                    />
-                </View>
-            </View>
-        </Animated.View>
-    );
+    return current.every((item, index) => getInvestmentRenderKey(item) === getInvestmentRenderKey(next[index]));
 };
 
-const InvestmentActionDropdown = ({
-    visible,
-    onExtract,
-    onMove,
-    onEdit,
-    onDelete,
-}: {
-    visible: boolean;
-    onExtract: () => void;
-    onMove: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
-}) => {
-    const sheetOpacity = useRef(new NativeAnimated.Value(0)).current;
-    const sheetScaleX = useRef(new NativeAnimated.Value(0.955)).current;
-    const sheetScaleY = useRef(new NativeAnimated.Value(0.935)).current;
-    const sheetY = useRef(new NativeAnimated.Value(-10)).current;
-    const contentOpacity = useRef(new NativeAnimated.Value(0)).current;
 
-    useEffect(() => {
-        if (visible) {
-            sheetOpacity.setValue(0);
-            sheetScaleX.setValue(0.955);
-            sheetScaleY.setValue(0.935);
-            sheetY.setValue(-10);
-            contentOpacity.setValue(0);
 
-            NativeAnimated.parallel([
-                NativeAnimated.timing(sheetOpacity, { toValue: 1, duration: 170, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
-                NativeAnimated.spring(sheetY, { toValue: 0, damping: 18, stiffness: 235, mass: 0.78, useNativeDriver: false }),
-                NativeAnimated.sequence([
-                    NativeAnimated.timing(sheetScaleX, { toValue: 1.018, duration: 165, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }),
-                    NativeAnimated.spring(sheetScaleX, { toValue: 1, damping: 13, stiffness: 190, mass: 0.62, useNativeDriver: false }),
-                ]),
-                NativeAnimated.sequence([
-                    NativeAnimated.timing(sheetScaleY, { toValue: 1.012, duration: 185, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }),
-                    NativeAnimated.spring(sheetScaleY, { toValue: 1, damping: 13, stiffness: 185, mass: 0.62, useNativeDriver: false }),
-                ]),
-                NativeAnimated.timing(contentOpacity, { toValue: 1, duration: 260, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }),
-            ]).start();
-        } else {
-            NativeAnimated.parallel([
-                NativeAnimated.timing(sheetOpacity, { toValue: 0, duration: 130, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
-                NativeAnimated.timing(contentOpacity, { toValue: 0, duration: 110, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
-                NativeAnimated.timing(sheetScaleX, { toValue: 0.955, duration: 170, easing: RNEasing.bezier(0.22, 1, 0.36, 1), useNativeDriver: false }),
-                NativeAnimated.timing(sheetScaleY, { toValue: 0.935, duration: 180, easing: RNEasing.bezier(0.22, 1, 0.36, 1), useNativeDriver: false }),
-                NativeAnimated.timing(sheetY, { toValue: -10, duration: 180, easing: RNEasing.bezier(0.22, 1, 0.36, 1), useNativeDriver: false }),
-            ]).start();
-        }
-    }, [visible]);
-
-    return (
-        <NativeAnimated.View
-            pointerEvents={visible ? 'auto' : 'none'}
-            style={[
-                styles.investmentDropdown,
-                {
-                    opacity: sheetOpacity,
-                    transform: [
-                        { translateY: sheetY },
-                        { scaleX: sheetScaleX },
-                        { scaleY: sheetScaleY },
-                    ],
-                },
-            ]}
-        >
-            <BlurView
-                intensity={16}
-                tint="dark"
-                experimentalBlurMethod="dimezisBlurView"
-                style={{ width: '100%' }}
-            >
-                <View style={styles.investmentDropdownOverlay} />
-                <NativeAnimated.View style={[styles.investmentDropdownContent, { opacity: contentOpacity }]}>
-                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onExtract}>
-                        <Text style={styles.investmentDropdownText}>Extrato</Text>
-                    </MorphTouchable>
-                    <View style={styles.investmentDropdownDivider} />
-                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onMove}>
-                        <Text style={styles.investmentDropdownText}>Movimentar</Text>
-                    </MorphTouchable>
-                    <View style={styles.investmentDropdownDivider} />
-                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onEdit}>
-                        <Text style={styles.investmentDropdownText}>Editar</Text>
-                    </MorphTouchable>
-                    <View style={styles.investmentDropdownDivider} />
-                    <MorphTouchable radius={12} style={styles.investmentDropdownItem} onPress={onDelete}>
-                        <Text style={styles.investmentDropdownTextDestructive}>Excluir</Text>
-                    </MorphTouchable>
-                </NativeAnimated.View>
-            </BlurView>
-        </NativeAnimated.View>
-    );
-};
-
-const InvestmentCard = React.memo(({ item, index, isMenuOpen, onToggleMenu, onCloseMenu, onExtract, onMove, onEdit, onDelete, onHoldStart, onHoldEnd }: {
+const InvestmentCard = React.memo(({ item, onOpenActionsMenu }: {
     item: Investment,
-    index: number,
-    isMenuOpen: boolean,
-    onToggleMenu: () => void,
-    onCloseMenu: () => void,
-    onExtract: () => void,
-    onMove: () => void,
-    onEdit: () => void,
-    onDelete: () => void,
-    onHoldStart: () => void,
-    onHoldEnd: () => void
+    onOpenActionsMenu: () => void
 }) => {
 
     const percentage = item.targetAmount > 0
@@ -240,129 +82,102 @@ const InvestmentCard = React.memo(({ item, index, isMenuOpen, onToggleMenu, onCl
         progressColor = '#FFB800';
     }
 
-    // Press Animation
-    const scale = useSharedValue(1);
-
-    const handlePressIn = () => {
-        // No animation on simple press
-    };
-
-    const handleLongPress = () => {
-        scale.value = withSpring(0.95);
-        onHoldStart();
-    };
-
-    const handlePressOut = () => {
-        scale.value = withSpring(1);
-        onHoldEnd();
-    };
-
-    const animatedCardStyle = useAnimatedStyle(() => {
-        return {
-            transform: [{ scale: scale.value }]
-        };
-    });
-
     return (
         <Animated.View
-            entering={FadeInUp.delay(index * 100).springify()}
-            style={[animatedCardStyle, { marginBottom: 10 }]}
+            style={{ marginBottom: 10 }}
         >
             <MorphTouchable
-                radius={16}
-                onPress={onCloseMenu}
-                onPressIn={handlePressIn}
-                onPressOut={handlePressOut}
-                onLongPress={handleLongPress}
-                delayLongPress={200}
+                radius={12}
                 hitSlop={8}
-                style={[styles.cardContainer, styles.cardContent]}
+                style={styles.cardContainer}
             >
-                {/* Header: Name + Menu (zIndex 20 para o dropdown flutuar acima do conteúdo abaixo) */}
-                <View style={styles.cardHeader}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>
-                            {item.name.includes(' • ') ? (
-                                <>
-                                    {item.name.split(' • ')[0]}
-                                    <Text style={styles.accountNumberText}> • {item.name.split(' • ')[1]}</Text>
-                                </>
-                            ) : (
-                                item.name
-                            )}
+                {/* Category Header */}
+                <View style={styles.categoryHeader}>
+                    <Text style={[styles.categoryHeaderText, item.source === 'pluggy' ? { color: '#04D361' } : { color: '#D97757' }]}>
+                        {item.source === 'pluggy' ? 'Poupança • Conta Bancária' : 'Caixinha'}
+                    </Text>
+                    {item.source !== 'pluggy' && (
+                        <Text style={styles.categoryHeaderRight}>
+                            {item.deadline
+                                ? `Meta: ${new Date(item.deadline).toLocaleDateString('pt-BR')}`
+                                : 'Sem prazo definido'}
                         </Text>
-                        {item.source === 'pluggy' ? (
-                            <View style={styles.openFinancePill}>
-                                <Text style={styles.openFinancePillText}>Poupança • Conta Bancária</Text>
-                            </View>
-                        ) : (
-                            <Text style={styles.cardSubtitle}>
-                                {item.deadline
-                                    ? `Meta: ${new Date(item.deadline).toLocaleDateString('pt-BR')}`
-                                    : 'Sem prazo definido'}
-                            </Text>
-                        )}
-                    </View>
-                    <MorphTouchable radius={13} style={styles.cardMenuButton} onPress={onToggleMenu}>
-                        <MoreVertical size={16} color="#A1A1A6" strokeWidth={2.4} />
-                    </MorphTouchable>
+                    )}
                 </View>
 
-                <InvestmentActionDropdown
-                    visible={isMenuOpen}
-                    onExtract={() => { onCloseMenu(); onExtract(); }}
-                    onMove={() => { onCloseMenu(); onMove(); }}
-                    onEdit={() => { onCloseMenu(); onEdit(); }}
-                    onDelete={() => { onCloseMenu(); onDelete(); }}
-                />
+                <View style={styles.cardCategoryDivider} />
 
-                {/* Amounts */}
-                <View style={styles.amountContainer}>
-                    <View style={{ flex: 1, marginRight: 10 }}>
-                        <Text style={styles.amountLabel}>{item.source === 'pluggy' ? 'Saldo Poupança' : 'Guardado'}</Text>
-                        <Text style={[styles.currentAmount, item.source === 'pluggy' && { color: '#04D361' }]} numberOfLines={1} adjustsFontSizeToFit>
-                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.currentAmount)}
-                        </Text>
-                    </View>
-                    <View style={{ flexShrink: 0, alignItems: 'flex-end' }}>
-                        <Text style={styles.amountLabel}>Meta</Text>
-                        <Text style={[styles.targetAmount, { textAlign: 'right' }]} numberOfLines={1}>
-                            {item.targetAmount > 0
-                                ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.targetAmount)
-                                : 'Sem meta'}
-                        </Text>
-                    </View>
-                </View>
-
-                {/* Footer: Progress Bar or Sync Info */}
-                {item.source === 'pluggy' ? (
-                    item.lastSyncedAt && (
-                        <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: '#252525', paddingTop: 8, marginHorizontal: -12, paddingHorizontal: 12 }}>
-                            <Text style={[styles.amountLabel, { fontSize: 10, marginBottom: 0, textAlign: 'right' }]}>
-                                Última atualização em {new Date(item.lastSyncedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                {/* Main Card Content */}
+                <View style={styles.cardMainContent}>
+                    {/* Header: Name + Menu (zIndex 20 para o dropdown flutuar acima do conteúdo abaixo) */}
+                    <View style={styles.cardHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.cardTitle} numberOfLines={1}>
+                                {item.name.includes(' • ') ? (
+                                    <>
+                                        {item.name.split(' • ')[0]}
+                                        <Text style={styles.accountNumberText}> • {item.name.split(' • ')[1]}</Text>
+                                    </>
+                                ) : (
+                                    item.name
+                                )}
                             </Text>
                         </View>
-                    )
-                ) : (
-                    item.targetAmount > 0 && (
-                        <View style={styles.progressContainer}>
-                            <View style={styles.progressHeader}>
-                                <Text style={styles.progressTextLeft}>{Math.round(percentage)}% concluído</Text>
-                                <Text style={styles.progressTextRight}>
-                                    Falta {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.max(0, item.targetAmount - item.currentAmount))}
+                        <MorphTouchable radius={10} style={styles.cardMenuButton} onPress={onOpenActionsMenu}>
+                            <MoreVertical size={14} color="#A1A1A6" strokeWidth={2.4} />
+                        </MorphTouchable>
+                    </View>
+
+                    {/* Amounts */}
+                    <View style={styles.amountContainer}>
+                        <View style={{ flex: 1, marginRight: 10 }}>
+                            <Text style={styles.amountLabel}>{item.source === 'pluggy' ? 'Saldo Poupança' : 'Guardado'}</Text>
+                            <Text style={[styles.currentAmount, item.source === 'pluggy' && { color: '#04D361' }]} numberOfLines={1} adjustsFontSizeToFit>
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.currentAmount)}
+                            </Text>
+                        </View>
+                        {item.source !== 'pluggy' && (
+                            <View style={{ flexShrink: 0, alignItems: 'flex-end' }}>
+                                <Text style={styles.amountLabel}>Meta</Text>
+                                <Text style={[styles.targetAmount, { textAlign: 'right' }]} numberOfLines={1}>
+                                    {item.targetAmount > 0
+                                        ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.targetAmount)
+                                        : 'Sem meta'}
                                 </Text>
                             </View>
-                            <View style={styles.progressBarBg}>
-                                <View
-                                    style={[
-                                        styles.progressBarFill,
-                                        { width: `${percentage}%`, backgroundColor: progressColor }
-                                    ]}
-                                />
+                        )}
+                    </View>
+
+                    {/* Footer: Progress Bar or Sync Info */}
+                    {item.source === 'pluggy' ? (
+                        item.lastSyncedAt && (
+                            <View style={{ marginTop: 4, paddingTop: 0 }}>
+                                <Text style={[styles.amountLabel, { fontSize: 9, color: '#606060', marginBottom: 0, textAlign: 'left' }]}>
+                                    Última atualização em {new Date(item.lastSyncedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </Text>
                             </View>
-                        </View>
-                    )
-                )}
+                        )
+                    ) : (
+                        item.targetAmount > 0 && (
+                            <View style={styles.progressContainer}>
+                                <View style={styles.progressHeader}>
+                                    <Text style={styles.progressTextLeft}>{Math.round(percentage)}% concluído</Text>
+                                    <Text style={styles.progressTextRight}>
+                                        Falta {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.max(0, item.targetAmount - item.currentAmount))}
+                                    </Text>
+                                </View>
+                                <View style={styles.progressBarBg}>
+                                    <View
+                                        style={[
+                                            styles.progressBarFill,
+                                            { width: `${percentage}%`, backgroundColor: progressColor }
+                                        ]}
+                                    />
+                                </View>
+                            </View>
+                        )
+                    )}
+                </View>
             </MorphTouchable>
         </Animated.View>
     );
@@ -385,12 +200,36 @@ export default function PlanningScreen() {
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [investmentToDelete, setInvestmentToDelete] = useState<Investment | null>(null);
 
-    // Hold Interaction State
-    const [holdingItem, setHoldingItem] = useState<Investment | null>(null);
-    const ignorePressRef = useRef(false);
+    // Action menu (bottom sheet) state
+    const [actionSheetVisible, setActionSheetVisible] = useState(false);
 
-    // Action menu (dropdown) state — lifted up so the open card can render above siblings
-    const [openMenuItemId, setOpenMenuItemId] = useState<string | null>(null);
+    const handleActionsSheetDismiss = (visible: boolean) => {
+        setActionSheetVisible(visible);
+        if (!visible) {
+            setTimeout(() => {
+                setActionSheetVisible(currVisible => {
+                    if (!currVisible) {
+                        setStatementModalVisible(currStatement => {
+                            setDetailsModalVisible(currDetails => {
+                                setEditModalVisible(currEdit => {
+                                    setDeleteModalVisible(currDelete => {
+                                        if (!currStatement && !currDetails && !currEdit && !currDelete) {
+                                            setSelectedInvestment(null);
+                                        }
+                                        return currDelete;
+                                    });
+                                    return currEdit;
+                                });
+                                return currDetails;
+                            });
+                            return currStatement;
+                        });
+                    }
+                    return currVisible;
+                });
+            }, 350);
+        }
+    };
 
     useEffect(() => {
         if (!user) return;
@@ -405,12 +244,13 @@ export default function PlanningScreen() {
 
                 unsubscribe = databaseService.onInvestmentsChange(user.uid, (data) => {
                     if (cancelled) return;
-                    setInvestments(data as Investment[]);
+                    const nextInvestments = data as Investment[];
+                    setInvestments(current => areInvestmentListsEqual(current, nextInvestments)
+                        ? current
+                        : nextInvestments
+                    );
                     setLoading(false);
                 });
-
-                // Trigger the migration logic inside getInvestments to sweep for missing connected accounts.
-                databaseService.getInvestments(user.uid).catch(console.error);
             });
         }, 180);
 
@@ -521,14 +361,7 @@ export default function PlanningScreen() {
         }
     };
 
-    const openDetails = (investment: Investment) => {
-        if (ignorePressRef.current) {
-            ignorePressRef.current = false;
-            return;
-        }
-        setSelectedInvestment(investment);
-        setDetailsModalVisible(true);
-    };
+
 
     return (
         <View style={styles.mainContainer}>
@@ -574,44 +407,13 @@ export default function PlanningScreen() {
                     <FlatList
                         data={investments}
                         keyExtractor={(item) => item.id}
-                        extraData={openMenuItemId}
-                        CellRendererComponent={({ item, children, style, ...rest }: any) => {
-                            const isOpen = openMenuItemId === item.id;
-                            return (
-                                <View
-                                    {...rest}
-                                    style={[style, isOpen && { zIndex: 100, elevation: 20 }]}
-                                >
-                                    {children}
-                                </View>
-                            );
-                        }}
-                        renderItem={({ item, index }) => (
+                        renderItem={({ item }) => (
                             <InvestmentCard
                                 item={item}
-                                index={index}
-                                isMenuOpen={openMenuItemId === item.id}
-                                onToggleMenu={() => setOpenMenuItemId((prev) => (prev === item.id ? null : item.id))}
-                                onCloseMenu={() => setOpenMenuItemId(null)}
-                                onExtract={() => {
+                                onOpenActionsMenu={() => {
                                     setSelectedInvestment(item);
-                                    setStatementModalVisible(true);
+                                    setActionSheetVisible(true);
                                 }}
-                                onMove={() => {
-                                    setSelectedInvestment(item);
-                                    setDetailsInitialView('movement');
-                                    setDetailsModalVisible(true);
-                                }}
-                                onEdit={() => {
-                                    setSelectedInvestment(item);
-                                    setEditModalVisible(true);
-                                }}
-                                onDelete={() => handleRequestDelete(item)}
-                                onHoldStart={() => {
-                                    ignorePressRef.current = false;
-                                    setHoldingItem(item);
-                                }}
-                                onHoldEnd={() => setHoldingItem(null)}
                             />
                         )}
                         style={{ flex: 1 }}
@@ -635,23 +437,21 @@ export default function PlanningScreen() {
                 )}
             </View>
 
-            <HoldDeletePill
-                visible={!!holdingItem}
-                onComplete={() => {
-                    if (holdingItem) {
-                        ignorePressRef.current = true;
-                        handleRequestDelete(holdingItem);
-                    }
-                }}
-            />
 
-            <DeleteConfirmationModal
-                visible={deleteModalVisible}
-                onCancel={() => setDeleteModalVisible(false)}
-                onConfirm={handleConfirmDelete}
-                title={`Excluir ${investmentToDelete?.name}?`}
-                confirmText="Excluir"
-                cancelText="Cancelar"
+
+            <AnimatedInlineBanner
+                show={deleteModalVisible && Boolean(investmentToDelete)}
+                step="error"
+                error={investmentToDelete ? `Excluir ${investmentToDelete.name}?` : ''}
+                actions={{
+                    cancelLabel: 'Cancelar',
+                    confirmLabel: 'Excluir',
+                    onCancel: () => {
+                        setDeleteModalVisible(false);
+                        setInvestmentToDelete(null);
+                    },
+                    onConfirm: handleConfirmDelete,
+                }}
             />
 
             <InvestmentModal
@@ -703,6 +503,27 @@ export default function PlanningScreen() {
                     }}
                     investmentId={selectedInvestment.id}
                     investmentName={selectedInvestment.name}
+                />
+            )}
+
+            {selectedInvestment && (
+                <InvestmentActionsSheet
+                    visible={actionSheetVisible}
+                    investmentName={selectedInvestment.name}
+                    onVisibleChange={handleActionsSheetDismiss}
+                    onExtract={() => {
+                        setStatementModalVisible(true);
+                    }}
+                    onMove={() => {
+                        setDetailsInitialView('movement');
+                        setDetailsModalVisible(true);
+                    }}
+                    onEdit={() => {
+                        setEditModalVisible(true);
+                    }}
+                    onDelete={() => {
+                        handleRequestDelete(selectedInvestment);
+                    }}
                 />
             )}
 
@@ -790,18 +611,43 @@ const styles = StyleSheet.create({
     },
     // Card Styles
     cardContainer: {
-        borderRadius: 16,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#252525',
+        borderColor: '#222222',
         backgroundColor: '#101010',
+        overflow: 'hidden',
     },
-    cardContent: {
-        padding: 12,
+    cardMainContent: {
+        padding: 10,
+        paddingTop: 8,
+    },
+    categoryHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        backgroundColor: '#141414',
+    },
+    categoryHeaderText: {
+        fontSize: 8.5,
+        fontWeight: '600',
+        letterSpacing: 0.2,
+    },
+    categoryHeaderRight: {
+        fontSize: 8.5,
+        color: '#909090',
+        fontFamily: 'AROneSans_400Regular',
+    },
+    cardCategoryDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#202020',
+        width: '100%',
     },
     cardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 10,
+        marginBottom: 4,
         gap: 8,
         position: 'relative',
         zIndex: 20,
@@ -815,7 +661,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#D97757',
     },
     cardTitle: {
-        fontSize: 15,
+        fontSize: 13.5,
         fontWeight: '700',
         color: '#FFFFFF',
         marginBottom: 1,
@@ -825,28 +671,24 @@ const styles = StyleSheet.create({
         fontWeight: '400',
         color: '#909090',
     },
-    cardSubtitle: {
-        fontSize: 10,
-        color: '#909090',
-    },
     amountContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-end',
-        marginBottom: 8,
+        marginBottom: 4,
     },
     amountLabel: {
-        fontSize: 10,
+        fontSize: 9,
         color: '#909090',
         marginBottom: 2,
     },
     currentAmount: {
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: '700',
         color: '#FFFFFF',
     },
     targetAmount: {
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '600',
         color: '#909090',
     },
@@ -910,16 +752,16 @@ const styles = StyleSheet.create({
     // Open Finance Pill Styles
     openFinancePill: {
         backgroundColor: 'rgba(4, 211, 97, 0.15)',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 5,
+        paddingHorizontal: 5,
+        paddingVertical: 1.5,
+        borderRadius: 4,
         alignSelf: 'flex-start',
-        marginTop: 2,
+        marginTop: 1.5,
         borderWidth: 1,
         borderColor: 'rgba(4, 211, 97, 0.3)',
     },
     openFinancePillText: {
-        fontSize: 9,
+        fontSize: 8,
         fontWeight: '600',
         color: '#04D361',
         letterSpacing: 0.2,

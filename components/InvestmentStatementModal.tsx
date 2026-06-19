@@ -145,20 +145,20 @@ export function InvestmentStatementModal({
 
     const titleComponent = (
         <View>
-            <Text style={{ fontSize: 22, fontWeight: '700', color: '#FFFFFF' }} numberOfLines={1}>
+            <Text style={{ fontSize: 18, fontFamily: 'AROneSans_600SemiBold', color: '#FFFFFF' }} numberOfLines={1}>
                 Extrato
             </Text>
             {investmentName.includes(' • ') ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                    <Text style={{ fontSize: 13, color: '#D9D9D9', fontWeight: '500' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                    <Text style={{ fontSize: 13, color: '#8E8E93', fontFamily: 'AROneSans_400Regular' }}>
                         {investmentName.split(' • ')[0]}
                     </Text>
-                    <Text style={{ fontSize: 13, color: '#909090', marginLeft: 4 }}>
+                    <Text style={{ fontSize: 13, color: '#606060', fontFamily: 'AROneSans_400Regular', marginLeft: 4 }}>
                         • {investmentName.split(' • ')[1]}
                     </Text>
                 </View>
             ) : (
-                <Text style={{ fontSize: 13, color: '#909090', marginTop: 2 }}>
+                <Text style={{ fontSize: 13, color: '#8E8E93', fontFamily: 'AROneSans_400Regular', marginTop: 3 }}>
                     {investmentName}
                 </Text>
             )}
@@ -235,6 +235,7 @@ const styles = StyleSheet.create({
         flex: 1,
         color: '#FFF',
         fontSize: 15,
+        fontFamily: 'AROneSans_400Regular',
         padding: 0,
     },
     centerContainer: {
@@ -245,8 +246,10 @@ const styles = StyleSheet.create({
         padding: 20,
     },
     groupCard: {
-        backgroundColor: '#1C1C1E',
-        borderRadius: 12,
+        backgroundColor: '#171717',
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#242424',
         overflow: 'hidden',
     },
     itemContent: {
@@ -255,36 +258,37 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingVertical: 12,
         paddingHorizontal: 16,
-        minHeight: 48,
+        minHeight: 60,
     },
     itemTitle: {
-        fontSize: 17,
+        fontSize: 15,
         color: '#FFFFFF',
-        fontWeight: '400',
+        fontFamily: 'AROneSans_400Regular',
     },
     itemSubtitle: {
         fontSize: 12,
-        color: '#8E8E93',
-        marginTop: 1,
+        color: '#606060',
+        fontFamily: 'AROneSans_400Regular',
+        marginTop: 2,
     },
     itemAmount: {
         fontSize: 15,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_600SemiBold',
     },
     separator: {
         height: StyleSheet.hairlineWidth,
-        backgroundColor: '#38383A',
-        marginLeft: 16,
+        backgroundColor: '#282828',
     },
     emptyTitle: {
         fontSize: 18,
-        fontWeight: '600',
+        fontFamily: 'AROneSans_600SemiBold',
         color: '#FFFFFF',
         marginBottom: 8,
     },
     emptyText: {
         color: '#8E8E93',
         fontSize: 14,
+        fontFamily: 'AROneSans_400Regular',
         textAlign: 'center',
     },
 });

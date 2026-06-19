@@ -2,6 +2,7 @@ import type { ProjectionSettings } from '@/components/ProjectionsModal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { Transaction } from '@/services/invoiceBuilder';
 import { extractMonthKey } from '@/utils/monthWindow';
+import { summarizeProjectedSubscriptions } from '@/utils/recurrenceProjection';
 import { Eye, EyeOff, SlidersHorizontal } from 'lucide-react-native';
 import React, { useEffect, useMemo } from 'react';
 import {
@@ -165,11 +166,6 @@ const SaldoConta = React.memo(({
       projectedIncome += Math.max(0, valePreview);
     }
 
-    const [yearStr, monthStr] = selectedMonthKey.split('-');
-    const selectedMonthNum = Number(monthStr);
-    const zeroPaddedMonthKey = `${yearStr}-${String(selectedMonthNum).padStart(2, '0')}`;
-    const simpleMonthKey = `${yearStr}-${selectedMonthNum}`;
-
     const pendingReminders = recurrences.filter(r => {
       if (r.type !== 'reminder' || r.status === 'paid') return false;
 
@@ -186,41 +182,10 @@ const SaldoConta = React.memo(({
       projectedIncome += incomeReminders.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
     }
 
-    const pendingSubs = recurrences.filter(r => {
-      if (r.type !== 'subscription') return false;
-
-      const startMonthKey = extractMonthKey(r.dueDate);
-      if (!startMonthKey) return false;
-
-      // Don't project before the subscription's first month
-      if (startMonthKey > selectedMonthKey) return false;
-
-      // Don't project on or after cancellation month
-      if (r.cancellationDate) {
-        const cancelMonthKey = extractMonthKey(r.cancellationDate);
-        if (cancelMonthKey && cancelMonthKey <= selectedMonthKey) return false;
-      }
-
-      const isPaid = Array.isArray(r.paidMonths)
-        && r.paidMonths.some((m: string) => m === zeroPaddedMonthKey || m === simpleMonthKey);
-      if (isPaid) return false;
-
-      if (r.frequency === 'monthly') return true;
-
-      if (r.frequency === 'yearly') {
-        const dueMonth = Number(r.dueDate.split('-')[1]);
-        return dueMonth === selectedMonthNum;
-      }
-
-      return false;
-    });
-
-    const expenseSubs = pendingSubs.filter(r => r.transactionType !== 'income');
-    const incomeSubs = pendingSubs.filter(r => r.transactionType === 'income');
-
     if (projectionSettings.includeSubscriptions) {
-      projectedExpense += expenseSubs.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
-      projectedIncome += incomeSubs.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+      const subscriptionTotals = summarizeProjectedSubscriptions(recurrences, selectedMonthKey);
+      projectedExpense += subscriptionTotals.expensePending;
+      projectedIncome += subscriptionTotals.incomePending;
     }
 
     const calculatedTotalReceitas = (bankAccountData.totalBalance || 0) + incomeTotal + projectedIncome;

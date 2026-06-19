@@ -33,6 +33,24 @@ const normalizeDescription = (description: string): string => {
         .trim();
 };
 
+export const getDetectedSubscriptionKey = (
+    subscription: Pick<DetectedSubscription, 'name' | 'frequency'> | { name: string; frequency?: string | null }
+): string => {
+    const normalizedName = normalizeDescription(subscription.name)
+        .replace(/\s+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+    const frequency = String(subscription.frequency || 'monthly').trim().toLowerCase();
+
+    return `${normalizedName || 'subscription'}:${frequency}`;
+};
+
+const createDetectedSubscriptionId = (
+    subscription: Pick<DetectedSubscription, 'name' | 'frequency'> | { name: string; frequency?: string | null }
+): string => {
+    return `detected_${getDetectedSubscriptionKey(subscription).replace(/[^a-z0-9]+/g, '_')}`;
+};
+
 /**
  * Calcula a diferença em dias entre duas datas
  */
@@ -195,8 +213,8 @@ export const detectSubscriptions = (transactions: Transaction[]): DetectedSubscr
         const sortedGroup = [...group].sort((a, b) => b.date.localeCompare(a.date));
         const latest = sortedGroup[0];
 
-        detected.push({
-            id: `detected_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        const detectedSubscription = {
+            id: '',
             name: latest.description,
             amount: avgAmount,
             frequency,
@@ -205,6 +223,11 @@ export const detectSubscriptions = (transactions: Transaction[]): DetectedSubscr
             category: guessCategory(latest.description),
             transactionIds: group.map(t => t.id),
             confidence
+        };
+
+        detected.push({
+            ...detectedSubscription,
+            id: createDetectedSubscriptionId(detectedSubscription)
         });
     }
 

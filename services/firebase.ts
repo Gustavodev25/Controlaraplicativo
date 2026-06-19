@@ -45,6 +45,8 @@ import { offlineStorage } from './offlineStorage';
 import { offlineSync } from './offlineSync';
 import {
     deleteRecurrenceRecord,
+    isRecurrenceSourceCollection,
+    isVirtualRecurrenceId,
     resolveRecurrenceSourceCollection,
     type RecurrenceSourceCollection,
     type RecurrenceType
@@ -2845,62 +2847,6 @@ export const databaseService = {
                 };
             });
 
-            // 3. Auto-detect from Credit Card Transactions
-            const subKeywords = [
-                'netflix', 'spotify', 'apple', 'icloud', 'amazon prime', 'prime video',
-                'disney', 'hbo', 'star+', 'globoplay', 'youtube', 'adobe', 'canva',
-                'smartfit', 'chatgpt', 'openai', 'midjourney', 'google storage'
-            ];
-
-            const ccRef = collection(db, 'users', userId, 'creditCardTransactions');
-            const qCC = query(ccRef, orderBy('date', 'desc'), limit(150));
-            const ccSnap = await getDocs(qCC);
-
-            const detectedSubs: any[] = [];
-            // Create set of normalized names from existing sources to avoid duplicates
-            const existingNames = new Set([
-                ...manualItems.map((i: any) => (i.name || '').toLowerCase()),
-                ...existingSubs.map((i: any) => (i.name || '').toLowerCase())
-            ]);
-
-            ccSnap.docs.forEach(doc => {
-                const data = doc.data();
-                const desc = (data.description || '').toLowerCase();
-                const match = subKeywords.find(k => desc.includes(k));
-
-                if (match) {
-                    // Check partial match
-                    const alreadyExists = Array.from(existingNames).some(name => name.includes(match) || match.includes(name));
-
-                    if (!alreadyExists) {
-                        existingNames.add(match); // prevent adding same detected sub twice
-
-                        // Calculate next due date
-                        const lastDate = new Date(data.date);
-                        const nextDue = new Date(lastDate);
-                        nextDue.setMonth(nextDue.getMonth() + 1);
-
-                        // Simple logic to ensure date is future or current month
-                        const now = new Date();
-                        if (nextDue < now) {
-                            nextDue.setMonth(now.getMonth());
-                            if (nextDue < now) nextDue.setMonth(now.getMonth() + 1);
-                        }
-
-                        detectedSubs.push({
-                            id: `auto_${doc.id}`,
-                            name: data.description,
-                            amount: Math.abs(data.amount),
-                            dueDate: nextDue.toISOString().split('T')[0],
-                            type: 'subscription',
-                            status: 'pending',
-                            frequency: 'monthly',
-                            isAuto: true
-                        });
-                    }
-                }
-            });
-
             // 4. Reminders from Future Transactions (Checking Account)
             const tomorrowDate = new Date();
             tomorrowDate.setDate(tomorrowDate.getDate() + 1);
@@ -2949,7 +2895,7 @@ export const databaseService = {
             });
 
             // 6. Filter out blacklisted items
-            const allItems = [...manualItems, ...existingSubs, ...existingReminders, ...detectedSubs, ...reminders, ...billReminders];
+            const allItems = [...manualItems, ...existingSubs, ...existingReminders, ...reminders, ...billReminders];
             const filteredItems = allItems.filter(item => !blacklistedIds.has(item.id));
 
             // Cache for offline use
@@ -3116,13 +3062,22 @@ export const databaseService = {
     // Process payment for recurrence (Add Transaction + Update Recurrence)
     payRecurrence: async (userId: string, item: any) => {
         try {
+            const recurrenceType: RecurrenceType = item.type === 'reminder' ? 'reminder' : 'subscription';
+            const sourceCollection = isRecurrenceSourceCollection(item.sourceCollection)
+                ? item.sourceCollection
+                : undefined;
+
             // Check for virtual items (auto-detected, future transactions, or bills)
             // If virtual, materialize them into real documents first
             let recurrenceId = item.id;
-            const isVirtual = item.id.startsWith('auto_') || item.id.startsWith('tx_') || item.id.startsWith('bill_');
+            let collectionName = resolveRecurrenceSourceCollection(
+                recurrenceType,
+                sourceCollection
+            );
+            const isVirtual = isVirtualRecurrenceId(item.id);
 
             if (isVirtual) {
-                const collectionName = item.type === 'subscription' ? 'subscriptions' : 'reminders';
+                collectionName = recurrenceType === 'subscription' ? 'subscriptions' : 'reminders';
                 const colRef = collection(db, 'users', userId, collectionName);
                 const newDocRef = doc(colRef);
 
@@ -3132,8 +3087,8 @@ export const databaseService = {
                     description: item.name, // Novo campo para compatibilidade
                     amount: Number(item.amount),
                     dueDate: item.dueDate,
-                    category: item.category || (item.type === 'subscription' ? 'Assinaturas' : 'Lembretes'),
-                    type: item.type,
+                    category: item.category || (recurrenceType === 'subscription' ? 'Assinaturas' : 'Lembretes'),
+                    type: recurrenceType,
                     status: 'pending', // Will be updated to paid below
                     frequency: item.frequency || 'monthly',
                     createdAt: Timestamp.now(),
@@ -3148,9 +3103,9 @@ export const databaseService = {
             }
 
             // LÃ³gica simplificada para Lembretes (NÃ£o cria transaÃ§Ã£o)
-            if (item.type === 'reminder') {
+            if (recurrenceType === 'reminder') {
                 // 1. Atualizar o item ATUAL para pago (Manter histÃ³rico)
-                const itemRef = doc(db, 'users', userId, 'reminders', recurrenceId);
+                const itemRef = doc(db, 'users', userId, collectionName, recurrenceId);
                 await updateDoc(itemRef, {
                     status: 'paid',
                     paid: true, // Compatibilidade
@@ -3213,7 +3168,7 @@ export const databaseService = {
                 description: item.name,
                 amount: Number(item.amount),
                 date: dateStr, // Transaction date is ALWAYS today
-                category: item.category || (item.type === 'subscription' ? 'Assinatura' : 'Lembrete'),
+                category: item.category || (recurrenceType === 'subscription' ? 'Assinatura' : 'Lembrete'),
                 type: item.transactionType || 'expense', // Use item type if available
                 transactionType: item.transactionType || 'expense', // Compatibility with Web App
                 status: 'completed',
@@ -3225,7 +3180,6 @@ export const databaseService = {
             });
 
             // 2. Update Recurrence Item (Unified for both types)
-            const collectionName = item.type === 'subscription' ? 'subscriptions' : 'reminders';
             const itemRef = doc(db, 'users', userId, collectionName, recurrenceId);
 
             // Add to paidMonths using arrayUnion - DO NOT change dueDate
@@ -3246,8 +3200,17 @@ export const databaseService = {
     // Revert payment for recurrence (Delete Transaction + Revert Recurrence)
     unpayRecurrence: async (userId: string, item: any) => {
         try {
+            const recurrenceType: RecurrenceType = item.type === 'reminder' ? 'reminder' : 'subscription';
+            const sourceCollection = isRecurrenceSourceCollection(item.sourceCollection)
+                ? item.sourceCollection
+                : undefined;
+            const collectionName = resolveRecurrenceSourceCollection(
+                recurrenceType,
+                sourceCollection
+            );
+
             // 0. If Reminder, delete the forward-generated recurrence
-            if (item.type === 'reminder') {
+            if (recurrenceType === 'reminder') {
                 const remindersRef = collection(db, 'users', userId, 'reminders');
                 const qNext = query(remindersRef, where('previousRecurrenceId', '==', item.id));
                 const snapNext = await getDocs(qNext);
@@ -3281,7 +3244,6 @@ export const databaseService = {
             }
 
             // 2. Update Recurrence Item (Unified)
-            const collectionName = item.type === 'subscription' ? 'subscriptions' : 'reminders';
             const itemRef = doc(db, 'users', userId, collectionName, item.id);
 
             // Use the Month from the ITEM's due date (which reflects the period we are unpaying)
@@ -3756,6 +3718,7 @@ export const databaseService = {
                 // Pluggy metadata
                 source: 'pluggy',
                 pluggyAccountId: account.id,
+                accountNumber: account.number || null,
                 pluggyItemId: account.itemId || null,
                 connector: normalizedConnector,
 
@@ -3824,23 +3787,13 @@ export const databaseService = {
             }
 
             const candidates = Array.from(candidatesById.values());
-            const existingIds = await getExistingDocumentIds(
-                historyRef,
-                candidates.map((candidate) => candidate.id)
-            );
-
             const writes: { docRef: any; data: Record<string, any>; merge?: boolean }[] = [];
 
             for (const candidate of candidates) {
-                if (existingIds.has(candidate.id)) {
-                    skippedCount++;
-                    continue;
-                }
-
                 writes.push({
                     docRef: doc(historyRef, candidate.id),
                     data: candidate.data,
-                    merge: false
+                    merge: true
                 });
                 savedCount++;
             }
@@ -3862,19 +3815,103 @@ export const databaseService = {
         // State to hold data from multiple sources
         let manualInvestments: any[] = [];
         let savingsAccounts: any[] = [];
+        let hasLoadedInvestments = false;
+        let hasLoadedSavings = false;
+
+        const normalizeSavingsName = (value: any): string => {
+            let name = String(value || '');
+            if (name.includes('ÃƒÂ§')) {
+                name = name.replace(/ÃƒÂ§/g, 'Ã§').replace(/ÃƒÂ£/g, 'Ã£');
+            }
+            return name.replace(/\s\(([\d\-]+)\)$/, ' â€¢ $1');
+        };
+
+        const mergeSavingsAccountIntoInvestment = (investment: any, account: any) => {
+            if (!account) return investment;
+
+            const normalizedConnector = normalizeConnectorForStorage(account.connector || investment.connector || null);
+            const bankName = normalizedConnector?.name || account.name || 'Banco';
+            const accountNumber = account.number ? ` â€¢ ${account.number}` : '';
+            const fallbackName = `PoupanÃ§a ${bankName}${accountNumber}`;
+
+            return {
+                ...investment,
+                currentAmount: Number(account.balance ?? 0),
+                color: normalizedConnector?.primaryColor || investment.color || '#D97757',
+                icon: investment.icon || 'savings',
+                source: 'pluggy',
+                pluggyAccountId: account.id,
+                accountNumber: account.number || investment.accountNumber || null,
+                pluggyItemId: account.pluggyItemId || account.itemId || investment.pluggyItemId || null,
+                connector: normalizedConnector,
+                lastSyncedAt: account.lastSyncedAt || investment.lastSyncedAt || null,
+                name: normalizeSavingsName(investment.name || fallbackName),
+            };
+        };
+
+        const resolveSavingsInvestmentAccountId = (investment: any): string | null => {
+            if (investment?.pluggyAccountId) return String(investment.pluggyAccountId);
+
+            const id = String(investment?.id || '');
+            if (id.startsWith('savings_')) {
+                return id.replace(/^savings_/, '');
+            }
+
+            return null;
+        };
+
+        const firstAccountNumberKey = (...values: any[]): string | null => {
+            for (const value of values) {
+                const digits = String(value ?? '').replace(/\D/g, '');
+                if (digits.length >= 4) return digits;
+            }
+            return null;
+        };
+
+        const extractAccountNumberFromName = (value: any): string | null => {
+            const text = String(value || '');
+            const match = text.match(/(?:\u2022|\u00e2\u20ac\u00a2|\()\s*([\d\s.-]{4,})\)?\s*$/);
+            return match ? firstAccountNumberKey(match[1]) : null;
+        };
+
+        const resolveSavingsAccountNumber = (account: any): string | null => {
+            return firstAccountNumberKey(account?.number, account?.accountNumber)
+                || extractAccountNumberFromName(account?.name);
+        };
+
+        const resolveSavingsInvestmentAccountNumber = (investment: any): string | null => {
+            return firstAccountNumberKey(investment?.accountNumber, investment?.number)
+                || extractAccountNumberFromName(investment?.name);
+        };
+
+        const isSyncedSavingsInvestment = (investment: any): boolean => {
+            const id = String(investment?.id || '');
+            return investment?.source === 'pluggy'
+                || Boolean(investment?.pluggyAccountId)
+                || id.startsWith('savings_');
+        };
 
         const notify = () => {
-            // IDs de investimentos que já foram criados a partir de contas poupança
-            const existingSavingsIds = new Set(
-                manualInvestments
-                    .filter(i => i.pluggyAccountId)
-                    .map(i => i.pluggyAccountId)
-            );
+            if (!hasLoadedInvestments || !hasLoadedSavings) return;
 
+            const savingsById = new Map<string, any>();
+            const savingsByNumber = new Map<string, any>();
+            savingsAccounts.forEach((account) => {
+                if (account?.id) savingsById.set(String(account.id), account);
+                const accountNumber = resolveSavingsAccountNumber(account);
+                if (accountNumber) {
+                    const existing = savingsByNumber.get(accountNumber);
+                    if (!existing || Number(account.balance ?? 0) > Number(existing.balance ?? 0)) {
+                        savingsByNumber.set(accountNumber, account);
+                    }
+                }
+            });
+
+            // IDs de investimentos que já foram criados a partir de contas poupança
             // Converter contas poupança que ainda não existem como investments
             // Filtrar apenas poupanças com saldo > 0
             const newSavingsAsInvestments = savingsAccounts
-                .filter(acc => !existingSavingsIds.has(acc.id) && Number(acc.balance ?? 0) > 0)
+                .filter(acc => Number(acc.balance ?? 0) > 0)
                 .map(acc => {
                     const bankName = acc.connector?.name || acc.name || 'Banco';
                     const accNum = acc.number ? ` • ${acc.number}` : '';
@@ -3894,8 +3931,9 @@ export const databaseService = {
                         createdAt: acc.createdAt || new Date().toISOString().split('T')[0],
                         source: 'pluggy',
                         pluggyAccountId: acc.id,
-                        pluggyItemId: acc.pluggyItemId || null,
-                        connector: acc.connector || null,
+                        accountNumber: acc.number || null,
+                        pluggyItemId: acc.pluggyItemId || acc.itemId || null,
+                        connector: normalizeConnectorForStorage(acc.connector || null),
                         lastSyncedAt: acc.lastSyncedAt || null
                     };
                 });
@@ -3903,6 +3941,7 @@ export const databaseService = {
             // Combinar: investments manuais/existentes + poupanças novas
             // Deduplicate by pluggyAccountId AND by Name (to fix legacy manual duplicates)
             const seenPluggyIds = new Set<string>();
+            const seenSavingsNumbers = new Set<string>();
             const seenNames = new Set<string>();
             const itemsMap = new Map<string, any>();
             
@@ -3912,33 +3951,58 @@ export const databaseService = {
                 if ((b.currentAmount || 0) !== (a.currentAmount || 0)) {
                     return (b.currentAmount || 0) - (a.currentAmount || 0);
                 }
-                const dateA = new Date(a.createdAt || 0).getTime();
-                const dateB = new Date(b.createdAt || 0).getTime();
+                const dateA = parseComparableDate(a.createdAt);
+                const dateB = parseComparableDate(b.createdAt);
                 return dateB - dateA;
             });
 
             for (const item of sortedManual) {
+                const savingsAccountId = resolveSavingsInvestmentAccountId(item);
+                const savingsAccountNumber = resolveSavingsInvestmentAccountNumber(item);
+                const freshSavingsAccount = (savingsAccountId ? savingsById.get(savingsAccountId) : null)
+                    || (savingsAccountNumber ? savingsByNumber.get(savingsAccountNumber) : null);
+
+                // Old Pluggy savings docs can stay in Firestore after a bank account changes.
+                // Only render synced savings when there is a current account to mirror.
+                if (isSyncedSavingsInvestment(item) && !freshSavingsAccount) continue;
+                const displayItem = freshSavingsAccount
+                    ? mergeSavingsAccountIntoInvestment(item, freshSavingsAccount)
+                    : item;
                 // Filtro rigoroso: Se não tem saldo, não mostra (conforme pedido pelo usuário)
-                if (Number(item.currentAmount || 0) <= 0) continue;
+                if (Number(displayItem.currentAmount || 0) <= 0) continue;
+
+                const displayAccountNumber = freshSavingsAccount
+                    ? resolveSavingsAccountNumber(freshSavingsAccount)
+                    : resolveSavingsInvestmentAccountNumber(displayItem);
+                if (freshSavingsAccount && displayAccountNumber) {
+                    if (seenSavingsNumbers.has(displayAccountNumber)) continue;
+                    seenSavingsNumbers.add(displayAccountNumber);
+                }
 
                 // Deduplicate by Pluggy ID
-                if (item.pluggyAccountId) {
-                    if (seenPluggyIds.has(item.pluggyAccountId)) continue;
-                    seenPluggyIds.add(item.pluggyAccountId);
+                if (displayItem.pluggyAccountId) {
+                    if (seenPluggyIds.has(displayItem.pluggyAccountId)) continue;
+                    seenPluggyIds.add(displayItem.pluggyAccountId);
                 }
 
                 // Deduplicate by Name (Case Insensitive)
-                const normalizedName = (item.name || '').toLowerCase().trim();
+                const normalizedName = (displayItem.name || '').toLowerCase().trim();
                 if (normalizedName && seenNames.has(normalizedName)) continue;
                 if (normalizedName) seenNames.add(normalizedName);
 
-                itemsMap.set(item.id, item);
+                itemsMap.set(displayItem.id, displayItem);
             }
             
             // 2. Add new detected savings only if not already seen and balance > 0
             for (const item of newSavingsAsInvestments) {
                 // If it's a new detected device, only show if it has money
                 if (Number(item.currentAmount || 0) <= 0) continue;
+
+                const savingsAccountNumber = resolveSavingsInvestmentAccountNumber(item);
+                if (savingsAccountNumber) {
+                    if (seenSavingsNumbers.has(savingsAccountNumber)) continue;
+                    seenSavingsNumbers.add(savingsAccountNumber);
+                }
 
                 if (item.pluggyAccountId) {
                     if (seenPluggyIds.has(item.pluggyAccountId)) continue;
@@ -3958,8 +4022,8 @@ export const databaseService = {
 
             // Ordenar por createdAt para a lista final
             allItems.sort((a, b) => {
-                const dateA = new Date(a.createdAt || 0).getTime();
-                const dateB = new Date(b.createdAt || 0).getTime();
+                const dateA = parseComparableDate(a.createdAt);
+                const dateB = parseComparableDate(b.createdAt);
                 return dateB - dateA;
             });
 
@@ -3982,26 +4046,40 @@ export const databaseService = {
                     name
                 };
             });
+            hasLoadedInvestments = true;
             notify();
         });
 
         // Listener para accounts (buscar contas poupança)
-        const qSavings = query(accountsRef, where('subtype', 'in', ['SAVINGS', 'SAVINGS_ACCOUNT']));
-        const unsubSavings = onSnapshot(qSavings, (snapshot) => {
+        const unsubSavings = onSnapshot(accountsRef, (snapshot) => {
             // Deduplicate by document id - keep only one per id
             const accountsMap = new Map<string, any>();
             
             snapshot.docs.forEach(doc => {
                 const accId = doc.id;
+                const data = doc.data();
+                const subtype = String(data?.subtype || '').toUpperCase();
+                const type = String(data?.type || '').toUpperCase();
+                const name = String(data?.name || '').toLowerCase();
+                const isSavings = subtype === 'SAVINGS'
+                    || subtype === 'SAVINGS_ACCOUNT'
+                    || type === 'SAVINGS'
+                    || name.includes('poupanca')
+                    || name.includes('poupan')
+                    || name.includes('savings');
+
+                if (!isSavings) return;
+
                 // Only keep the first occurrence
                 if (!accountsMap.has(accId)) {
                     accountsMap.set(accId, {
                         id: accId,
-                        ...doc.data()
+                        ...data
                     });
                 }
             });
             savingsAccounts = Array.from(accountsMap.values());
+            hasLoadedSavings = true;
             notify();
         });
 
@@ -4017,17 +4095,28 @@ export const databaseService = {
         const recurrencesRef = collection(db, 'users', userId, 'recurrences');
         const subscriptionsRef = collection(db, 'users', userId, 'subscriptions');
         const remindersRef = collection(db, 'users', userId, 'reminders');
+        const blacklistRef = collection(db, 'users', userId, 'recurrence_blacklist');
 
         // Internal state to hold data from listeners
         let manualItems: any[] = [];
         let subItems: any[] = [];
         let remItems: any[] = [];
+        let blacklistedIds = new Set<string>();
 
         const notify = () => {
             // Combine all real-time items (no stale autoItems that would prevent deletions from reflecting)
             const allItems = [...manualItems, ...subItems, ...remItems];
-            callback(allItems);
+            callback(allItems.filter(item => !blacklistedIds.has(item.id)));
         };
+
+        const unsubBlacklist = onSnapshot(blacklistRef, (snapshot) => {
+            blacklistedIds = new Set(
+                snapshot.docs
+                    .map(doc => String(doc.data().recurrenceId || doc.id || ''))
+                    .filter(Boolean)
+            );
+            notify();
+        });
 
         const unsubRec = onSnapshot(recurrencesRef, (snapshot) => {
             manualItems = snapshot.docs.map(doc => {
@@ -4107,6 +4196,7 @@ export const databaseService = {
         });
 
         return () => {
+            unsubBlacklist();
             unsubRec();
             unsubSub();
             unsubRem();

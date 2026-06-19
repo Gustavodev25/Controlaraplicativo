@@ -720,6 +720,19 @@ function inferAppleNotificationStatusCode(notificationPayload, transactionPayloa
         : APPLE_SERVER_STATUS.EXPIRED;
 }
 
+function getAppleNotificationAutoRenewStatus(notificationType, subtype, renewalPayload) {
+    const renewalStatus = getAppleServerAutoRenewStatus(renewalPayload);
+    if (renewalStatus) return renewalStatus;
+
+    const normalizedType = String(notificationType || '').trim().toUpperCase();
+    const normalizedSubtype = String(subtype || '').trim().toUpperCase();
+    if (normalizedType !== 'DID_CHANGE_RENEWAL_STATUS') return null;
+
+    if (normalizedSubtype === 'AUTO_RENEW_DISABLED') return 'disabled';
+    if (normalizedSubtype === 'AUTO_RENEW_ENABLED') return 'enabled';
+    return null;
+}
+
 async function persistComputedAppleStatus({ admin, userRef, sub, snapshot }) {
     const provider = resolveProvider(sub);
     if (!sub || (!APPLE_PROVIDER_VALUES.has(provider) && !MANUAL_PROVIDER_VALUES.has(provider))) return false;
@@ -1018,6 +1031,8 @@ async function persistAppStoreServerSubscription({
     renewalPayload,
     statusCode,
     serverEnvironment,
+    notificationType,
+    notificationSubtype,
 }) {
     const admin = getFirebaseAdmin();
     const db = admin.firestore();
@@ -1058,7 +1073,11 @@ async function persistAppStoreServerSubscription({
         expiresMs = now + DAY_MS;
     }
 
-    const autoRenewStatus = getAppleServerAutoRenewStatus(renewalPayload);
+    const autoRenewStatus = getAppleNotificationAutoRenewStatus(
+        notificationType,
+        notificationSubtype,
+        renewalPayload
+    );
     const transactionId = transactionPayload.transactionId || null;
     const originalTransactionId =
         transactionPayload.originalTransactionId ||
@@ -1100,6 +1119,15 @@ async function persistAppStoreServerSubscription({
     mirrorSubscriptionField(update, 'appStoreServerVerified', true);
     mirrorSubscriptionField(update, 'appleExpirationFallbackApplied', entitlementPeriod.usedFallbackExpiration);
     mirrorSubscriptionField(update, 'appleGracePeriodFallbackApplied', hasPro && !gracePeriodExpiresMs && explicitExpiresMs && explicitExpiresMs <= now);
+    if (notificationType) {
+        mirrorSubscriptionField(update, 'lastAppleNotificationType', notificationType);
+        mirrorSubscriptionField(update, 'lastAppleNotificationAt', serverTimestamp);
+    }
+    if (notificationSubtype) {
+        mirrorSubscriptionField(update, 'lastAppleNotificationSubtype', notificationSubtype);
+    } else if (notificationType) {
+        mirrorSubscriptionField(update, 'lastAppleNotificationSubtype', deleteField);
+    }
     if (autoRenewStatus) {
         mirrorSubscriptionField(update, 'autoRenewStatus', autoRenewStatus);
     }
@@ -1313,7 +1341,7 @@ router.post('/sync-storekit-purchase', async (req, res) => {
     }
 });
 
-router.post('/notifications', async (req, res) => {
+async function handleAppleServerNotification(req, res) {
     const { signedPayload } = req.body || {};
 
     if (!signedPayload) {
@@ -1326,6 +1354,7 @@ router.post('/notifications', async (req, res) => {
     try {
         const notificationPayload = decodeAppleSignedJws(signedPayload, 'Apple server notification');
         const notificationType = String(notificationPayload.notificationType || '').trim().toUpperCase();
+        const notificationSubtype = String(notificationPayload.subtype || '').trim().toUpperCase();
 
         if (notificationType === 'TEST') {
             return res.json({ success: true, notificationType: 'TEST' });
@@ -1366,11 +1395,15 @@ router.post('/notifications', async (req, res) => {
             renewalPayload,
             statusCode,
             serverEnvironment: notificationData.environment || transactionPayload.environment || null,
+            notificationType,
+            notificationSubtype,
         });
 
-        console.log(`[Apple IAP] notification: uid=${firebaseUid} type=${notificationType} hasPro=${persisted.hasPro} status=${persisted.status}`);
+        console.log(`[Apple IAP] notification: uid=${firebaseUid} type=${notificationType} subtype=${notificationSubtype || '-'} hasPro=${persisted.hasPro} status=${persisted.status}`);
         return res.json({
             success: true,
+            notificationType,
+            notificationSubtype: notificationSubtype || null,
             hasPro: persisted.hasPro,
             status: persisted.status,
             productId: PRO_PRODUCT_ID,
@@ -1382,7 +1415,10 @@ router.post('/notifications', async (req, res) => {
         console.error('[Apple IAP] notification error:', e);
         return res.status(400).json({ success: false, error: e.message });
     }
-});
+}
+
+router.post('/notifications', handleAppleServerNotification);
+router.post('/webhook', handleAppleServerNotification);
 
 router.get('/subscription-status', async (req, res) => {
     const { firebaseUid } = req.query;
@@ -1441,6 +1477,7 @@ module.exports._test = {
     resolveMonthlyEntitlementPeriod,
     mapAppleServerStatus,
     getAppleServerAutoRenewStatus,
+    getAppleNotificationAutoRenewStatus,
     shouldRefreshAppleSubscriptionFromServerApi,
     getExpectedAppleAppAccountToken,
     assertAppleAppAccountTokenMatches,
