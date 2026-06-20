@@ -834,7 +834,7 @@ export async function syncGooglePlaySubscriptionStatus(
 ): Promise<StoreSubscriptionStatusResult> {
     const currentStatus = await getGooglePlaySubscriptionStatus(firebaseUid, options);
 
-    if (Platform.OS !== 'android' || isRunningInExpoGo() || currentStatus.hasPro || options.syncActivePurchase !== true) {
+    if (Platform.OS !== 'android' || isRunningInExpoGo() || options.syncActivePurchase !== true) {
         return currentStatus;
     }
 

@@ -209,6 +209,37 @@ function obfuscateFirebaseUid(firebaseUid) {
     return hashValue(firebaseUid);
 }
 
+function getGooglePurchaseAccountId(purchase) {
+    return (
+        purchase?.externalAccountIdentifiers?.obfuscatedExternalAccountId ||
+        purchase?.outOfAppPurchaseContext?.expiredExternalAccountIdentifiers?.obfuscatedExternalAccountId ||
+        null
+    );
+}
+
+function assertGooglePurchaseAccountMatchesUser({ purchase, firebaseUid, requireAccountMatch }) {
+    if (!requireAccountMatch) return;
+
+    const accountId = getGooglePurchaseAccountId(purchase);
+    if (accountId && accountId !== obfuscateFirebaseUid(firebaseUid)) {
+        throw new Error('Google Play purchase is linked to another account');
+    }
+}
+
+function isGoogleSubscriptionAcknowledgementPending(purchase) {
+    return String(purchase?.acknowledgementState || '').trim().toUpperCase() ===
+        'ACKNOWLEDGEMENT_STATE_PENDING';
+}
+
+function getGoogleAcknowledgeExternalAccountIds({ purchase, firebaseUid }) {
+    if (!firebaseUid || !purchase?.outOfAppPurchaseContext) return null;
+    if (purchase?.externalAccountIdentifiers?.obfuscatedExternalAccountId) return null;
+
+    return {
+        obfuscatedAccountId: obfuscateFirebaseUid(firebaseUid),
+    };
+}
+
 function dateValueToMillis(value) {
     if (!value) return null;
     if (typeof value.toMillis === 'function') return value.toMillis();
@@ -371,13 +402,50 @@ async function getGoogleSubscriptionPurchase(purchaseToken) {
     );
 }
 
-async function acknowledgeGoogleSubscription(purchaseToken, productId) {
+async function acknowledgeGoogleSubscription(purchaseToken, productId, externalAccountIds = null) {
+    const body = externalAccountIds?.obfuscatedAccountId
+        ? { externalAccountIds }
+        : {};
+
     return googlePublisherRequest(
         `/applications/${encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)}` +
         `/purchases/subscriptions/${encodeURIComponent(productId)}` +
         `/tokens/${encodeURIComponent(purchaseToken)}:acknowledge`,
-        { method: 'POST', body: '{}' }
+        { method: 'POST', body: JSON.stringify(body) }
     );
+}
+
+async function acknowledgeGoogleSubscriptionIfNeeded({ firebaseUid, purchaseToken, purchase, state }) {
+    const acknowledgementState = String(purchase?.acknowledgementState || '').trim().toUpperCase();
+
+    if (!state?.hasPro || !isGoogleSubscriptionAcknowledgementPending(purchase)) {
+        return {
+            attempted: false,
+            acknowledged: acknowledgementState === 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+            acknowledgementState: acknowledgementState || null,
+        };
+    }
+
+    try {
+        await acknowledgeGoogleSubscription(
+            purchaseToken,
+            GOOGLE_PLAY_PRO_PRODUCT_ID,
+            getGoogleAcknowledgeExternalAccountIds({ purchase, firebaseUid })
+        );
+        return {
+            attempted: true,
+            acknowledged: true,
+            acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        };
+    } catch (error) {
+        console.error('[Google Play] acknowledge failed:', error);
+        return {
+            attempted: true,
+            acknowledged: false,
+            acknowledgementState,
+            error: error.message,
+        };
+    }
 }
 
 async function bindGooglePurchaseToUser({ admin, firebaseUid, purchaseToken }) {
@@ -416,10 +484,7 @@ async function persistGoogleSubscription({
         throw new Error(`Google Play purchase does not contain ${GOOGLE_PLAY_PRO_PRODUCT_ID}`);
     }
 
-    const accountId = purchase?.externalAccountIdentifiers?.obfuscatedExternalAccountId || null;
-    if (requireAccountMatch && accountId !== obfuscateFirebaseUid(firebaseUid)) {
-        throw new Error('Google Play purchase account does not match the signed-in user');
-    }
+    assertGooglePurchaseAccountMatchesUser({ purchase, firebaseUid, requireAccountMatch });
 
     const admin = getFirebaseAdmin();
     const db = admin.firestore();
@@ -525,7 +590,14 @@ async function refreshGoogleSubscriptionForUser({ firebaseUid, sub, forceRefresh
     }
 
     const purchase = await getGoogleSubscriptionPurchase(purchaseToken);
-    return persistGoogleSubscription({ firebaseUid, purchaseToken, purchase });
+    const persisted = await persistGoogleSubscription({ firebaseUid, purchaseToken, purchase });
+    await acknowledgeGoogleSubscriptionIfNeeded({
+        firebaseUid,
+        purchaseToken,
+        purchase,
+        state: persisted,
+    });
+    return persisted;
 }
 
 function getRtdnToken(req) {
@@ -563,9 +635,12 @@ router.post('/validate-purchase', async (req, res) => {
             requireAccountMatch: true,
         });
 
-        if (purchase.acknowledgementState === 'ACKNOWLEDGEMENT_STATE_PENDING' && persisted.hasPro) {
-            await acknowledgeGoogleSubscription(purchaseToken, GOOGLE_PLAY_PRO_PRODUCT_ID);
-        }
+        const acknowledgement = await acknowledgeGoogleSubscriptionIfNeeded({
+            firebaseUid,
+            purchaseToken,
+            purchase,
+            state: persisted,
+        });
 
         return res.json({
             hasPro: persisted.hasPro,
@@ -574,6 +649,9 @@ router.post('/validate-purchase', async (req, res) => {
             expiresAt: persisted.expiresMs ? new Date(persisted.expiresMs).toISOString() : null,
             cancelAtPeriodEnd: persisted.cancelAtPeriodEnd,
             autoRenewStatus: persisted.autoRenewStatus,
+            acknowledged: acknowledgement.acknowledged,
+            acknowledgementState: acknowledgement.acknowledgementState,
+            acknowledgementError: acknowledgement.error,
         });
     } catch (error) {
         console.error('[Google Play] validate-purchase error:', error);
@@ -650,7 +728,13 @@ router.post('/rtdn', async (req, res) => {
         }
 
         const purchase = await getGoogleSubscriptionPurchase(purchaseToken);
-        await persistGoogleSubscription({ firebaseUid, purchaseToken, purchase });
+        const persisted = await persistGoogleSubscription({ firebaseUid, purchaseToken, purchase });
+        await acknowledgeGoogleSubscriptionIfNeeded({
+            firebaseUid,
+            purchaseToken,
+            purchase,
+            state: persisted,
+        });
         return res.status(204).send();
     } catch (error) {
         console.error('[Google Play] RTDN error:', error);
@@ -663,8 +747,12 @@ module.exports._test = {
     GOOGLE_PLAY_PRO_PRODUCT_ID,
     GOOGLE_PLAY_TRIAL_OFFER_ID,
     GOOGLE_PLAY_TRIAL_DAYS,
+    getGoogleAcknowledgeExternalAccountIds,
+    getGooglePurchaseAccountId,
     getLatestProLineItem,
+    isGoogleSubscriptionAcknowledgementPending,
     obfuscateFirebaseUid,
     resolveGoogleSubscriptionState,
+    assertGooglePurchaseAccountMatchesUser,
     validateGooglePlayServiceAccountIdentity,
 };

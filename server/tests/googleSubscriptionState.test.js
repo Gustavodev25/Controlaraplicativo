@@ -19,6 +19,10 @@ const {
   GOOGLE_PLAY_PRO_PRODUCT_ID,
   GOOGLE_PLAY_TRIAL_OFFER_ID,
   GOOGLE_PLAY_TRIAL_DAYS,
+  assertGooglePurchaseAccountMatchesUser,
+  getGoogleAcknowledgeExternalAccountIds,
+  getGooglePurchaseAccountId,
+  isGoogleSubscriptionAcknowledgementPending,
   obfuscateFirebaseUid,
   resolveGoogleSubscriptionState,
   validateGooglePlayServiceAccountIdentity,
@@ -105,6 +109,81 @@ describe('Google Play subscription state', () => {
   test('uses a stable sha256 account identifier', () => {
     expect(obfuscateFirebaseUid('firebase-user-123')).toMatch(/^[a-f0-9]{64}$/);
     expect(obfuscateFirebaseUid('firebase-user-123')).toBe(obfuscateFirebaseUid('firebase-user-123'));
+  });
+
+  test('allows linking Google Play purchases without an obfuscated account id', () => {
+    expect(() => assertGooglePurchaseAccountMatchesUser({
+      purchase: createPurchase(),
+      firebaseUid: 'firebase-user-123',
+      requireAccountMatch: true,
+    })).not.toThrow();
+  });
+
+  test('rejects Google Play purchases linked to another app account', () => {
+    expect(() => assertGooglePurchaseAccountMatchesUser({
+      purchase: {
+        ...createPurchase(),
+        externalAccountIdentifiers: {
+          obfuscatedExternalAccountId: obfuscateFirebaseUid('other-user'),
+        },
+      },
+      firebaseUid: 'firebase-user-123',
+      requireAccountMatch: true,
+    })).toThrow(/linked to another account/);
+  });
+
+  test('uses out-of-app expired account identifiers for account matching', () => {
+    const firebaseUid = 'firebase-user-123';
+    const accountId = obfuscateFirebaseUid(firebaseUid);
+    const purchase = {
+      ...createPurchase(),
+      outOfAppPurchaseContext: {
+        expiredExternalAccountIdentifiers: {
+          obfuscatedExternalAccountId: accountId,
+        },
+      },
+    };
+
+    expect(getGooglePurchaseAccountId(purchase)).toBe(accountId);
+    expect(() => assertGooglePurchaseAccountMatchesUser({
+      purchase,
+      firebaseUid,
+      requireAccountMatch: true,
+    })).not.toThrow();
+  });
+
+  test('attaches account id when acknowledging out-of-app purchases without current identifiers', () => {
+    const firebaseUid = 'firebase-user-123';
+
+    expect(getGoogleAcknowledgeExternalAccountIds({
+      purchase: {
+        ...createPurchase(),
+        outOfAppPurchaseContext: {},
+      },
+      firebaseUid,
+    })).toEqual({
+      obfuscatedAccountId: obfuscateFirebaseUid(firebaseUid),
+    });
+
+    expect(getGoogleAcknowledgeExternalAccountIds({
+      purchase: {
+        ...createPurchase(),
+        externalAccountIdentifiers: {
+          obfuscatedExternalAccountId: obfuscateFirebaseUid(firebaseUid),
+        },
+        outOfAppPurchaseContext: {},
+      },
+      firebaseUid,
+    })).toBeNull();
+  });
+
+  test('detects pending subscription acknowledgement state', () => {
+    expect(isGoogleSubscriptionAcknowledgementPending({
+      acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
+    })).toBe(true);
+    expect(isGoogleSubscriptionAcknowledgementPending({
+      acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+    })).toBe(false);
   });
 
   test('rejects Firebase Admin SDK credentials for Google Play', () => {
