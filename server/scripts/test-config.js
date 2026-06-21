@@ -161,6 +161,9 @@ console.log(`  Package Name: ${checks.googlePlay.packageName}`);
 console.log(`  Product ID: ${checks.googlePlay.productId}`);
 console.log(`  Trial Offer ID: ${checks.googlePlay.trialOfferId}`);
 console.log(`  RTDN Token: ${checks.googlePlay.rtdnToken ? 'configured' : 'not set'}`);
+console.log('  Required Play Console permissions:');
+console.log('    - View financial data (or account-level View financial data, orders, and cancellation survey responses)');
+console.log('    - Manage orders and subscriptions');
 
 const sameCredentialEmail =
     firebaseClientEmail &&

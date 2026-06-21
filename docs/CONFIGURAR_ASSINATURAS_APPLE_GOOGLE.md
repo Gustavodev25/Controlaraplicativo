@@ -140,7 +140,11 @@ do Play Console.
 1. No Google Cloud do projeto, ative a `Google Play Android Developer API`.
 2. Crie uma conta de servico e baixe a chave JSON.
 3. No Play Console, adicione essa conta em `Users and permissions`.
-4. Libere acesso ao app Controlar+ e permissao para gerenciar pedidos e assinaturas.
+4. Libere acesso ao app Controlar+ e marque as permissoes necessarias para Billing:
+   - `View app information (read-only)`;
+   - `View financial data` no nivel do app, ou `View financial data, orders, and cancellation survey responses` no nivel da conta;
+   - `Manage orders and subscriptions`.
+   A permissao de leitor sozinha nao libera a Purchases API.
 5. Configure no Railway:
 
 ```env
@@ -164,6 +168,27 @@ npm run test:config
 
 O script deve mostrar `Trial Offer ID: trial-7d`, duas credenciais com `client_email`
 diferentes, e nao pode apontar a credencial Google Play como `firebase-adminsdk-...`.
+
+Se a rota `/api/google/validate-purchase` retornar `Google Play API denied Android
+Publisher access (401)` ou `google_play_permission_denied`, confirme no Railway que
+`GOOGLE_PLAY_SERVICE_ACCOUNT` usa o mesmo `client_email` convidado no Play Console,
+salve as permissoes acima, aguarde alguns minutos de propagacao e reinicie/redeploy o
+backend. Esse erro acontece antes do Firestore e antes da liberacao do Pro, entao nao
+e corrigido no app instalado.
+
+Para testar a credencial do Railway sem fazer uma compra nova, use o endpoint protegido:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "https://SEU_BACKEND/api/google/diagnostics" `
+  -Headers @{ Authorization = "Bearer SEU_ADMIN_API_TOKEN" }
+```
+
+O check `oauth_access_token` confirma que a chave JSON assina corretamente. O check
+`android_publisher_subscription_catalog_access` confirma que essa conta de servico
+consegue acessar o catalogo de assinaturas do app/package na Android Publisher API. O
+check `google_play_purchases_api_access` confirma a permissao da Purchases API usada na
+validacao de assinaturas.
 
 ### Notificacoes Google em tempo real
 

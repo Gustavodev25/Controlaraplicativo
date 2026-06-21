@@ -36,6 +36,11 @@ const GOOGLE_PROVIDER_VALUES = new Set(['google', 'google_play', 'play_store']);
 let cachedAccessToken = null;
 let cachedAccessTokenExpiresAt = 0;
 
+const GOOGLE_PLAY_BILLING_PERMISSION_HINT =
+    'Grant the service account Play Console access to this app with "View financial data" ' +
+    '(or account-level "View financial data, orders, and cancellation survey responses") ' +
+    'and "Manage orders and subscriptions".';
+
 function base64UrlEncode(value) {
     return Buffer.from(value)
         .toString('base64')
@@ -114,6 +119,26 @@ function validateGooglePlayServiceAccountIdentity(clientEmail) {
     }
 }
 
+function getGooglePlayServiceAccountIdentity() {
+    let serviceAccount = null;
+    try {
+        serviceAccount = parseJsonOrBase64Json(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT);
+    } catch {
+        serviceAccount = null;
+    }
+
+    const clientEmail = serviceAccount?.client_email || process.env.GOOGLE_PLAY_CLIENT_EMAIL || null;
+    const privateKey = serviceAccount?.private_key || process.env.GOOGLE_PLAY_PRIVATE_KEY || null;
+
+    return {
+        configured: Boolean(clientEmail && privateKey),
+        clientEmail,
+        projectId: serviceAccount?.project_id || null,
+        packageName: GOOGLE_PLAY_PACKAGE_NAME,
+        productId: GOOGLE_PLAY_PRO_PRODUCT_ID,
+    };
+}
+
 function getGooglePlayServiceAccount() {
     const serviceAccount = parseJsonOrBase64Json(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT);
     const clientEmail = serviceAccount?.client_email || process.env.GOOGLE_PLAY_CLIENT_EMAIL;
@@ -155,6 +180,92 @@ function createGoogleServiceAccountJwt() {
     return `${signingInput}.${base64UrlEncode(signature)}`;
 }
 
+function getGooglePlayApiBodyMessage(body) {
+    return (
+        body?.error?.message ||
+        body?.error_description ||
+        body?.message ||
+        ''
+    );
+}
+
+function isGooglePlayPermissionDenied(response, body) {
+    const message = String(getGooglePlayApiBodyMessage(body)).toLowerCase();
+    return (
+        response.status === 401 ||
+        response.status === 403 ||
+        message.includes('insufficient permissions') ||
+        message.includes('permission')
+    );
+}
+
+function describeGooglePlayRequest(path) {
+    const safePath = String(path || '');
+    if (safePath.includes('/purchases/subscriptionsv2/tokens/')) {
+        return 'purchases.subscriptionsv2.get';
+    }
+    if (safePath.includes('/purchases/subscriptions/') && safePath.includes(':acknowledge')) {
+        return 'purchases.subscriptions.acknowledge';
+    }
+    return safePath.replace(/tokens\/[^/]+/g, 'tokens/<redacted>');
+}
+
+function buildGooglePlayApiErrorMessage(response, body, path) {
+    const bodyMessage = getGooglePlayApiBodyMessage(body);
+    if (!isGooglePlayPermissionDenied(response, body)) {
+        return `Google Play API failed (${response.status}): ${JSON.stringify(body).slice(0, 240)}`;
+    }
+
+    const identity = getGooglePlayServiceAccountIdentity();
+    return [
+        `Google Play API denied Android Publisher access (${response.status}) for ${GOOGLE_PLAY_PACKAGE_NAME}.`,
+        `Configured service account: ${identity.clientEmail || 'not found'}.`,
+        GOOGLE_PLAY_BILLING_PERMISSION_HINT,
+        'Also confirm Google Play Android Developer API is enabled in the Google Cloud project that owns this service account, then redeploy/restart the backend.',
+        bodyMessage ? `Google response: ${bodyMessage}` : null,
+        `Google API request: ${describeGooglePlayRequest(path)}`,
+    ].filter(Boolean).join(' ');
+}
+
+function createGooglePlayApiError(response, body, path) {
+    const error = new Error(buildGooglePlayApiErrorMessage(response, body, path));
+    error.statusCode = isGooglePlayPermissionDenied(response, body) ? 502 : response.status;
+    error.errorCode = isGooglePlayPermissionDenied(response, body)
+        ? 'google_play_permission_denied'
+        : 'google_play_api_error';
+    error.googleStatusCode = response.status;
+    return error;
+}
+
+function getAdminBearerToken(req) {
+    const authorization = String(req.headers.authorization || '').trim();
+    if (authorization.toLowerCase().startsWith('bearer ')) {
+        return authorization.slice(7).trim();
+    }
+
+    return String(req.headers['x-admin-token'] || '').trim();
+}
+
+function requireGoogleDiagnosticsToken(req, res, next) {
+    const expectedToken = String(process.env.ADMIN_API_TOKEN || '').trim();
+    if (!expectedToken) {
+        return res.status(503).json({
+            success: false,
+            error: 'ADMIN_API_TOKEN is not configured',
+        });
+    }
+
+    const providedToken = getAdminBearerToken(req);
+    if (!providedToken || providedToken !== expectedToken) {
+        return res.status(401).json({
+            success: false,
+            error: 'Unauthorized',
+        });
+    }
+
+    return next();
+}
+
 async function getGoogleAccessToken() {
     if (cachedAccessToken && cachedAccessTokenExpiresAt > Date.now() + 60 * 1000) {
         return cachedAccessToken;
@@ -192,10 +303,15 @@ async function googlePublisherRequest(path, options = {}) {
         },
     });
     const bodyText = await response.text();
-    const body = bodyText ? JSON.parse(bodyText) : {};
+    let body = {};
+    try {
+        body = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+        body = { raw: bodyText.slice(0, 240) };
+    }
 
     if (!response.ok) {
-        throw new Error(`Google Play API failed (${response.status}): ${JSON.stringify(body).slice(0, 240)}`);
+        throw createGooglePlayApiError(response, body, path);
     }
 
     return body;
@@ -399,6 +515,20 @@ async function getGoogleSubscriptionPurchase(purchaseToken) {
     return googlePublisherRequest(
         `/applications/${encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)}` +
         `/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`
+    );
+}
+
+async function listGooglePlaySubscriptions() {
+    return googlePublisherRequest(
+        `/applications/${encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)}` +
+        '/monetization/subscriptions'
+    );
+}
+
+async function listGooglePlayVoidedPurchases() {
+    return googlePublisherRequest(
+        `/applications/${encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)}` +
+        '/purchases/voidedpurchases'
     );
 }
 
@@ -655,8 +785,88 @@ router.post('/validate-purchase', async (req, res) => {
         });
     } catch (error) {
         console.error('[Google Play] validate-purchase error:', error);
-        return res.status(error.statusCode || 400).json({ hasPro: false, error: error.message });
+        return res.status(error.statusCode || 400).json({
+            hasPro: false,
+            error: error.message,
+            errorCode: error.errorCode || 'google_play_validate_purchase_failed',
+        });
     }
+});
+
+router.get('/diagnostics', requireGoogleDiagnosticsToken, async (req, res) => {
+    const identity = getGooglePlayServiceAccountIdentity();
+    const checks = [];
+
+    try {
+        await getGoogleAccessToken();
+        checks.push({
+            name: 'oauth_access_token',
+            status: 'pass',
+        });
+    } catch (error) {
+        checks.push({
+            name: 'oauth_access_token',
+            status: 'fail',
+            error: error.message,
+        });
+
+        return res.status(200).json({
+            success: false,
+            serviceAccount: identity,
+            checks,
+        });
+    }
+
+    let success = true;
+
+    for (const check of [
+        {
+            name: 'android_publisher_subscription_catalog_access',
+            googleApiRequest: 'monetization.subscriptions.list',
+            run: listGooglePlaySubscriptions,
+            readSummary: (body) => ({
+                subscriptionsCount: Array.isArray(body?.subscriptions)
+                    ? body.subscriptions.length
+                    : null,
+            }),
+        },
+        {
+            name: 'google_play_purchases_api_access',
+            googleApiRequest: 'purchases.voidedpurchases.list',
+            run: listGooglePlayVoidedPurchases,
+            readSummary: (body) => ({
+                voidedPurchasesCount: Array.isArray(body?.voidedPurchases)
+                    ? body.voidedPurchases.length
+                    : null,
+            }),
+        },
+    ]) {
+        try {
+            const body = await check.run();
+            checks.push({
+                name: check.name,
+                status: 'pass',
+                googleApiRequest: check.googleApiRequest,
+                ...check.readSummary(body),
+            });
+        } catch (error) {
+            success = false;
+            checks.push({
+                name: check.name,
+                status: 'fail',
+                googleApiRequest: check.googleApiRequest,
+                errorCode: error.errorCode || 'google_play_api_error',
+                googleStatusCode: error.googleStatusCode || null,
+                error: error.message,
+            });
+        }
+    }
+
+    return res.status(200).json({
+        success,
+        serviceAccount: identity,
+        checks,
+    });
 });
 
 router.get('/subscription-status', async (req, res) => {
@@ -696,7 +906,10 @@ router.get('/subscription-status', async (req, res) => {
         return res.json(buildStatusSnapshot(sub));
     } catch (error) {
         console.error('[Google Play] subscription-status error:', error);
-        return res.status(error.statusCode || 500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({
+            error: error.message,
+            errorCode: error.errorCode || 'google_play_subscription_status_failed',
+        });
     }
 });
 

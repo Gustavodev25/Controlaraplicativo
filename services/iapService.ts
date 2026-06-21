@@ -770,7 +770,11 @@ export async function syncGooglePlayPurchaseWithBackend(
             }),
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Erro ao validar assinatura Google Play');
+        if (!response.ok) {
+            const error = new Error(data.error || 'Erro ao validar assinatura Google Play');
+            (error as any).code = data.errorCode || data.code || null;
+            throw error;
+        }
 
         return {
             success: data.hasPro === true,
@@ -786,6 +790,7 @@ export async function syncGooglePlayPurchaseWithBackend(
             success: false,
             hasPro: false,
             error: e?.message || 'Erro ao validar assinatura Google Play',
+            errorCode: e?.code || e?.errorCode,
         };
     }
 }
