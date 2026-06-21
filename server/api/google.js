@@ -521,7 +521,7 @@ async function getGoogleSubscriptionPurchase(purchaseToken) {
 async function listGooglePlaySubscriptions() {
     return googlePublisherRequest(
         `/applications/${encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)}` +
-        '/monetization/subscriptions'
+        '/subscriptions'
     );
 }
 
