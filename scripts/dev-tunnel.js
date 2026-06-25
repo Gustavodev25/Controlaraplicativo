@@ -49,8 +49,9 @@ const SERVER_IMPORTANT_ENV_GROUPS = [
         impact: 'Google Play purchase validation and subscription refresh will fail.',
     },
     {
-        label: 'Email verification SMTP',
+        label: 'Email verification delivery',
         options: [
+            ['RESEND_API_KEY', 'EMAIL_FROM'],
             ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'],
         ],
         impact: 'New account registration will not be able to send verification codes.',

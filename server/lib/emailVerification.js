@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fetch = require('node-fetch');
 const nodemailer = require('nodemailer');
 const { getFirebaseAdmin, isFirebaseConfigured } = require('./firebaseAdmin');
 
@@ -8,9 +9,11 @@ const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_COOLDOWN_MS = 60 * 1000;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_SMTP_TIMEOUT_MS = 15000;
+const DEFAULT_RESEND_TIMEOUT_MS = 20000;
+const DEFAULT_RESEND_API_URL = 'https://api.resend.com/emails';
 
 const verificationRecords = new Map();
-let transporter = null;
+const transporterCache = new Map();
 
 function parsePositiveInteger(value, fallback) {
     const parsed = Number(value);
@@ -54,6 +57,10 @@ function getSmtpTimeoutMs() {
     return parsePositiveInteger(process.env.SMTP_TIMEOUT_MS, DEFAULT_SMTP_TIMEOUT_MS);
 }
 
+function getResendTimeoutMs() {
+    return parsePositiveInteger(process.env.RESEND_TIMEOUT_MS, DEFAULT_RESEND_TIMEOUT_MS);
+}
+
 function getHashSecret() {
     return (
         process.env.EMAIL_VERIFICATION_HASH_SECRET ||
@@ -80,7 +87,20 @@ function generateCode() {
     return String(crypto.randomInt(100000, 1000000));
 }
 
-function getSmtpConfig() {
+function buildSmtpConfig({ host, user, pass, port, secure, requireTLS = false }) {
+    return {
+        host,
+        port,
+        secure,
+        requireTLS,
+        auth: { user, pass },
+        connectionTimeout: getSmtpTimeoutMs(),
+        greetingTimeout: getSmtpTimeoutMs(),
+        socketTimeout: getSmtpTimeoutMs(),
+    };
+}
+
+function getSmtpConfigs() {
     const host = String(process.env.SMTP_HOST || '').trim();
     const user = String(process.env.SMTP_USER || '').trim();
     const pass = String(process.env.SMTP_PASS || '').trim();
@@ -93,26 +113,64 @@ function getSmtpConfig() {
         throw error;
     }
 
-    return {
+    const configs = [buildSmtpConfig({
         host,
+        user,
+        pass,
         port,
         secure,
-        auth: { user, pass },
-        connectionTimeout: getSmtpTimeoutMs(),
-        greetingTimeout: getSmtpTimeoutMs(),
-        socketTimeout: getSmtpTimeoutMs(),
-    };
+        requireTLS: !secure && port === 587,
+    })];
+
+    const isZohoHost = host.toLowerCase().includes('zoho.com');
+    if (isZohoHost && port !== 587) {
+        configs.push(buildSmtpConfig({
+            host,
+            user,
+            pass,
+            port: 587,
+            secure: false,
+            requireTLS: true,
+        }));
+    }
+
+    return configs;
 }
 
-function getTransporter() {
-    if (!transporter) {
-        transporter = nodemailer.createTransport(getSmtpConfig());
+function getTransporter(smtpConfig) {
+    const cacheKey = [
+        smtpConfig.host,
+        smtpConfig.port,
+        smtpConfig.secure ? 'secure' : 'starttls',
+        smtpConfig.requireTLS ? 'requiretls' : 'optional',
+    ].join(':');
+
+    if (!transporterCache.has(cacheKey)) {
+        transporterCache.set(cacheKey, nodemailer.createTransport(smtpConfig));
     }
-    return transporter;
+
+    return transporterCache.get(cacheKey);
 }
 
 function isSmtpConfigured() {
     return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
+function isResendConfigured() {
+    return Boolean(process.env.RESEND_API_KEY);
+}
+
+function isEmailDeliveryConfigured() {
+    return isResendConfigured() || isSmtpConfigured();
+}
+
+function getEmailFrom() {
+    return (
+        process.env.EMAIL_FROM ||
+        process.env.RESEND_FROM ||
+        process.env.SMTP_FROM ||
+        `"Controlar+" <${process.env.SMTP_USER || 'contato@controlarmais.com.br'}>`
+    );
 }
 
 function escapeHtml(value) {
@@ -151,7 +209,7 @@ function toPublicSmtpError(error) {
         code.includes('ECONNREFUSED') ||
         /timeout|timed out|connection|socket/i.test(message)
     ) {
-        publicError.message = 'O servidor demorou para conectar ao SMTP. Confira SMTP_HOST, SMTP_PORT e SMTP_SECURE.';
+        publicError.message = 'O servidor nao conseguiu conectar ao SMTP. No Railway, tente SMTP_PORT=587 e SMTP_SECURE=false.';
         publicError.statusCode = 504;
         return publicError;
     }
@@ -163,6 +221,126 @@ function toPublicSmtpError(error) {
     }
 
     return publicError;
+}
+
+function isConnectionFailure(error) {
+    const code = String(error?.code || error?.command || '').toUpperCase();
+    const message = String(error?.message || '');
+
+    return (
+        code.includes('ETIMEDOUT') ||
+        code.includes('ESOCKET') ||
+        code.includes('ECONNECTION') ||
+        code.includes('ECONNREFUSED') ||
+        /timeout|timed out|connection|socket/i.test(message)
+    );
+}
+
+function toPublicResendError(error, statusCode) {
+    const message = String(error?.message || '');
+    const publicError = new Error('Nao foi possivel enviar o codigo pelo Resend agora. Tente novamente em alguns minutos.');
+    publicError.statusCode = statusCode >= 500 ? 502 : 400;
+
+    if (statusCode === 401 || statusCode === 403) {
+        publicError.message = 'Falha na autenticacao do Resend. Confira RESEND_API_KEY no backend.';
+        publicError.statusCode = 503;
+        return publicError;
+    }
+
+    if (statusCode === 422 || /domain|from|sender|verified/i.test(message)) {
+        publicError.message = 'O Resend recusou o remetente. Confira EMAIL_FROM e se o dominio esta verificado no Resend.';
+        publicError.statusCode = 400;
+        return publicError;
+    }
+
+    if (/timeout|network|fetch|connection/i.test(message)) {
+        publicError.message = 'O servidor nao conseguiu conectar ao Resend. Tente novamente em alguns minutos.';
+        publicError.statusCode = 504;
+        return publicError;
+    }
+
+    return publicError;
+}
+
+function buildVerificationEmail({ code, name, ttlMinutes }) {
+    const displayName = String(name || '').trim();
+    const greeting = displayName ? `Ola, ${displayName}!` : 'Ola!';
+    const safeGreeting = escapeHtml(greeting);
+
+    return {
+        subject: 'Seu codigo de verificacao Controlar+',
+        text: [
+            greeting,
+            '',
+            `Seu codigo de verificacao do Controlar+ e: ${code}`,
+            '',
+            `Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.`,
+        ].join('\n'),
+        html: `
+            <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+                <p>${safeGreeting}</p>
+                <p>Seu codigo de verificacao do Controlar+ e:</p>
+                <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #d97757;">${code}</p>
+                <p>Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.</p>
+            </div>
+        `,
+    };
+}
+
+async function readResendPayload(response) {
+    const text = await response.text();
+    if (!text) return null;
+
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { message: text };
+    }
+}
+
+async function sendVerificationEmailWithResend({ email, from, subject, text, html }) {
+    const apiKey = String(process.env.RESEND_API_KEY || '').trim();
+    const apiUrl = String(process.env.RESEND_API_URL || DEFAULT_RESEND_API_URL).trim();
+
+    if (!apiKey) {
+        const error = new Error('RESEND_API_KEY nao configurada no backend.');
+        error.statusCode = 503;
+        throw error;
+    }
+
+    try {
+        console.log(`[EmailVerification] Sending code to ${maskEmail(email)} via Resend from=${from}`);
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                from,
+                to: [email],
+                subject,
+                text,
+                html,
+            }),
+            timeout: getResendTimeoutMs(),
+        });
+        const payload = await readResendPayload(response);
+
+        if (!response.ok) {
+            const error = new Error(payload?.message || payload?.error || `Resend HTTP ${response.status}`);
+            error.statusCode = response.status;
+            throw error;
+        }
+
+        console.log(`[EmailVerification] Code sent to ${maskEmail(email)} via Resend id=${payload?.id || 'n/a'}`);
+    } catch (error) {
+        console.error('[EmailVerification] Resend send failed:', {
+            statusCode: error?.statusCode,
+            message: error?.message,
+        });
+        throw toPublicResendError(error, error?.statusCode || 502);
+    }
 }
 
 async function ensureEmailIsAvailable(email) {
@@ -205,44 +383,56 @@ async function ensureEmailIsAvailable(email) {
 }
 
 async function sendVerificationEmail({ email, code, name, ttlMinutes }) {
-    const smtpConfig = getSmtpConfig();
-    const from = process.env.SMTP_FROM || `"Controlar+" <${smtpConfig.auth.user}>`;
-    const displayName = String(name || '').trim();
-    const greeting = displayName ? `Ola, ${displayName}!` : 'Ola!';
-    const safeGreeting = escapeHtml(greeting);
+    const from = getEmailFrom();
+    const { subject, text, html } = buildVerificationEmail({ code, name, ttlMinutes });
 
-    try {
-        console.log(`[EmailVerification] Sending code to ${maskEmail(email)} via ${smtpConfig.host}:${smtpConfig.port} secure=${smtpConfig.secure}`);
-        const result = await getTransporter().sendMail({
-            from,
-            to: email,
-            subject: 'Seu codigo de verificacao Controlar+',
-            text: [
-                greeting,
-                '',
-                `Seu codigo de verificacao do Controlar+ e: ${code}`,
-                '',
-                `Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.`,
-            ].join('\n'),
-            html: `
-                <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
-                    <p>${safeGreeting}</p>
-                    <p>Seu codigo de verificacao do Controlar+ e:</p>
-                    <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #d97757;">${code}</p>
-                    <p>Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.</p>
-                </div>
-            `,
-        });
-        console.log(`[EmailVerification] Code sent to ${maskEmail(email)} messageId=${result.messageId || 'n/a'}`);
-    } catch (error) {
-        console.error('[EmailVerification] SMTP send failed:', {
-            code: error?.code,
-            command: error?.command,
-            responseCode: error?.responseCode,
-            message: error?.message,
-        });
-        throw toPublicSmtpError(error);
+    if (isResendConfigured()) {
+        await sendVerificationEmailWithResend({ email, from, subject, text, html });
+        return;
     }
+
+    const smtpConfigs = getSmtpConfigs();
+    let lastError = null;
+
+    for (let index = 0; index < smtpConfigs.length; index += 1) {
+        const smtpConfig = smtpConfigs[index];
+
+        try {
+            console.log(
+                `[EmailVerification] Sending code to ${maskEmail(email)} via ${smtpConfig.host}:${smtpConfig.port} secure=${smtpConfig.secure} requireTLS=${smtpConfig.requireTLS} attempt=${index + 1}/${smtpConfigs.length}`
+            );
+            const result = await getTransporter(smtpConfig).sendMail({
+                from,
+                to: email,
+                subject,
+                text,
+                html,
+            });
+            console.log(`[EmailVerification] Code sent to ${maskEmail(email)} messageId=${result.messageId || 'n/a'}`);
+            return;
+        } catch (error) {
+            lastError = error;
+            console.error('[EmailVerification] SMTP send failed:', {
+                host: smtpConfig.host,
+                port: smtpConfig.port,
+                secure: smtpConfig.secure,
+                requireTLS: smtpConfig.requireTLS,
+                code: error?.code,
+                command: error?.command,
+                responseCode: error?.responseCode,
+                message: error?.message,
+            });
+
+            if (index < smtpConfigs.length - 1 && isConnectionFailure(error)) {
+                console.warn('[EmailVerification] Retrying SMTP with fallback configuration.');
+                continue;
+            }
+
+            break;
+        }
+    }
+
+    throw toPublicSmtpError(lastError);
 }
 
 function cleanupExpiredRecords(now = Date.now()) {
@@ -347,6 +537,8 @@ function consumeEmailVerificationCode(email) {
 module.exports = {
     consumeEmailVerificationCode,
     ensureEmailIsAvailable,
+    isEmailDeliveryConfigured,
+    isResendConfigured,
     isSmtpConfigured,
     normalizeEmail,
     requestEmailVerificationCode,

@@ -84,9 +84,11 @@ const checks = {
         rtdnToken: Boolean(process.env.GOOGLE_PLAY_RTDN_TOKEN),
     },
     emailVerification: {
+        resendApiKey: Boolean(process.env.RESEND_API_KEY),
+        emailFrom: Boolean(process.env.EMAIL_FROM || process.env.RESEND_FROM || process.env.SMTP_FROM),
         smtpHost: Boolean(process.env.SMTP_HOST),
-        smtpPort: process.env.SMTP_PORT || '465',
-        smtpSecure: process.env.SMTP_SECURE || 'true',
+        smtpPort: process.env.SMTP_PORT || '587',
+        smtpSecure: process.env.SMTP_SECURE || 'false',
         smtpUser: Boolean(process.env.SMTP_USER),
         smtpPass: Boolean(process.env.SMTP_PASS),
     },
@@ -172,7 +174,9 @@ console.log('  Required Play Console permissions:');
 console.log('    - View financial data (or account-level View financial data, orders, and cancellation survey responses)');
 console.log('    - Manage orders and subscriptions');
 
-console.log('\nEmail Verification SMTP Configuration:');
+console.log('\nEmail Verification Configuration:');
+console.log(`  Resend API Key: ${checks.emailVerification.resendApiKey ? 'configured' : 'missing'}`);
+console.log(`  Email From: ${checks.emailVerification.emailFrom ? 'configured' : 'missing'}`);
 console.log(`  SMTP Host: ${checks.emailVerification.smtpHost ? 'configured' : 'missing'}`);
 console.log(`  SMTP Port: ${checks.emailVerification.smtpPort}`);
 console.log(`  SMTP Secure: ${checks.emailVerification.smtpSecure}`);
@@ -199,10 +203,12 @@ console.log('\n' + '='.repeat(50));
 
 const pluggyConfigured = checks.pluggy.clientId && checks.pluggy.clientSecret;
 const appleIapConfigured = appleIapDiagnostics.canAttemptIosTest;
-const emailVerificationConfigured =
+const resendConfigured = checks.emailVerification.resendApiKey && checks.emailVerification.emailFrom;
+const smtpConfigured =
     checks.emailVerification.smtpHost &&
     checks.emailVerification.smtpUser &&
     checks.emailVerification.smtpPass;
+const emailVerificationConfigured = resendConfigured || smtpConfigured;
 const allRequiredConfigured =
     pluggyConfigured &&
     firebaseConfigured &&
@@ -230,7 +236,7 @@ if (!googlePlayConfigured) {
     console.log('  - Configure Google Play Billing variables.');
 }
 if (!emailVerificationConfigured) {
-    console.log('  - Configure SMTP_HOST, SMTP_USER and SMTP_PASS for email verification.');
+    console.log('  - Configure RESEND_API_KEY + EMAIL_FROM or SMTP_HOST + SMTP_USER + SMTP_PASS for email verification.');
 }
 console.log('\nSee server/.env.example and docs/CONFIGURAR_ASSINATURAS_APPLE_GOOGLE.md.');
 process.exit(1);

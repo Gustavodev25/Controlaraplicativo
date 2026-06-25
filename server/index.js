@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const pluggyRoutes = require('./api/pluggy');
 const { isFirebaseConfigured, getFirebaseInitStatus } = require('./lib/firebaseAdmin');
-const { isSmtpConfigured } = require('./lib/emailVerification');
+const { isEmailDeliveryConfigured, isResendConfigured, isSmtpConfigured } = require('./lib/emailVerification');
 const {
     buildAppleIapDiagnostics,
     renderAppleIapDiagnosticsHtml,
@@ -51,6 +51,8 @@ app.get('/health', (req, res) => {
         googlePlay: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT ? 'configured' : 'missing',
         firebase: require('./lib/firebaseAdmin').isFirebaseConfigured() ? 'connected' : 'missing',
         smtp: isSmtpConfigured() ? 'configured' : 'missing',
+        resend: isResendConfigured() ? 'configured' : 'missing',
+        emailDelivery: isEmailDeliveryConfigured() ? 'configured' : 'missing',
     });
 });
 
@@ -75,6 +77,8 @@ app.get('/api/diagnostics', (req, res) => {
             firebaseConfigured: isFirebaseConfigured(),
             firebaseInitError: firebaseStatus.error,
             smtpConfigured: isSmtpConfigured(),
+            resendConfigured: isResendConfigured(),
+            emailDeliveryConfigured: isEmailDeliveryConfigured(),
             appleIap: {
                 status: appleIapDiagnostics.status,
                 readyForIosTest: appleIapDiagnostics.readyForIosTest,
