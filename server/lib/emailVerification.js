@@ -7,6 +7,7 @@ const CODE_REGEX = /^\d{6}$/;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_COOLDOWN_MS = 60 * 1000;
 const DEFAULT_MAX_ATTEMPTS = 5;
+const DEFAULT_SMTP_TIMEOUT_MS = 15000;
 
 const verificationRecords = new Map();
 let transporter = null;
@@ -47,6 +48,10 @@ function getSendCooldownMs() {
 
 function getMaxAttempts() {
     return parsePositiveInteger(process.env.EMAIL_VERIFICATION_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS);
+}
+
+function getSmtpTimeoutMs() {
+    return parsePositiveInteger(process.env.SMTP_TIMEOUT_MS, DEFAULT_SMTP_TIMEOUT_MS);
 }
 
 function getHashSecret() {
@@ -93,6 +98,9 @@ function getSmtpConfig() {
         port,
         secure,
         auth: { user, pass },
+        connectionTimeout: getSmtpTimeoutMs(),
+        greetingTimeout: getSmtpTimeoutMs(),
+        socketTimeout: getSmtpTimeoutMs(),
     };
 }
 
@@ -114,6 +122,47 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+function maskEmail(email) {
+    const normalized = normalizeEmail(email);
+    const [local, domain] = normalized.split('@');
+    if (!local || !domain) return normalized ? '***' : '';
+    const visibleLocal = local.length <= 2 ? local[0] : `${local[0]}${local[local.length - 1]}`;
+    return `${visibleLocal}***@${domain}`;
+}
+
+function toPublicSmtpError(error) {
+    const code = String(error?.code || error?.command || '').toUpperCase();
+    const message = String(error?.message || '');
+    const publicError = new Error('Nao foi possivel enviar o codigo agora. Tente novamente em alguns minutos.');
+    publicError.statusCode = 502;
+
+    if (code.includes('EAUTH') || /auth|login|credential|535|authentication/i.test(message)) {
+        publicError.message = 'Falha na autenticacao do SMTP. Confira SMTP_USER e SMTP_PASS no backend.';
+        publicError.statusCode = 503;
+        return publicError;
+    }
+
+    if (
+        code.includes('ETIMEDOUT') ||
+        code.includes('ESOCKET') ||
+        code.includes('ECONNECTION') ||
+        code.includes('ECONNREFUSED') ||
+        /timeout|timed out|connection|socket/i.test(message)
+    ) {
+        publicError.message = 'O servidor demorou para conectar ao SMTP. Confira SMTP_HOST, SMTP_PORT e SMTP_SECURE.';
+        publicError.statusCode = 504;
+        return publicError;
+    }
+
+    if (/recipient|mailbox|invalid address/i.test(message)) {
+        publicError.message = 'Nao foi possivel enviar para este e-mail. Confira o endereco e tente novamente.';
+        publicError.statusCode = 400;
+        return publicError;
+    }
+
+    return publicError;
 }
 
 async function ensureEmailIsAvailable(email) {
@@ -162,26 +211,38 @@ async function sendVerificationEmail({ email, code, name, ttlMinutes }) {
     const greeting = displayName ? `Ola, ${displayName}!` : 'Ola!';
     const safeGreeting = escapeHtml(greeting);
 
-    await getTransporter().sendMail({
-        from,
-        to: email,
-        subject: 'Seu codigo de verificacao Controlar+',
-        text: [
-            greeting,
-            '',
-            `Seu codigo de verificacao do Controlar+ e: ${code}`,
-            '',
-            `Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.`,
-        ].join('\n'),
-        html: `
-            <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
-                <p>${safeGreeting}</p>
-                <p>Seu codigo de verificacao do Controlar+ e:</p>
-                <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #d97757;">${code}</p>
-                <p>Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.</p>
-            </div>
-        `,
-    });
+    try {
+        console.log(`[EmailVerification] Sending code to ${maskEmail(email)} via ${smtpConfig.host}:${smtpConfig.port} secure=${smtpConfig.secure}`);
+        const result = await getTransporter().sendMail({
+            from,
+            to: email,
+            subject: 'Seu codigo de verificacao Controlar+',
+            text: [
+                greeting,
+                '',
+                `Seu codigo de verificacao do Controlar+ e: ${code}`,
+                '',
+                `Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.`,
+            ].join('\n'),
+            html: `
+                <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+                    <p>${safeGreeting}</p>
+                    <p>Seu codigo de verificacao do Controlar+ e:</p>
+                    <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #d97757;">${code}</p>
+                    <p>Ele expira em ${ttlMinutes} minutos. Se voce nao pediu este cadastro, ignore este e-mail.</p>
+                </div>
+            `,
+        });
+        console.log(`[EmailVerification] Code sent to ${maskEmail(email)} messageId=${result.messageId || 'n/a'}`);
+    } catch (error) {
+        console.error('[EmailVerification] SMTP send failed:', {
+            code: error?.code,
+            command: error?.command,
+            responseCode: error?.responseCode,
+            message: error?.message,
+        });
+        throw toPublicSmtpError(error);
+    }
 }
 
 function cleanupExpiredRecords(now = Date.now()) {
@@ -195,7 +256,9 @@ function cleanupExpiredRecords(now = Date.now()) {
 async function requestEmailVerificationCode({ email, name }) {
     const normalizedEmail = validateEmail(email);
     const now = Date.now();
+    const startedAt = Date.now();
     cleanupExpiredRecords(now);
+    console.log(`[EmailVerification] Code request started for ${maskEmail(normalizedEmail)}`);
 
     const existingRecord = verificationRecords.get(normalizedEmail);
     if (existingRecord && existingRecord.nextSendAt > now) {
@@ -206,7 +269,8 @@ async function requestEmailVerificationCode({ email, name }) {
         throw error;
     }
 
-    await ensureEmailIsAvailable(normalizedEmail);
+    const existingUser = await ensureEmailIsAvailable(normalizedEmail);
+    console.log(`[EmailVerification] Availability checked for ${maskEmail(normalizedEmail)} existingAuthWithoutProfile=${Boolean(existingUser)}`);
 
     const code = generateCode();
     const ttlMs = getVerificationTtlMs();
@@ -225,6 +289,7 @@ async function requestEmailVerificationCode({ email, name }) {
         nextSendAt: now + cooldownMs,
         attempts: 0,
     });
+    console.log(`[EmailVerification] Code request completed for ${maskEmail(normalizedEmail)} in ${Date.now() - startedAt}ms`);
 
     return {
         email: normalizedEmail,

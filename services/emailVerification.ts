@@ -1,6 +1,6 @@
 import { API_BASE_URL_CANDIDATES } from '@/services/apiBaseUrl';
 
-const REQUEST_TIMEOUT_MS = 20000;
+const REQUEST_TIMEOUT_MS = 60000;
 
 type ApiResult<T = Record<string, unknown>> = T & {
     success: boolean;
@@ -44,7 +44,8 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
         return response;
     } catch (error: any) {
         clearTimeout(timeoutId);
-        if (error?.name === 'AbortError') {
+        const message = String(error?.message || '');
+        if (error?.name === 'AbortError' || /abort|cancel/i.test(message)) {
             throw new TypeError('Tempo de conexao esgotado.');
         }
         throw error;

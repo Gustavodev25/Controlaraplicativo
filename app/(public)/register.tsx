@@ -308,8 +308,8 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         paddingHorizontal: 32,
-        paddingTop: Platform.OS === 'ios' ? 80 : 60,
-        paddingBottom: 20,
+        paddingTop: Platform.OS === 'ios' ? 100 : 80,
+        paddingBottom: 30,
     },
     titleSection: {
         alignItems: 'flex-start',
