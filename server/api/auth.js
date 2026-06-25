@@ -125,22 +125,33 @@ router.post('/register-with-email-code', emailVerificationLimiter, async (req, r
 
         validatePassword(password);
         verifyEmailCode({ email, code, consume: false });
-        await ensureEmailIsAvailable(email);
+        const existingUser = await ensureEmailIsAvailable(email);
 
         const admin = getFirebaseAdmin();
         const auth = admin.auth();
         const db = admin.firestore();
         const now = admin.firestore.FieldValue.serverTimestamp();
+        let registeredUser = existingUser;
 
-        createdUser = await auth.createUser({
-            email,
-            password,
-            displayName: name,
-            emailVerified: true,
-            disabled: false,
-        });
+        if (registeredUser) {
+            registeredUser = await auth.updateUser(registeredUser.uid, {
+                password,
+                displayName: name,
+                emailVerified: true,
+                disabled: false,
+            });
+        } else {
+            createdUser = await auth.createUser({
+                email,
+                password,
+                displayName: name,
+                emailVerified: true,
+                disabled: false,
+            });
+            registeredUser = createdUser;
+        }
 
-        await db.collection('users').doc(createdUser.uid).set({
+        await db.collection('users').doc(registeredUser.uid).set({
             name,
             email,
             phone,
@@ -161,9 +172,9 @@ router.post('/register-with-email-code', emailVerificationLimiter, async (req, r
         return res.status(201).json({
             success: true,
             user: {
-                uid: createdUser.uid,
-                email: createdUser.email,
-                emailVerified: createdUser.emailVerified,
+                uid: registeredUser.uid,
+                email: registeredUser.email,
+                emailVerified: registeredUser.emailVerified,
             },
         });
     } catch (error) {

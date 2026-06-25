@@ -298,6 +298,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         position: 'absolute',
         top: 0,
+
         left: 0,
         right: 0,
         zIndex: 10
@@ -307,46 +308,47 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         paddingHorizontal: 32,
-        paddingVertical: 100,
+        paddingTop: Platform.OS === 'ios' ? 80 : 60,
+        paddingBottom: 20,
     },
     titleSection: {
         alignItems: 'flex-start',
-        marginBottom: 40,
-    },
-    logoContainer: {
-        width: 56,
-        height: 56,
-        justifyContent: 'center',
-        alignItems: 'center',
         marginBottom: 20,
     },
+    logoContainer: {
+        width: 44,
+        height: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
     logo: {
-        width: 56,
-        height: 56,
-        borderRadius: 14,
+        width: 44,
+        height: 44,
+        borderRadius: 12,
     },
     title: {
-        fontSize: 32,
+        fontSize: 26,
         fontWeight: '800',
         color: '#faf9f5',
-        marginBottom: 10,
+        marginBottom: 4,
         textAlign: 'left',
         letterSpacing: -1,
     },
     subtitle: {
-        fontSize: 16,
+        fontSize: 14,
         color: '#9ca3af',
         fontWeight: '400',
         textAlign: 'left',
-        lineHeight: 24,
+        lineHeight: 20,
         paddingRight: 20,
     },
     form: {
         width: '100%',
-        gap: 16,
+        gap: 8,
     },
     button: {
-        marginTop: 12,
+        marginTop: 4,
     },
     verificationSection: {
         gap: 8,
@@ -371,7 +373,7 @@ const styles = StyleSheet.create({
         opacity: 0.6,
     },
     loginLink: {
-        marginTop: 24,
+        marginTop: 12,
         alignItems: 'flex-start',
     },
     loginLinkText: {

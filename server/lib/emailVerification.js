@@ -117,18 +117,42 @@ function escapeHtml(value) {
 }
 
 async function ensureEmailIsAvailable(email) {
-    if (!isFirebaseConfigured()) return;
+    if (!isFirebaseConfigured()) return null;
+
+    const normalizedEmail = validateEmail(email);
+    const admin = getFirebaseAdmin();
+    const auth = admin.auth();
+    const db = admin.firestore();
+    let existingUser = null;
 
     try {
-        const admin = getFirebaseAdmin();
-        await admin.auth().getUserByEmail(email);
+        existingUser = await auth.getUserByEmail(normalizedEmail);
+    } catch (error) {
+        if (!error || error.code !== 'auth/user-not-found') throw error;
+    }
+
+    if (existingUser) {
+        const profileSnap = await db.collection('users').doc(existingUser.uid).get();
+        if (profileSnap.exists) {
+            const error = new Error('Este e-mail ja esta em uso.');
+            error.statusCode = 409;
+            throw error;
+        }
+    }
+
+    const profileByEmail = await db
+        .collection('users')
+        .where('email', '==', normalizedEmail)
+        .limit(1)
+        .get();
+
+    if (!profileByEmail.empty) {
         const error = new Error('Este e-mail ja esta em uso.');
         error.statusCode = 409;
         throw error;
-    } catch (error) {
-        if (error && error.code === 'auth/user-not-found') return;
-        throw error;
     }
+
+    return existingUser;
 }
 
 async function sendVerificationEmail({ email, code, name, ttlMinutes }) {
