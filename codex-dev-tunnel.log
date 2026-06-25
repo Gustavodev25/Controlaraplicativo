@@ -1,0 +1,93 @@
+
+[1m[36mControlarApp dev:tunnel[0m
+[2mApp: controlarapp | Metro: 8081 | API: 3001[0m
+[2mExpo args: --no-dev --minify --clear[0m
+
+[33m[server][0m Missing backend env PLUGGY_CLIENT_ID, PLUGGY_CLIENT_SECRET. Using dev placeholders so the local API can boot.
+[33m[server][0m Pluggy endpoints still need real values in server/.env for bank flows.
+[33m[server][0m Missing Firebase Admin env (FIREBASE_SERVICE_ACCOUNT or FIREBASE_PROJECT_ID + FIREBASE_PRIVATE_KEY + FIREBASE_CLIENT_EMAIL). IAP status routes will fail with "Firebase Service Account not configured".
+[33m[server][0m Missing Google Play Billing env (GOOGLE_PLAY_SERVICE_ACCOUNT or GOOGLE_PLAY_CLIENT_EMAIL + GOOGLE_PLAY_PRIVATE_KEY). Google Play purchase validation and subscription refresh will fail.
+[33m[cleanup][0m Freeing ports 8081 and 3001 if needed...
+[36m[api][0m Opening Cloudflare tunnel for API on localhost:3001...
+[36m[metro][0m Opening Cloudflare tunnel for Metro on localhost:8081...
+[32m[api][0m API tunnel ready: https://beauty-altered-bubble-legendary.trycloudflare.com
+[32m[metro][0m Metro tunnel ready: https://drawing-northeast-warrior-depending.trycloudflare.com
+[34m[server][0m Starting local backend...
+[34m[server][0m > controlarapp-server@1.0.0 dev
+[34m[server][0m > nodemon index.js
+[34m[server][0m [33m[nodemon] 3.1.11[39m
+[34m[server][0m [33m[nodemon] to restart at any time, enter `rs`[39m
+[34m[server][0m [33m[nodemon] watching path(s): *.*[39m
+[34m[server][0m [33m[nodemon] watching extensions: js,mjs,cjs,json[39m
+[34m[server][0m [32m[nodemon] starting `node index.js`[39m
+[34m[server][0m [Server] PORT from env: 3001
+[34m[server][0m [Server] Using PORT: 3001
+[34m[server][0m [Server] Rotas Stripe, Apple IAP e Google Play Billing carregadas ✅
+[34m[server][0m [Servidor] Rodando na porta 3001 (Railway Ready) 🚂
+[34m[server][0m [2026-06-24T18:14:53.276Z] GET /health
+[32m[server][0m Local backend is responding at http://127.0.0.1:3001/health
+[32m[expo][0m Starting Expo: npx expo start --dev-client --localhost --port 8081 --no-dev --minify --clear
+[32m[expo][0m Injecting EXPO_PUBLIC_API_URL=https://beauty-altered-bubble-legendary.trycloudflare.com
+[32m[expo][0m Injecting EXPO_PUBLIC_IAP_API_URL=https://backendcontrolarapp-production.up.railway.app
+[32m[expo][0m Starting project at C:\Users\Maldanis\Desktop\controlarapp-main
+[32m[expo][0m Starting Metro Bundler
+[32m[expo][0m warning: Bundler cache is empty, rebuilding (this may take a minute)
+[32m[expo][0m Waiting on http://localhost:8081
+
+[1m[32mControlarApp dev:tunnel is ready[0m
+
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+█ ▄▄▄▄▄ █▀█ █▄ ▀ ▀▀▀▄▄▄▄▄▀█ ▄▄▄▄▄ █
+█ █   █ █▀▀▀█ ▄▀▄▄▀▄█ ▄▀▄▄█ █   █ █
+█ █▄▄▄█ █▀ █▀▀██▀ ▄▀▄▄▀█▄██ █▄▄▄█ █
+█▄▄▄▄▄▄▄█▄▀ ▀▄█ █ █▄▀ ▀ █ █▄▄▄▄▄▄▄█
+█   ▄▄▀▄ ▄▄▀▄▀▀▀█▀▄▀ ██▄▀▄▄▀▄█ █▄▀█
+█▀█ █▀▄▄▀ █▄█▀ ▄▄▄▄▄▀ ▀ ▀█  ▄ ▄▀█▀█
+██▄▄█ ▀▄▄█▄▄█▄█▄▄▀ ▀▀▀▀ ▀█ ▀▄▄▀█▀ █
+█▄▀ █ ▄▄█▀▄▀ ▄█▀▄▀█▀▀▀▀████▀█▀ ▀███
+█▄█▄▄ ▀▄▄▀█▀▄▀▀▀██ ▀ ▀██   ▀ ▄▀▀▀▀█
+█▄  ▄▀█▄▄█ ██▀ ▄  ▄██▄  █▄▄██▄▀ ▄██
+█▀▄▄█▄█▄ ▀█▄█▄█▄▄▀▄█ ▀▀▄▀█▄▀▄▄▄▀▀ █
+█ █▀█  ▄▀▀█  ▄█▀▄████▀ ▄▀▀█▄▄ ▀▀ ██
+█▄█▄▄█▄▄▄  ▄▄▀▀▀▄ ▄▀▀▀▀▄▀ ▄▄▄ █▀▄▀█
+█ ▄▄▄▄▄ █▄▀██▀ ▄ ▄█▀▀▀    █▄█    ▀█
+█ █   █ █ ▄▀█▄█▄▄▀▄▀ ▀▀ ▀  ▄   ▀▀ █
+█ █▄▄▄█ █  ▄ ▄█▀ ▀▄▀█  ██▄▀▄██ ▀███
+█▄▄▄▄▄▄▄█▄▄█▄█████▄████▄▄▄▄█▄▄██▄██
+
+
+[36mExpo URL:          [1mexp://drawing-northeast-warrior-depending.trycloudflare.com[0m
+[36mMetro tunnel:      [1mhttps://drawing-northeast-warrior-depending.trycloudflare.com[0m
+[36mAPI tunnel:        [1mhttps://beauty-altered-bubble-legendary.trycloudflare.com[0m
+[36mLocal Metro:       http://127.0.0.1:8081[0m
+[36mLocal API:         http://127.0.0.1:3001[0m
+[36mBackend public:    PUBLIC_BASE_URL=https://beauty-altered-bubble-legendary.trycloudflare.com[0m
+[36mApp API env:       EXPO_PUBLIC_API_URL=https://beauty-altered-bubble-legendary.trycloudflare.com[0m
+[36mIAP API env:       EXPO_PUBLIC_IAP_API_URL=https://backendcontrolarapp-production.up.railway.app[0m
+[2mExpo command:      npx expo start --dev-client --localhost --port 8081 --no-dev --minify --clear[0m
+[2mShortcuts: r reload | q quit | Ctrl+C quit[0m
+
+[32m[expo][0m Logs for your project will appear below.
+[34m[server][0m [2026-06-24T18:15:17.479Z] GET /health
+[33m[metro][0m Metro status check timed out: Metro did not respond at http://127.0.0.1:8081/status (connect ECONNREFUSED 127.0.0.1:8081)
+[35m[expo][0m C:\Users\Maldanis\Desktop\controlarapp-main\node_modules\@expo\cli\build\src\utils\errors.js:130
+[35m[expo][0m throw error;
+[35m[expo][0m ^
+[35m[expo][0m Error: ENOENT: no such file or directory, watch 'C:\Users\Maldanis\Desktop\controlarapp-main\node_modules\.cacheable-request-JwrOa9Vu'
+[35m[expo][0m at FSWatcher.<computed> (node:internal/fs/watchers:321:19)
+[35m[expo][0m at Object.watch (node:fs:2548:36)
+[35m[expo][0m at #watchdir (C:\Users\Maldanis\Desktop\controlarapp-main\node_modules\@expo\metro-file-map\build\watchers\FallbackWatcher.js:164:38)
+[35m[expo][0m at C:\Users\Maldanis\Desktop\controlarapp-main\node_modules\@expo\metro-file-map\build\watchers\FallbackWatcher.js:268:39
+[35m[expo][0m at Walker.<anonymous> (C:\Users\Maldanis\Desktop\controlarapp-main\node_modules\@expo\metro-file-map\build\watchers\FallbackWatcher.js:410:33)
+[35m[expo][0m at Walker.emit (node:events:509:28)
+[35m[expo][0m at C:\Users\Maldanis\Desktop\controlarapp-main\node_modules\walker\lib\walker.js:69:16
+[35m[expo][0m at FSReqCallback.oncomplete (node:fs:185:23) {
+[35m[expo][0m errno: -4058,
+[35m[expo][0m syscall: 'watch',
+[35m[expo][0m code: 'ENOENT',
+[35m[expo][0m path: 'C:\\Users\\Maldanis\\Desktop\\controlarapp-main\\node_modules\\.cacheable-request-JwrOa9Vu',
+[35m[expo][0m filename: 'C:\\Users\\Maldanis\\Desktop\\controlarapp-main\\node_modules\\.cacheable-request-JwrOa9Vu'
+[35m[expo][0m }
+[35m[expo][0m Node.js v24.16.0
+[31m[expo][0m Expo exited (code 7)
+[33m[cleanup][0m Stopping dev:tunnel processes...

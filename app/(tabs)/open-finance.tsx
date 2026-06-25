@@ -1,4 +1,7 @@
 import { ConnectAccountModal } from '@/components/ConnectAccountModal';
+import { CreateAccountChoiceModal } from '@/components/CreateAccountChoiceModal';
+import { ManualBankAccountModal, type ManualBankAccountInput } from '@/components/ManualBankAccountModal';
+import { ManualSubAccountModal, type ManualSubAccountInput } from '@/components/ManualSubAccountModal';
 import { UniversalBackground } from '@/components/UniversalBackground';
 import { BankConnectorLogo } from '@/components/open-finance/BankConnectorLogo';
 import { ConnectedBankCard, BankSyncStatus as SyncStatus } from '@/components/open-finance/ConnectedBankCard';
@@ -454,6 +457,17 @@ export default function OpenFinanceScreen() {
     const contentAnimatedStyle = useElasticEntrance(80, 16);
 
     const [isModalVisible, setIsModalVisible] = useState(false);
+    const [showCreateChoiceModal, setShowCreateChoiceModal] = useState(false);
+    const [subAccountModalConfig, setSubAccountModalConfig] = useState<{
+        visible: boolean;
+        mode: 'CREDIT_CARD' | 'SAVINGS' | null;
+        connector: any;
+    }>({ visible: false, mode: null, connector: null });
+    const [editSubAccountConfig, setEditSubAccountConfig] = useState<{
+        visible: boolean;
+        account: any | null;
+    }>({ visible: false, account: null });
+    const [showManualBankAccountModal, setShowManualBankAccountModal] = useState(false);
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [itemToDelete, setItemToDelete] = useState<any>(null);
     const [deleteInProgress, setDeleteInProgress] = useState(false);
@@ -1012,6 +1026,79 @@ export default function OpenFinanceScreen() {
         }
     };
     fetchAccountsRef.current = fetchAccounts;
+
+    const handleCreateManualBankAccount = useCallback(async (data: ManualBankAccountInput) => {
+        if (!user?.uid) {
+            throw new Error('Usuário não autenticado.');
+        }
+
+        const result = await databaseService.createManualBankAccount(user.uid, data);
+        if (!result?.success) {
+            throw new Error(result?.error || 'Não foi possível criar a conta.');
+        }
+
+        fetchAccounts();
+    }, [user, fetchAccounts]);
+
+    const handleCreateManualSubAccount = useCallback(async (data: { accountName: string; balanceOrLimit: number }) => {
+        if (!user?.uid) {
+            throw new Error('Usuário não autenticado.');
+        }
+
+        const { mode, connector } = subAccountModalConfig;
+        if (!connector) return;
+
+        const type = mode === 'CREDIT_CARD' ? 'CREDIT' : 'BANK';
+        const subtype = mode === 'CREDIT_CARD' ? 'CREDIT_CARD' : 'SAVINGS_ACCOUNT';
+
+        const result = await databaseService.createManualSubAccount(
+            user.uid,
+            connector,
+            type,
+            subtype,
+            data.accountName,
+            data.balanceOrLimit
+        );
+        
+        if (!result?.success) {
+            throw new Error(result?.error || 'Não foi possível criar a conta.');
+        }
+
+        fetchAccounts();
+    }, [user, fetchAccounts, subAccountModalConfig]);
+
+    const handleEditManualSubAccount = useCallback(async (data: { id?: string; accountName: string; balanceOrLimit: number; dueDate?: number; closeDate?: number }) => {
+        if (!user?.uid) {
+            throw new Error('Usuário não autenticado.');
+        }
+
+        const { account } = editSubAccountConfig;
+        if (!account || !data.id) return;
+
+        const updateData: any = {
+            name: data.accountName,
+        };
+
+        if (account.type === 'CREDIT' || account.type === 'CREDIT_CARD' || account.subtype === 'CREDIT_CARD') {
+            updateData.creditLimit = data.balanceOrLimit;
+            updateData.availableCreditLimit = data.balanceOrLimit;
+            // Also update creditData if present
+            if (account.creditData) {
+                updateData['creditData.creditLimit'] = data.balanceOrLimit;
+                updateData['creditData.availableCreditLimit'] = data.balanceOrLimit;
+            }
+        } else {
+            updateData.balance = data.balanceOrLimit;
+        }
+
+        const result = await databaseService.updateAccount(user.uid, data.id, updateData);
+        
+        if (!result?.success) {
+            throw new Error(result?.error || 'Não foi possível atualizar a conta.');
+        }
+
+        fetchAccounts();
+    }, [user, fetchAccounts, editSubAccountConfig]);
 
     const handleOAuthCallback = useCallback(async (url: string) => {
         const now = Date.now();
@@ -2592,7 +2679,7 @@ export default function OpenFinanceScreen() {
                             <SyncCreditsDisplay
                                 userId={user.uid}
                                 compact
-                                onConnect={handleOpenModal}
+                                onConnect={() => setShowCreateChoiceModal(true)}
                                 connectDisabled={!hasCredits}
                             />
                         )}
@@ -2653,6 +2740,9 @@ export default function OpenFinanceScreen() {
                                                 hiddenAccountIds={(profile?.preferences as any)?.hiddenAccountIds}
                                                 onToggleVisibility={handleToggleVisibility}
                                                 onStatusChange={handleBankSyncStatusChange}
+                                                onCreateManualCard={(g) => setSubAccountModalConfig({ visible: true, mode: 'CREDIT_CARD', connector: g.connector })}
+                                                onCreateManualSavings={(g) => setSubAccountModalConfig({ visible: true, mode: 'SAVINGS', connector: g.connector })}
+                                                onEditManualSubAccount={(acc) => setEditSubAccountConfig({ visible: true, account: acc })}
                                             />
                                         </Reanimated.View>
                                     );
@@ -2714,46 +2804,42 @@ export default function OpenFinanceScreen() {
                     maxWidth={Math.min(390, width - 24)}
                     scrollable={false}
                     enableDragToClose={true}
-                    showHandle={true}
-                    footerBorder={false}
-                    contentStyle={styles.cpfModalContent}
-                    headerStyle={styles.cpfModalHeader}
-                    bodyStyle={styles.cpfModalBody}
-                    titleStyle={styles.cpfModalTitle}
-                    footerStyle={styles.cpfModalFooter}
                     footer={
                         cpfModalStep === 'cpf' ? (
-                            <TouchableOpacity
-                                style={[
-                                    styles.continuarButton,
-                                    cpfInput.replace(/\D/g, '').length !== 11 &&
-                                    styles.continuarButtonDisabled
-                                ]}
-                                onPress={handleConfirmCpf}
-                                activeOpacity={0.85}
-                                disabled={cpfInput.replace(/\D/g, '').length !== 11}
-                            >
-                                <Text style={styles.continuarButtonText}>
-                                    Continuar
-                                </Text>
-                            </TouchableOpacity>
+                            <View style={{ paddingTop: 10 }}>
+                                <TouchableOpacity
+                                    style={[styles.cpfModalFooterButton, styles.cpfModalConfirmButton, cpfInput.length < 14 && { opacity: 0.5 }]}
+                                    activeOpacity={0.7}
+                                    onPress={handleConfirmCpf}
+                                    disabled={cpfInput.length < 14}
+                                >
+                                    <Text style={styles.cpfModalConfirmButtonText}>Avançar</Text>
+                                </TouchableOpacity>
+                            </View>
                         ) : (
-                            <TouchableOpacity
-                                style={styles.confirmConnectButton}
-                                onPress={handleStartConnection}
-                                activeOpacity={0.85}
-                            >
-                                <Text style={styles.confirmConnectButtonText}>
-                                    Conectar ao {cpfConnector?.name || 'banco'}
-                                </Text>
-                            </TouchableOpacity>
+                            <View style={{ paddingTop: 10, flexDirection: 'row', gap: 10 }}>
+                                <TouchableOpacity
+                                    style={[styles.cpfModalFooterButton, styles.cpfModalCancelButton, { flex: 1 }]}
+                                    activeOpacity={0.7}
+                                    onPress={() => setCpfModalStep('cpf')}
+                                >
+                                    <Text style={styles.cpfModalCancelButtonText}>Voltar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.cpfModalFooterButton, styles.cpfModalConfirmButton, { flex: 1 }]}
+                                    activeOpacity={0.7}
+                                    onPress={handleStartConnection}
+                                >
+                                    <Text style={styles.cpfModalConfirmButtonText}>Confirmar</Text>
+                                </TouchableOpacity>
+                            </View>
                         )
                     }
                 >
                     {cpfModalStep === 'cpf' ? (
                         <>
                             <Text style={styles.cpfModalSubtitle}>
-                                Para continuar com {cpfConnector?.name || 'o banco selecionado'}
+                                Para continuar com {cpfConnector?.name || 'o banco selecionado'}, informe seu CPF.
                             </Text>
 
                             <View style={styles.cpfSectionCard}>
@@ -2895,6 +2981,49 @@ export default function OpenFinanceScreen() {
                             : undefined
                     }
                 />
+
+                <CreateAccountChoiceModal
+                    visible={showCreateChoiceModal}
+                    onClose={() => setShowCreateChoiceModal(false)}
+                    onSelectManual={() => setShowManualBankAccountModal(true)}
+                    onSelectConnect={handleOpenModal}
+                />
+
+                {showManualBankAccountModal && (
+                    <ManualBankAccountModal
+                        visible={showManualBankAccountModal}
+                        onClose={() => setShowManualBankAccountModal(false)}
+                        onSubmit={handleCreateManualBankAccount}
+                    />
+                )}
+
+                {subAccountModalConfig.visible && (
+                    <ManualSubAccountModal
+                        visible={subAccountModalConfig.visible}
+                        mode={subAccountModalConfig.mode}
+                        onClose={() => setSubAccountModalConfig({ visible: false, mode: null, connector: null })}
+                        onSubmit={handleCreateManualSubAccount}
+                    />
+                )}
+
+                {editSubAccountConfig.visible && editSubAccountConfig.account && (
+                    <ManualSubAccountModal
+                        visible={editSubAccountConfig.visible}
+                        mode={(editSubAccountConfig.account.type === 'CREDIT' || editSubAccountConfig.account.type === 'CREDIT_CARD' || editSubAccountConfig.account.subtype === 'CREDIT_CARD') ? 'CREDIT_CARD' : 'SAVINGS'}
+                        isEditing={true}
+                        initialData={{
+                            id: editSubAccountConfig.account.id,
+                            accountName: editSubAccountConfig.account.name || '',
+                            balanceOrLimit: (editSubAccountConfig.account.type === 'CREDIT' || editSubAccountConfig.account.type === 'CREDIT_CARD' || editSubAccountConfig.account.subtype === 'CREDIT_CARD') 
+                                ? (editSubAccountConfig.account.creditLimit || 0)
+                                : (editSubAccountConfig.account.balance || 0),
+                            dueDate: editSubAccountConfig.account.dueDate,
+                            closeDate: editSubAccountConfig.account.closeDate,
+                        }}
+                        onClose={() => setEditSubAccountConfig({ visible: false, account: null })}
+                        onSubmit={handleEditManualSubAccount}
+                    />
+                )}
             </View>
         </View>
     );
@@ -3180,6 +3309,24 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 10,
         flexShrink: 0,
+    },
+
+    headerCreateButton: {
+        backgroundColor: '#1E1E1E',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#2D2D2D',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
+    headerCreateButtonText: {
+        color: '#E5E5E5',
+        fontSize: 13,
+        fontWeight: '600',
+        fontFamily: 'AROneSans_400Regular',
     },
 
     content: {

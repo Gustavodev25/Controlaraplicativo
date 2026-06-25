@@ -5,6 +5,8 @@ interface InvoiceActionsSheetContentProps {
     showInvoiceCards: boolean;
     onConfigureInvoice: () => void;
     onSearchTransaction: () => void;
+    onCreateManualAccount: () => void;
+    onCreateManualTransaction: () => void;
     onToggleInvoiceCards: () => void;
 }
 
@@ -12,6 +14,8 @@ export function InvoiceActionsSheetContent({
     showInvoiceCards,
     onConfigureInvoice,
     onSearchTransaction,
+    onCreateManualAccount,
+    onCreateManualTransaction,
     onToggleInvoiceCards,
 }: InvoiceActionsSheetContentProps) {
     return (
@@ -24,7 +28,6 @@ export function InvoiceActionsSheetContent({
             </View>
 
             <View style={styles.optionsList}>
-                {/* Configurar fatura */}
                 <TouchableOpacity
                     style={styles.option}
                     activeOpacity={0.72}
@@ -39,7 +42,6 @@ export function InvoiceActionsSheetContent({
 
                 <View style={styles.divider} />
 
-                {/* Buscar transação */}
                 <TouchableOpacity
                     style={styles.option}
                     activeOpacity={0.72}
@@ -52,9 +54,10 @@ export function InvoiceActionsSheetContent({
                     </View>
                 </TouchableOpacity>
 
-                <View style={styles.divider} />
 
-                {/* Alternar visualização dos cartões */}
+
+
+
                 <TouchableOpacity
                     style={styles.option}
                     activeOpacity={0.72}

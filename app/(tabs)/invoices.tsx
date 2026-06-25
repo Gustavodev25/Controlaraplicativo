@@ -260,6 +260,7 @@ export default function InvoicesScreen() {
                     name: data.name || null,
                     type: data.type || 'credit',
                     subtype: data.subtype || null,
+                    manual: data.manual === true || data.source === 'manual',
                     creditLimit: data.creditLimit || data.creditData?.creditLimit || null,
                     availableCreditLimit: data.availableCreditLimit || data.creditData?.availableCreditLimit || null,
                     balance: data.balance || null,

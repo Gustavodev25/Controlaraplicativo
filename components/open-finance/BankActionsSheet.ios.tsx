@@ -21,12 +21,17 @@ export function BankActionsSheet({
     onVisibleChange,
     onSync,
     onDisconnect,
+    isManual,
+    onCreateCard,
+    onCreateSavings,
 }: BankActionsSheetProps) {
     const { width } = useWindowDimensions();
     const pendingActionRef = useRef<(() => void) | null>(null);
 
-    const dismissWithAction = useCallback((action: () => void) => {
-        pendingActionRef.current = action;
+    const dismissWithAction = useCallback((action?: () => void) => {
+        if (action) {
+            pendingActionRef.current = action;
+        }
         onVisibleChange(false);
     }, [onVisibleChange]);
 
@@ -64,8 +69,11 @@ export function BankActionsSheet({
                         <BankActionsSheetContent
                             bankName={bankName}
                             syncDisabled={syncDisabled}
+                            isManual={isManual}
                             onSyncPress={() => dismissWithAction(onSync)}
                             onDisconnectPress={() => dismissWithAction(onDisconnect)}
+                            onCreateCardPress={() => dismissWithAction(onCreateCard)}
+                            onCreateSavingsPress={() => dismissWithAction(onCreateSavings)}
                         />
                     </RNHostView>
                 </Group>

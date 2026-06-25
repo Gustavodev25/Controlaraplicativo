@@ -14,6 +14,8 @@ export function InvoiceActionsSheet({
     showInvoiceCards,
     onConfigureInvoice,
     onSearchTransaction,
+    onCreateManualAccount,
+    onCreateManualTransaction,
     onToggleInvoiceCards,
 }: InvoiceActionsSheetProps) {
     const sheetRef = useRef<BottomSheetMethods>(null);
@@ -67,6 +69,8 @@ export function InvoiceActionsSheet({
                     showInvoiceCards={showInvoiceCards}
                     onConfigureInvoice={() => dismissWithAction(onConfigureInvoice)}
                     onSearchTransaction={() => dismissWithAction(onSearchTransaction)}
+                    onCreateManualAccount={() => dismissWithAction(onCreateManualAccount)}
+                    onCreateManualTransaction={() => dismissWithAction(onCreateManualTransaction)}
                     onToggleInvoiceCards={() => dismissWithAction(onToggleInvoiceCards)}
                 />
             </BottomSheetView>

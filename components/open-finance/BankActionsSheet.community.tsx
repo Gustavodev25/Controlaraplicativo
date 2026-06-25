@@ -15,6 +15,9 @@ export function BankActionsSheet({
     onVisibleChange,
     onSync,
     onDisconnect,
+    isManual,
+    onCreateCard,
+    onCreateSavings,
 }: BankActionsSheetProps) {
     const sheetRef = useRef<BottomSheetMethods>(null);
     const pendingActionRef = useRef<(() => void) | null>(null);
@@ -31,7 +34,12 @@ export function BankActionsSheet({
         }
     }, [onVisibleChange]);
 
-    const dismissWithAction = useCallback((action: () => void) => {
+    const dismissWithAction = useCallback((action?: () => void) => {
+        if (!action) {
+            onVisibleChange(false);
+            return;
+        }
+
         pendingActionRef.current = action;
 
         if (sheetRef.current) {
@@ -66,8 +74,11 @@ export function BankActionsSheet({
                 <BankActionsSheetContent
                     bankName={bankName}
                     syncDisabled={syncDisabled}
+                    isManual={isManual}
                     onSyncPress={() => dismissWithAction(onSync)}
                     onDisconnectPress={() => dismissWithAction(onDisconnect)}
+                    onCreateCardPress={() => dismissWithAction(onCreateCard)}
+                    onCreateSavingsPress={() => dismissWithAction(onCreateSavings)}
                 />
             </BottomSheetView>
         </BottomSheet>

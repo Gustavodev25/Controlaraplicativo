@@ -83,8 +83,15 @@ const checks = {
         trialOfferId: process.env.GOOGLE_PLAY_TRIAL_OFFER_ID || 'trial-7d',
         rtdnToken: Boolean(process.env.GOOGLE_PLAY_RTDN_TOKEN),
     },
+    emailVerification: {
+        smtpHost: Boolean(process.env.SMTP_HOST),
+        smtpPort: process.env.SMTP_PORT || '465',
+        smtpSecure: process.env.SMTP_SECURE || 'true',
+        smtpUser: Boolean(process.env.SMTP_USER),
+        smtpPass: Boolean(process.env.SMTP_PASS),
+    },
     server: {
-        port: process.env.PORT || '3001',
+        port: process.env.BACKEND_PORT || process.env.PORT || '3001',
     },
 };
 
@@ -165,6 +172,13 @@ console.log('  Required Play Console permissions:');
 console.log('    - View financial data (or account-level View financial data, orders, and cancellation survey responses)');
 console.log('    - Manage orders and subscriptions');
 
+console.log('\nEmail Verification SMTP Configuration:');
+console.log(`  SMTP Host: ${checks.emailVerification.smtpHost ? 'configured' : 'missing'}`);
+console.log(`  SMTP Port: ${checks.emailVerification.smtpPort}`);
+console.log(`  SMTP Secure: ${checks.emailVerification.smtpSecure}`);
+console.log(`  SMTP User: ${checks.emailVerification.smtpUser ? 'configured' : 'missing'}`);
+console.log(`  SMTP Pass: ${checks.emailVerification.smtpPass ? 'configured' : 'missing'}`);
+
 const sameCredentialEmail =
     firebaseClientEmail &&
     googlePlayClientEmail &&
@@ -185,7 +199,16 @@ console.log('\n' + '='.repeat(50));
 
 const pluggyConfigured = checks.pluggy.clientId && checks.pluggy.clientSecret;
 const appleIapConfigured = appleIapDiagnostics.canAttemptIosTest;
-const allRequiredConfigured = pluggyConfigured && firebaseConfigured && googlePlayConfigured && appleIapConfigured;
+const emailVerificationConfigured =
+    checks.emailVerification.smtpHost &&
+    checks.emailVerification.smtpUser &&
+    checks.emailVerification.smtpPass;
+const allRequiredConfigured =
+    pluggyConfigured &&
+    firebaseConfigured &&
+    googlePlayConfigured &&
+    appleIapConfigured &&
+    emailVerificationConfigured;
 
 if (allRequiredConfigured) {
     console.log('All required configuration is present.');
@@ -205,6 +228,9 @@ if (!appleIapConfigured) {
 }
 if (!googlePlayConfigured) {
     console.log('  - Configure Google Play Billing variables.');
+}
+if (!emailVerificationConfigured) {
+    console.log('  - Configure SMTP_HOST, SMTP_USER and SMTP_PASS for email verification.');
 }
 console.log('\nSee server/.env.example and docs/CONFIGURAR_ASSINATURAS_APPLE_GOOGLE.md.');
 process.exit(1);

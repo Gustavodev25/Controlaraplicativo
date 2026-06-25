@@ -20,7 +20,7 @@ const parsePort = (value, fallback) => {
 };
 
 const METRO_PORT = parsePort(process.env.CONTROLAR_METRO_PORT, 8081);
-const SERVER_PORT = parsePort(process.env.CONTROLAR_API_PORT || process.env.PORT, 3001);
+const SERVER_PORT = parsePort(process.env.CONTROLAR_API_PORT || process.env.BACKEND_PORT || process.env.PORT, 3001);
 const PROJECT_DIR = process.cwd();
 const SERVER_DIR = path.join(PROJECT_DIR, 'server');
 const ROOT_ENV_FILE = path.join(PROJECT_DIR, '.env');
@@ -29,7 +29,7 @@ const LOCAL_API_HEALTH_URL = `http://127.0.0.1:${SERVER_PORT}/health`;
 const METRO_STATUS_URL = `http://127.0.0.1:${METRO_PORT}/status`;
 const TUNNEL_URL_PATTERN = /https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/;
 const DEFAULT_PRODUCTION_API_URL = 'https://backendcontrolarapp-production.up.railway.app';
-const SERVER_REQUIRED_MODULES = ['express', 'cors', 'dotenv', 'zod', 'nodemon'];
+const SERVER_REQUIRED_MODULES = ['express', 'cors', 'dotenv', 'zod', 'nodemon', 'nodemailer'];
 const SERVER_REQUIRED_ENV_KEYS = ['PLUGGY_CLIENT_ID', 'PLUGGY_CLIENT_SECRET'];
 const SERVER_IMPORTANT_ENV_GROUPS = [
     {
@@ -47,6 +47,13 @@ const SERVER_IMPORTANT_ENV_GROUPS = [
             ['GOOGLE_PLAY_CLIENT_EMAIL', 'GOOGLE_PLAY_PRIVATE_KEY'],
         ],
         impact: 'Google Play purchase validation and subscription refresh will fail.',
+    },
+    {
+        label: 'Email verification SMTP',
+        options: [
+            ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'],
+        ],
+        impact: 'New account registration will not be able to send verification codes.',
     },
 ];
 const DEV_PLACEHOLDER_ENV = {

@@ -1,5 +1,6 @@
 // Authentication Hook for Controlar+ App
 import { authService, databaseService, User } from '@/services/firebase';
+import { registerWithEmailCode } from '@/services/emailVerification';
 import { offlineStorage } from '@/services/offlineStorage';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
@@ -170,20 +171,53 @@ export function useAuth() {
     };
 
     // Sign up
-    const signUp = async (email: string, password: string, name: string, phone?: string) => {
+    const signUp = async (email: string, password: string, name: string, phone?: string, emailVerificationCode?: string) => {
         setState(prev => ({ ...prev, isLoading: true }));
+
+        const createdFromMobile = isNativeMobile();
+        const signupPlatform = getSignupPlatform();
+        const signupSource = createdFromMobile ? 'mobile' : 'web';
+
+        if (emailVerificationCode) {
+            const registrationResult = await registerWithEmailCode({
+                email,
+                password,
+                name,
+                phone: phone || null,
+                code: emailVerificationCode,
+                signupPlatform,
+                signupSource,
+                createdFromMobile,
+            });
+
+            if (!registrationResult.success) {
+                setState(prev => ({ ...prev, isLoading: false }));
+                return { success: false, error: registrationResult.error || 'Nao foi possivel verificar o e-mail.' };
+            }
+
+            const signInResult = await authService.signIn(email, password);
+            if (signInResult.success && signInResult.user) {
+                await loadProfile(signInResult.user);
+                return signInResult;
+            }
+
+            setState(prev => ({ ...prev, isLoading: false }));
+            return {
+                success: false,
+                error: signInResult.error || 'Conta criada, mas nao foi possivel entrar automaticamente.',
+            };
+        }
+
         const result = await authService.signUp(email, password);
 
         if (result.success && result.user) {
-            const createdFromMobile = isNativeMobile();
-
             // Create user profile
             await databaseService.setUserProfile(result.user.uid, {
                 name,
                 email,
                 phone: phone || null,
-                signupPlatform: getSignupPlatform(),
-                signupSource: createdFromMobile ? 'mobile' : 'web',
+                signupPlatform,
+                signupSource,
                 createdFromMobile,
                 createdAt: new Date(),
                 subscription: {

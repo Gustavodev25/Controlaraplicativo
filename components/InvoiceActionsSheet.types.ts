@@ -4,5 +4,7 @@ export interface InvoiceActionsSheetProps {
     showInvoiceCards: boolean;
     onConfigureInvoice: () => void;
     onSearchTransaction: () => void;
+    onCreateManualAccount: () => void;
+    onCreateManualTransaction: () => void;
     onToggleInvoiceCards: () => void;
 }

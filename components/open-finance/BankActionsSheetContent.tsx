@@ -4,15 +4,21 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 interface BankActionsSheetContentProps {
     bankName: string;
     syncDisabled: boolean;
+    isManual?: boolean;
     onSyncPress: () => void;
     onDisconnectPress: () => void;
+    onCreateCardPress?: () => void;
+    onCreateSavingsPress?: () => void;
 }
 
 export function BankActionsSheetContent({
     bankName,
     syncDisabled,
+    isManual,
     onSyncPress,
     onDisconnectPress,
+    onCreateCardPress,
+    onCreateSavingsPress,
 }: BankActionsSheetContentProps) {
     return (
         <View style={styles.container}>
@@ -22,20 +28,54 @@ export function BankActionsSheetContent({
             </View>
 
             <View style={styles.actions}>
-                <TouchableOpacity
-                    style={[styles.action, syncDisabled && styles.actionDisabled]}
-                    activeOpacity={0.72}
-                    onPress={onSyncPress}
-                    disabled={syncDisabled}
-                    accessibilityRole="button"
-                    accessibilityLabel="Sincronizar conta bancária"
-                >
-                    <Text style={[styles.actionText, syncDisabled && styles.actionTextDisabled]}>
-                        Sincronizar
-                    </Text>
-                </TouchableOpacity>
+                {!isManual && (
+                    <>
+                        <TouchableOpacity
+                            style={[styles.action, syncDisabled && styles.actionDisabled]}
+                            activeOpacity={0.72}
+                            onPress={onSyncPress}
+                            disabled={syncDisabled}
+                            accessibilityRole="button"
+                            accessibilityLabel="Sincronizar conta bancária"
+                        >
+                            <Text style={[styles.actionText, syncDisabled && styles.actionTextDisabled]}>
+                                Sincronizar
+                            </Text>
+                        </TouchableOpacity>
 
-                <View style={styles.divider} />
+                        <View style={styles.divider} />
+                    </>
+                )}
+
+                {isManual && (
+                    <>
+                        <TouchableOpacity
+                            style={styles.action}
+                            activeOpacity={0.72}
+                            onPress={onCreateCardPress}
+                            accessibilityRole="button"
+                        >
+                            <Text style={styles.actionText}>
+                                Criar cartão de crédito
+                            </Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.divider} />
+
+                        <TouchableOpacity
+                            style={styles.action}
+                            activeOpacity={0.72}
+                            onPress={onCreateSavingsPress}
+                            accessibilityRole="button"
+                        >
+                            <Text style={styles.actionText}>
+                                Criar patrimônio / poupança
+                            </Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.divider} />
+                    </>
+                )}
 
                 <TouchableOpacity
                     style={styles.action}
@@ -44,7 +84,9 @@ export function BankActionsSheetContent({
                     accessibilityRole="button"
                     accessibilityLabel="Desconectar conta bancária"
                 >
-                    <Text style={[styles.actionText, styles.destructiveText]}>Desconectar</Text>
+                    <Text style={[styles.actionText, styles.destructiveText]}>
+                        {isManual ? 'Excluir banco manual' : 'Desconectar'}
+                    </Text>
                 </TouchableOpacity>
             </View>
         </View>

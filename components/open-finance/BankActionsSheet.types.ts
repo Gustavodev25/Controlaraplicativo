@@ -5,4 +5,7 @@ export interface BankActionsSheetProps {
     onVisibleChange: (visible: boolean) => void;
     onSync: () => void;
     onDisconnect: () => void;
+    isManual?: boolean;
+    onCreateCard?: () => void;
+    onCreateSavings?: () => void;
 }

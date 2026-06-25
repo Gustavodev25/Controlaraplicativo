@@ -7,10 +7,11 @@ import { RefundSheet } from '@/components/RefundSheet';
 import { SwipeTutorial } from '@/components/SwipeTutorial';
 import { TransactionOptionsSheet } from '@/components/TransactionOptionsSheet';
 import { InvoiceActionsSheet } from '@/components/InvoiceActionsSheet';
+import { ManualCreditCardAccountModal, type ManualCreditCardAccountInput } from '@/components/ManualCreditCardAccountModal';
+import { ManualCreditCardTransactionModal, type ManualCreditCardTransactionInput } from '@/components/ManualCreditCardTransactionModal';
 import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 import { useStackCardStyle } from '@/components/ui/StackCarousel';
-import { DEFAULT_CATEGORIES } from '@/constants/defaultCategories';
 import { useCategories } from '@/hooks/use-categories';
 import { usePerformanceBudget } from '@/hooks/usePerformanceBudget';
 import { databaseService, db } from '@/services/firebase';
@@ -39,6 +40,7 @@ import {
     Search,
     Settings,
     Trash2,
+    Plus,
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -1030,9 +1032,10 @@ export function CreditCardInvoice({
     refreshing = false,
     onLoadMoreHistory,
     hasMoreHistory = false,
-    loadingMoreHistory = false
+    loadingMoreHistory = false,
+    onNavigateToOpenFinance
 }: CreditCardInvoiceProps) {
-    const { getCategoryName } = useCategories();
+    const { getCategoryName, categories, loading: categoriesLoading } = useCategories();
     const { lod, isEntryTier, isMidTier } = usePerformanceBudget();
     const [selectedTab, setSelectedTab] = useState<InvoiceTab>('current');
     const [invoiceData, setInvoiceData] = useState<InvoiceBuildResult | null>(null);
@@ -1104,6 +1107,8 @@ export function CreditCardInvoice({
     const [selectedTransactionForOptions, setSelectedTransactionForOptions] = useState<InvoiceItem | null>(null);
     const [transactionSearchModalVisible, setTransactionSearchModalVisible] = useState(false);
     const [invoiceActionsModalVisible, setInvoiceActionsModalVisible] = useState(false);
+    const [manualAccountModalVisible, setManualAccountModalVisible] = useState(false);
+    const [manualTransactionModalVisible, setManualTransactionModalVisible] = useState(false);
     const [transactionSearchQuery, setTransactionSearchQuery] = useState('');
     const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<InvoiceItem | null>(null);
@@ -1664,6 +1669,60 @@ export function CreditCardInvoice({
         return transactionsByCard.get(selectedCardId) || [];
     }, [selectedCardId, effectiveTransactions, transactionsByCard]);
 
+    const selectedCardAvailableAmount = useMemo(() => {
+        if (!selectedCard) return 0;
+
+        if (selectedCard.availableCreditLimit != null) {
+            const available = Number(selectedCard.availableCreditLimit);
+            return Number.isFinite(available) ? Math.max(available, 0) : 0;
+        }
+
+        const limit = Number(selectedCard.creditLimit ?? selectedCard.balance ?? 0);
+        if (!Number.isFinite(limit) || limit <= 0) return 0;
+
+        const used = filteredTransactions.reduce((sum, tx) => {
+            const amount = Math.abs(Number(tx.amount || 0));
+            const isCredit = tx.type === 'income' || tx.isRefund || tx.category === 'Refund';
+            return sum + (isCredit ? -amount : amount);
+        }, 0);
+
+        return Math.max(limit - used, 0);
+    }, [filteredTransactions, selectedCard]);
+
+    const handleCreateManualAccount = useCallback(async (data: ManualCreditCardAccountInput) => {
+        if (!userId) {
+            throw new Error('Usuário não autenticado.');
+        }
+
+        const result = await databaseService.createManualCreditCardAccount(userId, data);
+        if (!result?.success) {
+            throw new Error(result?.error || 'Não foi possível criar a conta.');
+        }
+
+        if (result.id) {
+            setSelectedCardId(result.id);
+        }
+
+        if (onRefresh) {
+            await onRefresh();
+        }
+    }, [onRefresh, userId]);
+
+    const handleCreateManualTransaction = useCallback(async (data: ManualCreditCardTransactionInput) => {
+        if (!userId) {
+            throw new Error('Usuário não autenticado.');
+        }
+
+        const result = await databaseService.createManualCreditCardTransactions(userId, data);
+        if (!result?.success) {
+            throw new Error(result?.error || 'Não foi possível salvar o lançamento.');
+        }
+
+        if (onRefresh) {
+            await onRefresh();
+        }
+    }, [onRefresh, userId]);
+
     const invoiceComputationTransactions = useMemo(() => {
         if (filteredTransactions.length === 0) {
             return filteredTransactions;
@@ -2145,6 +2204,12 @@ export function CreditCardInvoice({
 
     if (creditCards.length === 0) return (
         <View style={styles.screen}>
+            <ManualCreditCardAccountModal
+                visible={manualAccountModalVisible}
+                onClose={() => setManualAccountModalVisible(false)}
+                onSubmit={handleCreateManualAccount}
+            />
+
             <View style={styles.headerRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <Image
@@ -2158,7 +2223,27 @@ export function CreditCardInvoice({
             <View style={styles.emptyState}>
                 <CreditCard size={56} color="#F5F5F7" strokeWidth={1.7} style={styles.emptyIcon} />
                 <Text style={styles.emptyTitle}>Nenhum cartão</Text>
-                <Text style={styles.emptyText}>Conecte um cartão para visualizar suas faturas.</Text>
+                <Text style={styles.emptyText}>Conecte ou crie um cartão manual para visualizar suas faturas.</Text>
+
+                <View style={styles.emptyActions}>
+                    {onNavigateToOpenFinance ? (
+                        <TouchableOpacity
+                            style={[styles.emptyActionButton, styles.emptyPrimaryAction]}
+                            activeOpacity={0.8}
+                            onPress={onNavigateToOpenFinance}
+                        >
+                            <Text style={styles.emptyPrimaryActionText}>Conectar banco</Text>
+                        </TouchableOpacity>
+                    ) : null}
+
+                    <TouchableOpacity
+                        style={[styles.emptyActionButton, styles.emptySecondaryAction]}
+                        activeOpacity={0.8}
+                        onPress={() => setManualAccountModalVisible(true)}
+                    >
+                        <Text style={styles.emptySecondaryActionText}>Criar manualmente</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
         </View>
     );
@@ -2166,6 +2251,22 @@ export function CreditCardInvoice({
     return (
         <View style={styles.screen}>
 
+            <ManualCreditCardAccountModal
+                visible={manualAccountModalVisible}
+                onClose={() => setManualAccountModalVisible(false)}
+                onSubmit={handleCreateManualAccount}
+            />
+
+            <ManualCreditCardTransactionModal
+                visible={manualTransactionModalVisible}
+                onClose={() => setManualTransactionModalVisible(false)}
+                card={selectedCard}
+                availableAmount={selectedCardAvailableAmount}
+                categories={categories}
+                categoryLoading={categoriesLoading}
+                getCategoryName={getCategoryName}
+                onSubmit={handleCreateManualTransaction}
+            />
 
             <TransactionOptionsSheet
                 visible={transactionOptionsVisible}
@@ -2223,8 +2324,8 @@ export function CreditCardInvoice({
                     }
                 }}
                 onSelect={handleCategoryChange}
-                categories={DEFAULT_CATEGORIES}
-                loading={false}
+                categories={categories}
+                loading={categoriesLoading}
             />
 
             <RefundSheet
@@ -2336,6 +2437,8 @@ export function CreditCardInvoice({
                 showInvoiceCards={showInvoiceCards}
                 onConfigureInvoice={() => setClosingDateModalVisible(true)}
                 onSearchTransaction={() => setTransactionSearchModalVisible(true)}
+                onCreateManualAccount={() => setManualAccountModalVisible(true)}
+                onCreateManualTransaction={() => setManualTransactionModalVisible(true)}
                 onToggleInvoiceCards={toggleInvoiceCards}
             />
 
@@ -2390,7 +2493,19 @@ export function CreditCardInvoice({
                                         }}
                                     />
                                 </View>
-                                <View style={styles.cardHeaderRight}>
+                                <View style={[styles.cardHeaderRight, { flexDirection: 'row', gap: 8 }]}>
+                                    {(selectedCard?.manual || selectedCard?.id?.startsWith('manual-')) && (
+                                        <IOSTouchable
+                                            style={styles.settingsButton}
+                                            onPress={() => {
+                                                triggerIOSCoreMorph();
+                                                setManualTransactionModalVisible(true);
+                                            }}
+                                            activeOpacity={1}
+                                        >
+                                            <Plus size={20} color="#F5F5F7" strokeWidth={2} />
+                                        </IOSTouchable>
+                                    )}
                                     <IOSTouchable
                                         style={styles.settingsButton}
                                         onPress={() => {
@@ -2816,6 +2931,37 @@ const styles = StyleSheet.create({
         maxWidth: 232,
         lineHeight: 18,
         fontFamily: 'AROneSans_400Regular'
+    },
+    emptyActions: {
+        width: '100%',
+        maxWidth: 260,
+        gap: 10,
+        marginTop: 18,
+    },
+    emptyActionButton: {
+        minHeight: 46,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+    },
+    emptyPrimaryAction: {
+        backgroundColor: '#D97757',
+    },
+    emptySecondaryAction: {
+        backgroundColor: '#171717',
+        borderWidth: 1,
+        borderColor: '#282828',
+    },
+    emptyPrimaryActionText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    emptySecondaryActionText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
     },
     connectButton: {
         backgroundColor: '#D97757',

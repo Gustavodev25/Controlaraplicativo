@@ -1497,6 +1497,410 @@ export const databaseService = {
         }
     },
 
+    // Create a manual credit card account in the same accounts collection used by Open Finance
+    createManualCreditCardAccount: async (
+        userId: string,
+        accountData: { bankName: string; accountName: string; initialBalance?: number }
+    ) => {
+        try {
+            const bankName = String(accountData.bankName || '').trim();
+            const accountName = String(accountData.accountName || '').trim();
+            const initialBalance = Math.max(0, Number(accountData.initialBalance || 0));
+
+            if (!bankName || !accountName) {
+                return { success: false, error: 'Banco e nome da conta são obrigatórios.' };
+            }
+
+            const safeSeed = `${bankName}-${accountName}`
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .slice(0, 36) || 'conta';
+
+            const accountId = `manual-card-${safeSeed}-${Date.now()}`;
+            const docRef = doc(db, 'users', userId, 'accounts', accountId);
+            const nowIso = new Date().toISOString();
+            const nowTimestamp = Timestamp.now();
+            const connector = {
+                id: `manual-${safeSeed}`,
+                name: bankName,
+                imageUrl: null,
+                primaryColor: '#D97757'
+            };
+
+            const accountDoc = {
+                id: accountId,
+                name: accountName,
+                bankName,
+                type: 'credit',
+                subtype: 'CREDIT_CARD',
+                number: null,
+                balance: initialBalance,
+                currencyCode: 'BRL',
+                creditLimit: initialBalance,
+                availableCreditLimit: initialBalance,
+                balanceCloseDate: null,
+                balanceDueDate: null,
+                creditData: {
+                    level: null,
+                    brand: bankName,
+                    balanceCloseDate: null,
+                    balanceDueDate: null,
+                    availableCreditLimit: initialBalance,
+                    creditLimit: initialBalance,
+                    isLimitFlexible: null,
+                    balanceForeignCurrency: null,
+                    minimumPayment: null,
+                    status: 'ACTIVE',
+                    holderType: null,
+                },
+                currentBill: null,
+                bills: null,
+                source: 'manual',
+                manual: true,
+                pluggyItemId: null,
+                connector,
+                createdAt: nowTimestamp,
+                updatedAt: nowTimestamp,
+                lastSyncedAt: nowIso,
+            };
+
+            await setDoc(docRef, accountDoc, { merge: true });
+
+            const cached = await offlineStorage.getAccounts(userId);
+            if (cached) {
+                await offlineStorage.saveAccounts(userId, [{ ...accountDoc, createdAt: nowIso, updatedAt: nowIso }, ...cached]);
+            }
+
+            return { success: true, id: accountId };
+        } catch (error: any) {
+            console.error('[Firebase] Error creating manual credit card account:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    // Create a manual bank account in the same accounts collection
+    createManualBankAccount: async (
+        userId: string,
+        accountData: { bankName: string; accountName: string; initialBalance?: number }
+    ) => {
+        try {
+            const bankName = String(accountData.bankName || '').trim();
+            const accountName = String(accountData.accountName || '').trim();
+            const initialBalance = Number(accountData.initialBalance || 0);
+
+            if (!bankName || !accountName) {
+                return { success: false, error: 'Banco e nome da conta são obrigatórios.' };
+            }
+
+            const safeSeed = `${bankName}-${accountName}`
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .slice(0, 36) || 'conta';
+
+            const accountId = `manual-bank-${safeSeed}-${Date.now()}`;
+            const docRef = doc(db, 'users', userId, 'accounts', accountId);
+            const nowIso = new Date().toISOString();
+            const nowTimestamp = Timestamp.now();
+            const connector = {
+                id: `manual-${safeSeed}`,
+                name: bankName,
+                imageUrl: null,
+                primaryColor: '#D97757'
+            };
+
+            const accountDoc = {
+                id: accountId,
+                name: accountName,
+                bankName,
+                type: 'BANK',
+                subtype: 'CHECKING_ACCOUNT',
+                number: null,
+                balance: initialBalance,
+                currencyCode: 'BRL',
+                source: 'manual',
+                manual: true,
+                pluggyItemId: null,
+                connector,
+                createdAt: nowTimestamp,
+                updatedAt: nowTimestamp,
+                lastSyncedAt: nowIso,
+            };
+
+            await setDoc(docRef, accountDoc, { merge: true });
+
+            const cached = await offlineStorage.getAccounts(userId);
+            if (cached) {
+                await offlineStorage.saveAccounts(userId, [{ ...accountDoc, createdAt: nowIso, updatedAt: nowIso }, ...cached]);
+            }
+
+            return { success: true, id: accountId };
+        } catch (error: any) {
+            console.error('[Firebase] Error creating manual bank account:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    // Create a manual sub-account (e.g., credit card or savings) tied to an existing manual connector
+    createManualSubAccount: async (
+        userId: string,
+        connector: any,
+        type: 'CREDIT' | 'BANK',
+        subtype: 'CREDIT_CARD' | 'SAVINGS_ACCOUNT',
+        accountName: string,
+        balanceOrLimit: number,
+        dueDate?: number,
+        closeDate?: number
+    ) => {
+        try {
+            if (!connector || !connector.id) {
+                return { success: false, error: 'Conector inválido.' };
+            }
+            if (!accountName.trim()) {
+                return { success: false, error: 'Nome da conta é obrigatório.' };
+            }
+
+            const safeSeed = accountName
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .slice(0, 36) || 'subconta';
+
+            const accountId = `manual-${type.toLowerCase()}-${safeSeed}-${Date.now()}`;
+            const docRef = doc(db, 'users', userId, 'accounts', accountId);
+            const nowIso = new Date().toISOString();
+            const nowTimestamp = Timestamp.now();
+
+            const accountDoc: any = {
+                id: accountId,
+                name: accountName.trim(),
+                bankName: connector.name,
+                type,
+                subtype,
+                number: null,
+                currencyCode: 'BRL',
+                source: 'manual',
+                manual: true,
+                pluggyItemId: null,
+                connector,
+                createdAt: nowTimestamp,
+                updatedAt: nowTimestamp,
+                lastSyncedAt: nowIso,
+            };
+
+            if (type === 'CREDIT') {
+                accountDoc.creditData = {
+                    level: 'UNKNOWN',
+                    brand: 'UNKNOWN',
+                    balanceCloseDate: closeDate ? new Date(new Date().setDate(closeDate)).toISOString() : null,
+                    balanceDueDate: dueDate ? new Date(new Date().setDate(dueDate)).toISOString() : null,
+                    availableCreditLimit: balanceOrLimit,
+                    balanceForeignCurrency: null,
+                    minimumPayment: null,
+                    creditLimit: balanceOrLimit,
+                };
+                // For credit cards, balance represents current bill balance, usually 0 initially
+                accountDoc.balance = 0;
+            } else {
+                accountDoc.balance = balanceOrLimit;
+            }
+
+            await setDoc(docRef, accountDoc, { merge: true });
+
+            const cached = await offlineStorage.getAccounts(userId);
+            if (cached) {
+                await offlineStorage.saveAccounts(userId, [{ ...accountDoc, createdAt: nowIso, updatedAt: nowIso }, ...cached]);
+            }
+
+            return { success: true, id: accountId };
+        } catch (error: any) {
+            console.error('[Firebase] Error creating manual sub-account:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    // Create manual card transactions in the same creditCardTransactions collection.
+    createManualCreditCardTransactions: async (
+        userId: string,
+        transactionData: {
+            cardId: string;
+            description: string;
+            amount: number;
+            installments?: number;
+            date: string;
+            category?: string | null;
+        }
+    ) => {
+        try {
+            const cardId = String(transactionData.cardId || '').trim();
+            const description = String(transactionData.description || '').trim();
+            const totalAmount = Math.abs(Number(transactionData.amount || 0));
+            const rawInstallments = Number(transactionData.installments || 1);
+            const totalInstallments = Number.isFinite(rawInstallments)
+                ? Math.min(Math.max(Math.floor(rawInstallments), 1), 48)
+                : 1;
+            const firstDate = normalizePluggyDateField(transactionData.date, 'manualCreditCardTransaction.date')
+                || normalizeDateForStorage(transactionData.date).split('T')[0];
+            const category = transactionData.category || null;
+
+            if (!cardId || !description || totalAmount <= 0) {
+                return { success: false, error: 'Cartão, descrição e valor são obrigatórios.' };
+            }
+
+            const addMonths = (isoDate: string, monthsToAdd: number): string => {
+                const [yearRaw, monthRaw, dayRaw] = isoDate.split('-');
+                const year = Number(yearRaw);
+                const month = Number(monthRaw);
+                const day = Number(dayRaw);
+                const target = new Date(year, month - 1 + monthsToAdd, 1, 12, 0, 0);
+                const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+                target.setDate(Math.min(day, lastDay));
+                return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`;
+            };
+
+            const totalCents = Math.round(totalAmount * 100);
+            const baseCents = Math.floor(totalCents / totalInstallments);
+            const remainderCents = totalCents % totalInstallments;
+            const seriesId = `manual-${cardId}-${Date.now()}`;
+            const nowIso = new Date().toISOString();
+            const creditRef = collection(db, 'users', userId, 'creditCardTransactions');
+            const writes: { docRef: any; data: Record<string, any>; merge?: boolean }[] = [];
+            const monthlyTotals: Record<string, {
+                total: number;
+                count: number;
+                categoryTotals: Record<string, number>;
+                creditByCard: Record<string, { total: number; count: number }>;
+            }> = {};
+            const ids: string[] = [];
+
+            for (let index = 0; index < totalInstallments; index++) {
+                const installmentNumber = index + 1;
+                const installmentDate = addMonths(firstDate, index);
+                const amountCents = baseCents + (index < remainderCents ? 1 : 0);
+                const installmentAmount = amountCents / 100;
+                const invoiceMonthKey = installmentDate.slice(0, 7);
+                const transactionId = totalInstallments > 1
+                    ? `${seriesId}-${String(installmentNumber).padStart(2, '0')}`
+                    : seriesId;
+
+                ids.push(transactionId);
+
+                const transactionDoc = {
+                    amount: installmentAmount,
+                    cardId,
+                    accountId: cardId,
+                    category,
+                    date: installmentDate,
+                    description,
+                    installmentNumber,
+                    invoiceMonthKey,
+                    invoiceMonthKeyManual: false,
+                    isRefund: false,
+                    originalTransactionId: null,
+                    manualSeriesId: seriesId,
+                    creditCardMetadata: {
+                        billId: null,
+                        installmentNumber,
+                        totalInstallments,
+                        manualSeriesId: seriesId,
+                    },
+                    pluggyRaw: {
+                        accountId: cardId,
+                        amount: installmentAmount,
+                        category,
+                        createdAt: nowIso,
+                        creditCardMetadata: {
+                            billId: null,
+                            installmentNumber,
+                            totalInstallments,
+                        },
+                        currencyCode: 'BRL',
+                        date: installmentDate,
+                        description,
+                        descriptionRaw: description,
+                        id: transactionId,
+                        merchant: null,
+                        operationType: 'MANUAL',
+                        paymentData: null,
+                        status: 'POSTED',
+                        type: 'DEBIT',
+                        updatedAt: nowIso,
+                        manual: true,
+                    },
+                    status: 'completed',
+                    totalInstallments,
+                    type: 'expense',
+                    source: 'manual',
+                    createdAt: Timestamp.now(),
+                    updatedAt: Timestamp.now(),
+                };
+
+                writes.push({
+                    docRef: doc(creditRef, transactionId),
+                    data: transactionDoc,
+                    merge: true,
+                });
+
+                if (!monthlyTotals[invoiceMonthKey]) {
+                    monthlyTotals[invoiceMonthKey] = {
+                        total: 0,
+                        count: 0,
+                        categoryTotals: {},
+                        creditByCard: {},
+                    };
+                }
+
+                const categoryKey = category || 'Outros';
+                monthlyTotals[invoiceMonthKey].total += installmentAmount;
+                monthlyTotals[invoiceMonthKey].count += 1;
+                monthlyTotals[invoiceMonthKey].categoryTotals[categoryKey] =
+                    (monthlyTotals[invoiceMonthKey].categoryTotals[categoryKey] || 0) + installmentAmount;
+
+                if (!monthlyTotals[invoiceMonthKey].creditByCard[cardId]) {
+                    monthlyTotals[invoiceMonthKey].creditByCard[cardId] = { total: 0, count: 0 };
+                }
+                monthlyTotals[invoiceMonthKey].creditByCard[cardId].total += installmentAmount;
+                monthlyTotals[invoiceMonthKey].creditByCard[cardId].count += 1;
+            }
+
+            await commitSetDocsInBatches(db, writes);
+
+            await Promise.all(Object.entries(monthlyTotals).map(([monthKey, totals]) => {
+                const categoryTotals: Record<string, any> = {};
+                Object.entries(totals.categoryTotals).forEach(([key, value]) => {
+                    categoryTotals[key] = increment(value);
+                });
+
+                const creditByCard: Record<string, any> = {};
+                Object.entries(totals.creditByCard).forEach(([key, value]) => {
+                    creditByCard[key] = {
+                        total: increment(value.total),
+                        count: increment(value.count),
+                    };
+                });
+
+                return databaseService.updateMonthlyAggregates(userId, `${monthKey}-01`, {
+                    creditTotal: increment(totals.total) as any,
+                    creditCount: increment(totals.count) as any,
+                    creditByCard,
+                    categoryTotals: categoryTotals as any,
+                });
+            }));
+
+            return { success: true, ids, id: ids[0] };
+        } catch (error: any) {
+            console.error('[Firebase] Error creating manual credit card transaction:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
     // Save account from Pluggy (Open Finance)
     saveAccount: async (userId: string, accountData: any, connector?: any) => {
         try {

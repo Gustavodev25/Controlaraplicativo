@@ -9,7 +9,8 @@ import {
     ChevronRight,
     Lock,
     RefreshCw,
-    XCircle
+    XCircle,
+    PenLine
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -56,6 +57,9 @@ interface ConnectedBankCardProps {
     hiddenAccountIds?: string[];
     onToggleVisibility?: (accountId: string) => void;
     onStatusChange?: (group: any, status: BankSyncStatus) => void;
+    onCreateManualCard?: (group: any) => void;
+    onCreateManualSavings?: (group: any) => void;
+    onEditManualSubAccount?: (account: any) => void;
 }
 
 // Helper Component: Minimalist progress indicator
@@ -162,7 +166,10 @@ export const ConnectedBankCard = ({
     canSyncItem,
     onConsumeCredit,
     hiddenAccountIds,
-    onStatusChange
+    onStatusChange,
+    onCreateManualCard,
+    onCreateManualSavings,
+    onEditManualSubAccount
 }: ConnectedBankCardProps) => {
     const { width } = useWindowDimensions();
     const isNarrowPhone = width < 360;
@@ -484,6 +491,15 @@ export const ConnectedBankCard = ({
                     visible={menuVisible}
                     bankName={bankName}
                     syncDisabled={isSyncDisabled || isSyncing}
+                    isManual={String(group.connector?.id || '').startsWith('manual-')}
+                    onCreateCard={() => {
+                        setMenuVisible(false);
+                        onCreateManualCard?.(group);
+                    }}
+                    onCreateSavings={() => {
+                        setMenuVisible(false);
+                        onCreateManualSavings?.(group);
+                    }}
                     onVisibleChange={setMenuVisible}
                     onSync={handleMenuSync}
                     onDisconnect={handleDisconnect}
@@ -503,10 +519,18 @@ export const ConnectedBankCard = ({
                             const formattedValue = formatCurrency(numericValue);
                             const isMuted = hiddenIds.includes(acc.id) || Math.abs(numericValue) === 0;
 
+                            const isManualAccount = acc.source === 'manual' || acc.manual === true || acc.id?.startsWith('manual-');
+                            const RowComponent = isManualAccount ? TouchableOpacity : View;
+                            const rowProps = isManualAccount ? {
+                                activeOpacity: 0.7,
+                                onPress: () => onEditManualSubAccount?.(acc)
+                            } : {};
+
                             return (
-                                <View
+                                <RowComponent
                                     key={acc.id || `${accountName}-${formattedValue}`}
                                     style={[styles.accountRow, isNarrowPhone && styles.accountRowNarrow]}
+                                    {...rowProps}
                                 >
                                     <View style={[styles.accountDot, isMuted && styles.accountDotMuted]} />
                                     <View style={[styles.accountTextGroup, isNarrowPhone && styles.accountTextGroupNarrow]}>
@@ -540,7 +564,12 @@ export const ConnectedBankCard = ({
                                     >
                                         {formattedValue}
                                     </Text>
-                                </View>
+                                    {isManualAccount && (
+                                        <View style={{ marginLeft: 8, opacity: 0.5 }}>
+                                            <PenLine size={14} color="#A4A8AF" />
+                                        </View>
+                                    )}
+                                </RowComponent>
                             );
                         })}
                     </View>

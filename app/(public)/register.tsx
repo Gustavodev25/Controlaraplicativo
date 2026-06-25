@@ -1,5 +1,5 @@
 import { useRouter, type Href } from 'expo-router';
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, User as UserIcon } from 'lucide-react-native';
+import { ArrowLeft, Eye, EyeOff, Lock, Mail, Phone, ShieldCheck, User as UserIcon } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { KeyboardAvoidingViewProps } from 'react-native';
@@ -11,6 +11,7 @@ import { AuthButton } from '@/components/ui/AuthButton';
 import { AuthInput } from '@/components/ui/AuthInput';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
+import { requestEmailVerificationCode } from '@/services/emailVerification';
 
 const KEYBOARD_BEHAVIOR: KeyboardAvoidingViewProps['behavior'] = Platform.select({ ios: 'padding', android: 'height' });
 
@@ -20,15 +21,29 @@ export default function RegisterScreen() {
     const { showError, showToast } = useToast();
 
     const [name, setName] = useState('');
+    const [phone, setPhone] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [termsAccepted, setTermsAccepted] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isVerificationStep, setIsVerificationStep] = useState(false);
+    const [verificationCode, setVerificationCode] = useState('');
+    const [verificationEmail, setVerificationEmail] = useState<string | null>(null);
 
     const handleRegister = useCallback(async () => {
-        if (!name || !email || !password) {
+        const trimmedName = name.trim();
+        const trimmedPhone = phone.trim();
+        const trimmedEmail = email.trim();
+
+        if (!trimmedName || !trimmedPhone || !trimmedEmail || !password) {
             showError('Por favor, preencha todos os campos.');
+            return;
+        }
+
+        const phoneDigits = trimmedPhone.replace(/\D/g, '');
+        if (phoneDigits.length < 10) {
+            showError('Informe um telefone valido com DDD.');
             return;
         }
 
@@ -44,10 +59,40 @@ export default function RegisterScreen() {
 
         setIsLoading(true);
         try {
-            const result = await signUp(email, password, name);
+            const normalizedEmail = trimmedEmail.toLowerCase();
+            const hasPendingVerification = isVerificationStep && verificationEmail === normalizedEmail;
+
+            if (!hasPendingVerification) {
+                const sendResult = await requestEmailVerificationCode({
+                    email: trimmedEmail,
+                    name: trimmedName,
+                });
+
+                if (!sendResult.success) {
+                    showError(sendResult.error || 'Nao foi possivel enviar o codigo de verificacao.');
+                    setIsLoading(false);
+                    return;
+                }
+
+                setVerificationEmail(normalizedEmail);
+                setVerificationCode('');
+                setIsVerificationStep(true);
+                showToast('Enviamos um codigo de verificacao para o seu e-mail.', 'success');
+                setIsLoading(false);
+                return;
+            }
+
+            const sanitizedCode = verificationCode.replace(/\D/g, '');
+            if (sanitizedCode.length !== 6) {
+                showError('Informe o codigo de 6 digitos enviado para o seu e-mail.');
+                setIsLoading(false);
+                return;
+            }
+
+            const result = await signUp(trimmedEmail, password, trimmedName, trimmedPhone, sanitizedCode);
 
             if (result.success) {
-                showToast('Conta Controlar+ criada com sucesso!', 'success');
+                showToast('E-mail verificado e conta criada com sucesso!', 'success');
                 router.replace('/settings/plans?forced=true');
             } else {
                 showError(result.error || 'Erro ao criar conta.');
@@ -57,10 +102,45 @@ export default function RegisterScreen() {
             showError('Ocorreu um erro inesperado.');
             setIsLoading(false);
         }
-    }, [name, email, password, termsAccepted, signUp, showError, showToast, router]);
+    }, [name, phone, email, password, termsAccepted, isVerificationStep, verificationEmail, verificationCode, signUp, showError, showToast, router]);
 
     const goBack = () => router.back();
     const togglePasswordVisibility = () => setShowPassword(prev => !prev);
+    const handleVerificationCodeChange = (value: string) => {
+        setVerificationCode(value.replace(/\D/g, '').slice(0, 6));
+    };
+    const handleResendCode = useCallback(async () => {
+        const trimmedName = name.trim();
+        const trimmedEmail = email.trim();
+
+        if (!trimmedName || !trimmedEmail) {
+            showError('Informe nome e e-mail para reenviar o codigo.');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const sendResult = await requestEmailVerificationCode({
+                email: trimmedEmail,
+                name: trimmedName,
+            });
+
+            if (!sendResult.success) {
+                showError(sendResult.error || 'Nao foi possivel reenviar o codigo.');
+                setIsLoading(false);
+                return;
+            }
+
+            setVerificationEmail(trimmedEmail.toLowerCase());
+            setVerificationCode('');
+            setIsVerificationStep(true);
+            showToast('Enviamos um novo codigo para o seu e-mail.', 'success');
+            setIsLoading(false);
+        } catch {
+            showError('Ocorreu um erro ao reenviar o codigo.');
+            setIsLoading(false);
+        }
+    }, [name, email, showError, showToast]);
     const handleOpenTerms = useCallback(() => {
         router.push('/settings/legal/terms' as Href);
     }, [router]);
@@ -108,6 +188,16 @@ export default function RegisterScreen() {
                                 onChangeText={setName}
                             />
                             <AuthInput
+                                label="Telefone"
+                                placeholder="(00) 00000-0000"
+                                icon={Phone}
+                                value={phone}
+                                onChangeText={setPhone}
+                                keyboardType="phone-pad"
+                                textContentType="telephoneNumber"
+                                autoComplete="tel"
+                            />
+                            <AuthInput
                                 label="E-mail"
                                 placeholder="seu@email.com"
                                 icon={Mail}
@@ -129,6 +219,34 @@ export default function RegisterScreen() {
                                     </TouchableOpacity>
                                 }
                             />
+
+                            {isVerificationStep && (
+                                <View style={styles.verificationSection}>
+                                    <Text style={styles.verificationHint}>
+                                        Codigo enviado para {verificationEmail || email.trim()}. Confira sua caixa de entrada.
+                                    </Text>
+                                    <AuthInput
+                                        label="Codigo de verificacao"
+                                        placeholder="000000"
+                                        icon={ShieldCheck}
+                                        value={verificationCode}
+                                        onChangeText={handleVerificationCodeChange}
+                                        keyboardType="number-pad"
+                                        textContentType="oneTimeCode"
+                                        autoComplete="one-time-code"
+                                        maxLength={6}
+                                    />
+                                    <TouchableOpacity
+                                        onPress={handleResendCode}
+                                        style={styles.resendCodeButton}
+                                        disabled={isLoading}
+                                    >
+                                        <Text style={[styles.resendCodeText, isLoading && styles.disabledText]}>
+                                            Reenviar codigo
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
 
                             <View style={styles.termsRow}>
                                 <TouchableOpacity
@@ -155,7 +273,7 @@ export default function RegisterScreen() {
                             </View>
 
                             <AuthButton
-                                title="Continuar para o Plano"
+                                title={isVerificationStep && verificationEmail === email.trim().toLowerCase() ? 'Verificar e Criar Conta' : 'Enviar Codigo por E-mail'}
                                 onPress={handleRegister}
                                 isLoading={isLoading}
                                 style={styles.button}
@@ -229,6 +347,28 @@ const styles = StyleSheet.create({
     },
     button: {
         marginTop: 12,
+    },
+    verificationSection: {
+        gap: 8,
+        marginTop: 2,
+        marginBottom: 4,
+    },
+    verificationHint: {
+        color: '#d1d5db',
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    resendCodeButton: {
+        alignSelf: 'flex-start',
+        paddingVertical: 4,
+    },
+    resendCodeText: {
+        color: '#d97757',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    disabledText: {
+        opacity: 0.6,
     },
     loginLink: {
         marginTop: 24,

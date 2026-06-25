@@ -3,14 +3,16 @@ const express = require('express');
 const cors = require('cors');
 const pluggyRoutes = require('./api/pluggy');
 const { isFirebaseConfigured, getFirebaseInitStatus } = require('./lib/firebaseAdmin');
+const { isSmtpConfigured } = require('./lib/emailVerification');
 const {
     buildAppleIapDiagnostics,
     renderAppleIapDiagnosticsHtml,
 } = require('./lib/appleIapDiagnostics');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.BACKEND_PORT || process.env.PORT || 3001;
 console.log('[Server] PORT from env:', process.env.PORT);
+console.log('[Server] BACKEND_PORT from env:', process.env.BACKEND_PORT);
 console.log('[Server] Using PORT:', PORT);
 
 // O seu middleware original já inicializa o Firebase com sucesso lendo o FIREBASE_SERVICE_ACCOUNT
@@ -48,6 +50,7 @@ app.get('/health', (req, res) => {
         stripe: process.env.STRIPE_SECRET_KEY ? 'configured' : 'missing',
         googlePlay: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT ? 'configured' : 'missing',
         firebase: require('./lib/firebaseAdmin').isFirebaseConfigured() ? 'connected' : 'missing',
+        smtp: isSmtpConfigured() ? 'configured' : 'missing',
     });
 });
 
@@ -71,6 +74,7 @@ app.get('/api/diagnostics', (req, res) => {
             googlePlayConfigured: !!process.env.GOOGLE_PLAY_SERVICE_ACCOUNT,
             firebaseConfigured: isFirebaseConfigured(),
             firebaseInitError: firebaseStatus.error,
+            smtpConfigured: isSmtpConfigured(),
             appleIap: {
                 status: appleIapDiagnostics.status,
                 readyForIosTest: appleIapDiagnostics.readyForIosTest,
@@ -107,6 +111,7 @@ app.get('/api/diagnostics/apple-iap/panel', (req, res) => {
 });
 
 app.use('/api/pluggy', pluggyRoutes);
+app.use('/api/auth', require('./api/auth'));
 app.use('/api/stripe', require('./api/stripe'));
 app.use('/api/apple', require('./api/apple'));
 app.use('/api/google', require('./api/google'));

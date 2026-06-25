@@ -40,6 +40,7 @@ export interface CreditCardAccount {
     name?: string;
     type: 'credit' | 'CREDIT' | 'CREDIT_CARD' | 'BANK';
     subtype?: string;
+    manual?: boolean;
     creditLimit?: number;
     availableCreditLimit?: number;
     balance?: number;
