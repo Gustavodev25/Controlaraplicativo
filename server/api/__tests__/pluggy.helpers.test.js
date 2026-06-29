@@ -1,6 +1,7 @@
 /* global describe, expect, test */
 
 const {
+    deduplicatePluggyConnectors,
     isActionRequiredPluggyError,
     isRetryablePluggyError,
     normalizePluggyError,
@@ -34,5 +35,23 @@ describe('pluggy helpers', () => {
             retryable: true,
             actionRequired: false,
         });
+    });
+
+    test('deduplicates bank connectors by display identity', () => {
+        const result = deduplicatePluggyConnectors([
+            { id: 1, name: 'Inter', type: 'PERSONAL_BANK', credentials: [] },
+            { id: 2, name: 'Inter', type: 'PERSONAL_BANK', credentials: [{ name: 'cpf' }] },
+            { id: 3, name: 'Inter Empresas', type: 'BUSINESS_BANK' },
+            { id: 4, name: 'Inter Empresas', type: 'BUSINESS_BANK' },
+            { id: 5, name: 'Inter Empresas', type: 'PERSONAL_BANK' },
+        ]);
+
+        expect(result).toHaveLength(3);
+        expect(result.map((connector) => connector.name)).toEqual([
+            'Inter',
+            'Inter Empresas',
+            'Inter Empresas',
+        ]);
+        expect(result[0].id).toBe(2);
     });
 });

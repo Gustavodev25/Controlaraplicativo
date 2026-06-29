@@ -32,6 +32,7 @@ export interface SyncCreditsData {
     lastSyncDate: string | null;
     canSync: boolean;
     syncedItems?: { [itemId: string]: string }; // Map of itemId -> lastSyncDate
+    connectedItems?: { [itemId: string]: string };
     isAdmin?: boolean;
     unlimited?: boolean;
 }
@@ -208,7 +209,7 @@ export const SyncCreditsDisplay = ({
                         ]}
                     >
                         <Text style={styles.unifiedButtonText} numberOfLines={1}>
-                            Conectar <Text style={{ opacity: 0.8 }}>({creditsData.unlimited ? '∞' : creditsData.credits})</Text>
+                            Conectar / Criar
                         </Text>
                     </MorphTouchable>
                 )}
@@ -426,4 +427,3 @@ const styles = StyleSheet.create({
         flexShrink: 1,
     },
 });
-

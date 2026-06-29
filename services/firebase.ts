@@ -32,6 +32,7 @@ import {
     onSnapshot,
     orderBy,
     query,
+    runTransaction,
     setDoc,
     Timestamp,
     updateDoc,
@@ -51,6 +52,7 @@ import {
     type RecurrenceSourceCollection,
     type RecurrenceType
 } from './recurrenceDeletion';
+import { consumeSyncCreditState } from './syncCreditsPolicy';
 declare const __DEV__: boolean;
 
 type FirebaseAuthModuleWithRnPersistence = {
@@ -2965,6 +2967,7 @@ export const databaseService = {
                 const data = docSnap.data();
                 const syncCredits = data.syncCredits || {};
                 const isAdmin = data.isAdmin === true || data.profile?.isAdmin === true;
+                const connectedItems = syncCredits.connectedItems || {};
 
                 // Admin users are unlimited for Open Finance actions.
                 if (isAdmin) {
@@ -2975,6 +2978,7 @@ export const databaseService = {
                             lastResetDate: syncCredits.lastResetDate || today,
                             lastSyncDate: syncCredits.lastSyncDate || null,
                             syncedItems: syncCredits.syncedItems || {},
+                            connectedItems,
                             canSync: true,
                             isAdmin: true,
                             unlimited: true,
@@ -2990,6 +2994,7 @@ export const databaseService = {
                         lastResetDate: today,
                         lastSyncDate: null, // Reset global sync date
                         syncedItems: {}, // Clear per-bank sync tracking for new day
+                        connectedItems,
                     };
                     await databaseService.setUserProfile(userId, { syncCredits: newCredits });
                     return {
@@ -2999,6 +3004,7 @@ export const databaseService = {
                             lastResetDate: today,
                             lastSyncDate: null,
                             syncedItems: {},
+                            connectedItems,
                             canSync: true, // Global flag for backwards compatibility
                             isAdmin: false,
                             unlimited: false,
@@ -3011,6 +3017,7 @@ export const databaseService = {
                     lastResetDate: syncCredits.lastResetDate || today,
                     lastSyncDate: syncCredits.lastSyncDate || null,
                     syncedItems: syncCredits.syncedItems || {},
+                    connectedItems,
                     canSync: true,
                     isAdmin: false,
                     unlimited: false,
@@ -3029,6 +3036,7 @@ export const databaseService = {
                 lastResetDate: today,
                 lastSyncDate: null,
                 syncedItems: {},
+                connectedItems: {},
             };
             await databaseService.setUserProfile(userId, { syncCredits: initialCredits });
             return {
@@ -3038,6 +3046,7 @@ export const databaseService = {
                     lastResetDate: today,
                     lastSyncDate: null,
                     syncedItems: {},
+                    connectedItems: {},
                     canSync: true,
                     isAdmin: false,
                     unlimited: false,
@@ -3089,9 +3098,8 @@ export const databaseService = {
         return syncedItems[itemId] === today;
     },
 
-    // Consume 1 credit (for connection or sync)
-    // Now accepts optional itemId for per-bank sync tracking
-    consumeSyncCredit: async (userId: string, action: 'connect' | 'sync', itemId?: string) => {
+    // Legacy non-transactional implementation retained only as a rollback reference.
+    _consumeSyncCreditLegacy: async (userId: string, action: 'connect' | 'sync', itemId?: string) => {
 
         try {
             const creditsResult = await databaseService.getSyncCredits(userId);
@@ -3151,6 +3159,62 @@ export const databaseService = {
                 remainingCredits: currentCredits - 1,
                 action,
                 itemId
+            };
+        } catch (error: any) {
+            console.error('[Firebase] Error consuming sync credit:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    // Consume credits atomically so duplicate callbacks cannot charge twice.
+    consumeSyncCredit: async (userId: string, action: 'connect' | 'sync', itemId?: string) => {
+        try {
+            const today = databaseService._getTodayDateString();
+            const userRef = doc(db, 'users', userId);
+
+            const decision = await runTransaction(db, async (transaction) => {
+                const userSnap = await transaction.get(userRef);
+                const userData: Record<string, any> = userSnap.exists() ? userSnap.data() : {};
+                const syncCredits = userData.syncCredits || {};
+                const isAdmin = userData.isAdmin === true || userData.profile?.isAdmin === true;
+                const isNewDay = syncCredits.lastResetDate !== today;
+
+                const currentState = {
+                    credits: isNewDay ? 3 : (syncCredits.credits ?? 3),
+                    lastResetDate: today,
+                    lastSyncDate: isNewDay ? null : (syncCredits.lastSyncDate || null),
+                    syncedItems: isNewDay ? {} : (syncCredits.syncedItems || {}),
+                    connectedItems: syncCredits.connectedItems || {},
+                    unlimited: isAdmin,
+                };
+
+                const nextDecision = consumeSyncCreditState(currentState, action, itemId, today);
+
+                if (nextDecision.success && nextDecision.nextState) {
+                    transaction.set(userRef, {
+                        syncCredits: nextDecision.nextState,
+                        updatedAt: Timestamp.now(),
+                    }, { merge: true });
+                }
+
+                return nextDecision;
+            });
+
+            if (decision.success && decision.nextState) {
+                offlineStorage.saveSyncCredits(userId, {
+                    ...decision.nextState,
+                    canSync: true,
+                    unlimited: false,
+                });
+            }
+
+            return {
+                success: decision.success,
+                error: decision.error,
+                remainingCredits: decision.remainingCredits,
+                action,
+                itemId,
+                unlimited: decision.unlimited === true,
             };
         } catch (error: any) {
             console.error('[Firebase] Error consuming sync credit:', error);

@@ -1,6 +1,6 @@
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, X } from 'lucide-react-native';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
 
 interface ConnectAccountModalProps {
@@ -19,6 +19,7 @@ interface ConnectAccountModalProps {
     warningText?: string;
     overlayElement?: React.ReactNode;
     onDismiss?: () => void;
+    scrollable?: boolean;
 }
 
 export function ConnectAccountModal({
@@ -32,10 +33,15 @@ export function ConnectAccountModal({
     warningText,
     overlayElement,
     onDismiss,
+    scrollable = true,
 }: ConnectAccountModalProps) {
+    const { height } = useWindowDimensions();
+
     const handleClose = () => {
         onClose();
     };
+
+    const fixedBodyHeight = Math.max(320, Math.floor(height * 0.75) - 82);
 
     const CustomTitle = (
         <View style={styles.titleRow}>
@@ -47,6 +53,11 @@ export function ConnectAccountModal({
             <Text style={styles.titleText}>
                 {title}
             </Text>
+            {!scrollable && !onBack && (
+                <TouchableOpacity onPress={handleClose} hitSlop={10} style={styles.closeButton}>
+                    <X size={20} color="#8E8E93" />
+                </TouchableOpacity>
+            )}
         </View>
     );
 
@@ -56,12 +67,15 @@ export function ConnectAccountModal({
             onClose={handleClose}
             title={CustomTitle}
             presentation="bottom"
-            scrollable={true}
-            enableDragToClose={true}
+            scrollable={scrollable}
+            enableDragToClose={scrollable}
             showHandle={true}
             maxHeightRatio={0.75}
             onAfterClose={onDismiss}
-            bodyStyle={styles.modalBody}
+            bodyStyle={[
+                styles.modalBody,
+                !scrollable && { height: fixedBodyHeight },
+            ]}
         >
             <View style={styles.container}>
                 {subtitle && (
@@ -107,9 +121,18 @@ const styles = StyleSheet.create({
         marginRight: 2,
     },
     titleText: {
+        flex: 1,
         fontSize: 22,
         color: '#FFFFFF',
         fontFamily: 'AROneSans_400Regular',
+    },
+    closeButton: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#1C1C1E',
     },
     subtitle: {
         fontSize: 15,

@@ -1,17 +1,20 @@
 import { UniversalBackground } from '@/components/UniversalBackground';
+import { ManualTransactionModal, type ManualTransactionAccount, type ManualTransactionInput } from '@/components/ManualTransactionModal';
 import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import { useCategories } from '@/hooks/use-categories';
 import { usePerformanceBudget } from '@/hooks/usePerformanceBudget';
-import { db } from '@/services/firebase';
+import { databaseService, db } from '@/services/firebase';
 import { isNonInstallmentMerchant } from '@/services/installmentRules';
 import { normalizePluggyDate } from '@/services/invoiceBuilder';
+import { queryCache } from '@/services/queryCache';
 import {
     dedupeTransactionsBySourceId,
     mergeSortedTransactions
 } from '@/utils/transactionsMerge';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { collection, getDocs, limit, orderBy, query, QueryDocumentSnapshot, startAfter } from 'firebase/firestore';
+import { collection, getDocs, increment, limit, orderBy, query, QueryDocumentSnapshot, startAfter } from 'firebase/firestore';
 import {
     ArrowRightLeft,
     ChevronLeft,
@@ -33,6 +36,7 @@ import {
     Landmark,
     Music,
     Plane,
+    PlusCircle,
     Shirt,
     ShoppingBag,
     ShoppingCart,
@@ -550,10 +554,16 @@ TransactionItem.displayName = 'TransactionsScreenItem';
 export default function TransactionsScreen() {
     const router = useRouter();
     const { user } = useAuthContext();
-    const { filter } = useLocalSearchParams<{ filter: string }>();
-    const { getCategoryName } = useCategories();
+    const userId = user?.uid;
+    const { filter } = useLocalSearchParams<{ filter?: string }>();
+    const { categories, loading: categoriesLoading, getCategoryName } = useCategories();
     const { lod } = usePerformanceBudget();
+    const { showSuccess, showWarning } = useToast();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [accounts, setAccounts] = useState<ManualTransactionAccount[]>([]);
+    const [accountsLoading, setAccountsLoading] = useState(false);
+    const [accountsError, setAccountsError] = useState('');
+    const [manualTransactionModalVisible, setManualTransactionModalVisible] = useState(false);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -583,6 +593,65 @@ export default function TransactionsScreen() {
     );
 
     const hasActiveFilters = !!(filters.search || filters.categories.length > 0 || filters.year || typeFilter);
+
+    const fetchTransactionAccounts = useCallback(async () => {
+        if (!userId) {
+            setAccounts([]);
+            setAccountsError('');
+            setAccountsLoading(false);
+            return;
+        }
+
+        setAccountsLoading(true);
+        setAccountsError('');
+
+        try {
+            const result = await databaseService.getAccounts(userId);
+            if (!result?.success || !Array.isArray(result.data)) {
+                throw new Error(result?.error || 'Não foi possível carregar as contas.');
+            }
+
+            const checkingAccounts = result.data
+                .filter((account: any) => {
+                    const isCheckingType =
+                        account.type === 'BANK' ||
+                        account.type === 'checking' ||
+                        account.subtype === 'CHECKING_ACCOUNT';
+                    const isCreditType =
+                        account.type === 'credit' ||
+                        account.type === 'CREDIT' ||
+                        account.type === 'CREDIT_CARD' ||
+                        account.subtype === 'CREDIT_CARD';
+                    const isSavingsType =
+                        account.type === 'SAVINGS' ||
+                        account.subtype === 'SAVINGS_ACCOUNT' ||
+                        account.subtype === 'SAVINGS';
+
+                    return isCheckingType && !isCreditType && !isSavingsType;
+                })
+                .map((account: any) => ({
+                    id: String(account.id || ''),
+                    name: account.name || account.accountName || 'Conta',
+                    bankName: account.bankName || account.connector?.name || account.institution?.name,
+                    balance: Number(account.balance || 0),
+                    manual: account.manual === true,
+                    source: typeof account.source === 'string' ? account.source : null,
+                }))
+                .filter((account: ManualTransactionAccount) => account.id);
+
+            setAccounts(checkingAccounts);
+        } catch (error) {
+            console.error('Error fetching transaction accounts:', error);
+            setAccountsError('Não foi possível carregar as contas.');
+        } finally {
+            setAccountsLoading(false);
+        }
+    }, [userId]);
+
+    const openManualTransactionModal = useCallback(() => {
+        setManualTransactionModalVisible(true);
+        void fetchTransactionAccounts();
+    }, [fetchTransactionAccounts]);
 
     // Calcular anos disponíveis
     const availableYears = useMemo(() => {
@@ -924,6 +993,96 @@ export default function TransactionsScreen() {
         fetchTransactions(false, true);
     };
 
+    const handleCreateManualTransaction = async (data: ManualTransactionInput) => {
+        if (!userId) {
+            throw new Error('Usuário não autenticado.');
+        }
+
+        const selectedAccount = data.accountId
+            ? accounts.find((account) => account.id === data.accountId) || null
+            : null;
+        const isManualAccount =
+            selectedAccount?.manual === true ||
+            selectedAccount?.source === 'manual' ||
+            selectedAccount?.id.startsWith('manual-');
+        const accountName = data.accountName ?? selectedAccount?.name ?? null;
+
+        const result = await databaseService.addTransaction(userId, {
+            amount: data.amount,
+            accountId: data.accountId ?? null,
+            accountName,
+            accountType: 'CHECKING_ACCOUNT',
+            category: data.category,
+            currencyCode: 'BRL',
+            date: data.date,
+            description: data.description,
+            manual: true,
+            source: 'manual',
+            status: 'completed',
+            transactionType: data.type,
+            type: data.type,
+        });
+
+        if (!result?.success) {
+            throw new Error(result?.error || 'Não foi possível salvar a transação.');
+        }
+
+        if (filter !== 'credit') {
+            const createdTransaction: Transaction = {
+                id: String(result.id || `manual-${Date.now()}`),
+                description: data.description,
+                amount: data.amount,
+                type: data.type,
+                date: data.date,
+                category: data.category,
+                accountId: data.accountId ?? undefined,
+                accountName: accountName ?? undefined,
+                source: 'checking',
+            };
+
+            setTransactions(prev => dedupeTransactionsBySourceId(
+                mergeSortedTransactions([createdTransaction], prev)
+            ));
+        }
+
+        let balanceUpdateFailed = false;
+        if (selectedAccount?.id && isManualAccount) {
+            const balanceDelta = data.type === 'income' ? data.amount : -data.amount;
+            const accountResult = await databaseService.updateAccount(userId, selectedAccount.id, {
+                balance: increment(balanceDelta) as any,
+                lastSyncedAt: new Date().toISOString(),
+            });
+
+            balanceUpdateFailed = !accountResult?.success;
+        }
+
+        await Promise.allSettled([
+            queryCache.invalidate(`accounts_${userId}`),
+            queryCache.invalidate(`dashboard_credit_transactions_${userId}_v3_perf`),
+            queryCache.invalidate(`dashboard_credit_transactions_${userId}_v2`),
+            queryCache.invalidate(`dashboard_credit_transactions_${userId}`),
+        ]);
+
+        setLastCheckingDoc(null);
+        setLastCreditDoc(null);
+        setHasMoreChecking(true);
+        setHasMoreCredit(true);
+        await fetchTransactions(false, true);
+        void fetchTransactionAccounts();
+
+        showSuccess(
+            data.type === 'income' ? 'Receita salva' : 'Despesa salva',
+            'Lançamento manual adicionado à conta corrente.'
+        );
+
+        if (balanceUpdateFailed) {
+            showWarning(
+                'Transação salva',
+                'Não foi possível atualizar o saldo da conta manual.'
+            );
+        }
+    };
+
     const loadMore = () => {
         if (!loadingMore && !loading && hasMoreForCurrentFilter) {
             fetchTransactions(true);
@@ -988,6 +1147,19 @@ export default function TransactionsScreen() {
 
     return (
         <View style={styles.mainContainer}>
+            <ManualTransactionModal
+                visible={manualTransactionModalVisible}
+                onClose={() => setManualTransactionModalVisible(false)}
+                accounts={accounts}
+                accountLoading={accountsLoading}
+                accountError={accountsError}
+                categories={categories}
+                categoryLoading={categoriesLoading}
+                getCategoryName={getCategoryName}
+                onSubmit={handleCreateManualTransaction}
+                onRetryAccounts={fetchTransactionAccounts}
+            />
+
             <UniversalBackground
                 backgroundColor="#0C0C0C"
                 glowSize={350}
@@ -1008,6 +1180,19 @@ export default function TransactionsScreen() {
                             Transações
                         </Text>
                     </View>
+
+                    <TouchableOpacity
+                        style={styles.headerActionButton}
+                        activeOpacity={0.78}
+                        onPress={() => {
+                            openManualTransactionModal();
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Criar transação"
+                    >
+                        <PlusCircle size={16} color="#FFFFFF" strokeWidth={2.2} />
+                        <Text style={styles.headerActionText}>Criar</Text>
+                    </TouchableOpacity>
                 </Animated.View>
 
                 <Animated.View style={filterEntryStyle}>
@@ -1111,13 +1296,25 @@ export default function TransactionsScreen() {
                                     </Text>
 
                                     {!hasActiveFilters && (
-                                        <TouchableOpacity
-                                            style={styles.connectButton}
-                                            onPress={() => router.push('/(tabs)/open-finance')}
-                                            activeOpacity={0.8}
-                                        >
-                                            <Text style={styles.connectButtonText}>Conectar Conta</Text>
-                                        </TouchableOpacity>
+                                        <View style={styles.emptyActions}>
+                                            <TouchableOpacity
+                                                style={styles.connectButton}
+                                                onPress={() => router.push('/(tabs)/open-finance')}
+                                                activeOpacity={0.8}
+                                            >
+                                                <Text style={styles.connectButtonText}>Conectar Conta</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={[styles.connectButton, styles.manualButton]}
+                                                onPress={() => {
+                                                    openManualTransactionModal();
+                                                }}
+                                                activeOpacity={0.8}
+                                            >
+                                                <Text style={styles.connectButtonText}>Adicionar Manual</Text>
+                                            </TouchableOpacity>
+                                        </View>
                                     )}
                                 </View>
                             }
@@ -1158,6 +1355,22 @@ const styles = StyleSheet.create({
         gap: 10,
         flex: 1,
         minWidth: 0,
+    },
+    headerActionButton: {
+        height: 34,
+        borderRadius: 17,
+        borderWidth: 1,
+        borderColor: '#2A2A2A',
+        backgroundColor: '#151515',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        gap: 7,
+    },
+    headerActionText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
     },
     headerIcon: {
         width: 40,
@@ -1370,6 +1583,17 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
         borderRadius: 20,
         marginTop: 8
+    },
+    manualButton: {
+        backgroundColor: '#1A1A1A',
+        borderWidth: 1,
+        borderColor: '#2A2A2A',
+    },
+    emptyActions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: 10,
     },
     connectButtonText: {
         color: '#FFFFFF',

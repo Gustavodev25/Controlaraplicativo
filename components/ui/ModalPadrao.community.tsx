@@ -22,6 +22,7 @@ export function ModalPadrao(props: ModalPadraoProps) {
         bodyStyle,
         contentStyle,
         maxHeightRatio = 0.75,
+        enableDragToClose = true,
     } = props;
 
     const sheetRef = useRef<BottomSheetMethods>(null);
@@ -57,9 +58,8 @@ export function ModalPadrao(props: ModalPadraoProps) {
         <BottomSheet
             ref={sheetRef}
             index={-1}
-            enablePanDownToClose
+            enablePanDownToClose={enableDragToClose}
             enableDynamicSizing
-            maxDynamicContentSize={maxSheetHeight}
             backgroundStyle={{ backgroundColor: '#111111' }}
             onDismiss={handleDismiss}
         >
@@ -128,4 +128,3 @@ export function ModalPadrao(props: ModalPadraoProps) {
     );
 }
 export default ModalPadrao;
-

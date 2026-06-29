@@ -5,6 +5,7 @@ export type SyncCreditsState = {
     lastResetDate?: string | null;
     lastSyncDate?: string | null;
     syncedItems?: Record<string, string>;
+    connectedItems?: Record<string, string>;
     unlimited?: boolean;
 };
 
@@ -18,6 +19,7 @@ export type SyncCreditDecision = {
         lastResetDate: string;
         lastSyncDate: string | null;
         syncedItems: Record<string, string>;
+        connectedItems: Record<string, string>;
     };
 };
 
@@ -29,12 +31,27 @@ export const consumeSyncCreditState = (
 ): SyncCreditDecision => {
     const currentCredits = Number(state?.credits ?? 3);
     const currentSyncedItems = { ...(state?.syncedItems || {}) };
+    const currentConnectedItems = { ...(state?.connectedItems || {}) };
 
     if (state?.unlimited) {
         return {
             success: true,
             remainingCredits: currentCredits,
             unlimited: true,
+        };
+    }
+
+    if (action === 'connect' && itemId && currentConnectedItems[itemId]) {
+        return {
+            success: true,
+            remainingCredits: currentCredits,
+            nextState: {
+                credits: currentCredits,
+                lastResetDate: today,
+                lastSyncDate: state?.lastSyncDate || null,
+                syncedItems: currentSyncedItems,
+                connectedItems: currentConnectedItems,
+            },
         };
     }
 
@@ -55,6 +72,9 @@ export const consumeSyncCreditState = (
     if (action === 'sync' && itemId) {
         currentSyncedItems[itemId] = today;
     }
+    if (action === 'connect' && itemId) {
+        currentConnectedItems[itemId] = today;
+    }
 
     return {
         success: true,
@@ -64,6 +84,7 @@ export const consumeSyncCreditState = (
             lastResetDate: today,
             lastSyncDate: action === 'sync' ? today : (state?.lastSyncDate || null),
             syncedItems: currentSyncedItems,
+            connectedItems: currentConnectedItems,
         },
     };
 };

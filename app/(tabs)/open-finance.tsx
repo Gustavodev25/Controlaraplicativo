@@ -21,11 +21,12 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { ChevronRight, Landmark, Search } from 'lucide-react-native';
+import { ChevronRight, Landmark, Lock, Search } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Animated,
     AppState,
+    FlatList,
     Image,
     InteractionManager,
     Keyboard,
@@ -145,6 +146,101 @@ const SYNC_REQUEST_TIMEOUT_MS = 240000;
 const MANUAL_REFRESH_MAX_DURATION_MS = 5 * 60 * 1000;
 const CPF_MODAL_IOS_PRESENT_DELAY_MS = 90;
 const CPF_MODAL_IOS_DISMISS_FALLBACK_MS = 900;
+const CONNECTORS_CACHE_TTL_MS = 10 * 60 * 1000;
+const BANK_HEALTH_CACHE_TTL_MS = 2 * 60 * 1000;
+const BANK_ROW_HEIGHT = 63;
+const BANK_ROW_ANIMATION_DELAY_MS = 18;
+const BANK_ROW_ANIMATION_MAX_DELAY_MS = 144;
+
+let cachedBankConnectors: any[] = [];
+let cachedBankConnectorsAt = 0;
+let bankConnectorsRequest: Promise<any[]> | null = null;
+let cachedUnhealthyBankIds: Set<string> | null = null;
+let cachedUnhealthyBankIdsAt = 0;
+let bankHealthRequest: Promise<Set<string>> | null = null;
+
+const normalizeConnectorSearchKey = (value: any) => {
+    const text = String(value || '');
+    const normalizedText = typeof text.normalize === 'function' ? text.normalize('NFD') : text;
+
+    return normalizedText
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+};
+
+const getConnectorDedupeKey = (connector: any) => {
+    const name = normalizeConnectorSearchKey(connector?.name);
+    const type = normalizeConnectorSearchKey(connector?.type);
+
+    if (name) return `${type || 'bank'}:${name}`;
+    if (connector?.id) return `id:${String(connector.id)}`;
+
+    return null;
+};
+
+const getConnectorQualityScore = (connector: any) => {
+    let score = 0;
+
+    if (connector?.id) score += 4;
+    if (connector?.imageUrl) score += 3;
+    if (connector?.primaryColor) score += 1;
+    if (Array.isArray(connector?.credentials)) score += connector.credentials.length;
+
+    return score;
+};
+
+const deduplicateBankConnectors = (items: any[]) => {
+    const result: any[] = [];
+    const keyToIndex = new Map<string, number>();
+
+    items.forEach((connector) => {
+        const keys = [
+            connector?.id ? `id:${String(connector.id)}` : null,
+            getConnectorDedupeKey(connector),
+        ].filter(Boolean) as string[];
+
+        const existingIndex = keys
+            .map((key) => keyToIndex.get(key))
+            .find((index) => index !== undefined);
+
+        if (existingIndex === undefined) {
+            const nextIndex = result.length;
+            result.push(connector);
+            keys.forEach((key) => keyToIndex.set(key, nextIndex));
+            return;
+        }
+
+        const current = result[existingIndex];
+        if (getConnectorQualityScore(connector) > getConnectorQualityScore(current)) {
+            result[existingIndex] = connector;
+        }
+
+        keys.forEach((key) => keyToIndex.set(key, existingIndex));
+    });
+
+    return result;
+};
+
+const normalizeBankConnectorsPayload = (data: any): any[] => {
+    const results = Array.isArray(data?.results)
+        ? data.results
+        : Array.isArray(data)
+            ? data
+            : [];
+
+    const bankConnectors = results
+        .filter((c: any) => c?.type === 'PERSONAL_BANK' || c?.type === 'BUSINESS_BANK')
+        .map((c: any) => ({
+            ...c,
+            imageUrl: getConnectorLogoUrl(c) || '',
+            primaryColor: normalizeHexColor(c.primaryColor, '#30302E'),
+            credentials: Array.isArray(c.credentials) ? c.credentials : []
+        }));
+
+    return deduplicateBankConnectors(bankConnectors);
+};
 
 const triggerBankCardMorph = () => {
     LayoutAnimation.configureNext({
@@ -477,6 +573,7 @@ export default function OpenFinanceScreen() {
     const [refreshing, setRefreshing] = useState(false);
 
     const {
+        credits,
         refresh: refreshCredits,
         consumeCredit,
         hasCredits,
@@ -517,8 +614,10 @@ export default function OpenFinanceScreen() {
     const [cpfConnector, setCpfConnector] = useState<any>(null);
     const [cpfModalStep, setCpfModalStep] = useState<'cpf' | 'confirm'>('cpf');
 
-    const confirmLogoScale = useRef(new Animated.Value(0)).current;
-    const confirmLogoOpacity = useRef(new Animated.Value(0)).current;
+    const [confirmLogoScale] = useState(() => new Animated.Value(0));
+    const [confirmLogoOpacity] = useState(() => new Animated.Value(0));
+    const [confirmFlowProgress] = useState(() => new Animated.Value(0));
+    const confirmFlowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
     const lastApiHealthCheckRef = useRef(0);
     const [apiBaseUrl, setApiBaseUrl] = useState(API_BASE_URL_FALLBACKS[0] || RAILWAY_FALLBACK_API_URL);
@@ -535,10 +634,15 @@ export default function OpenFinanceScreen() {
     const lastOAuthCallbackRef = useRef<{ url: string; receivedAt: number } | null>(null);
     const handleOAuthCallbackRef = useRef<((url: string) => Promise<void>) | null>(null);
     const fetchAccountsRef = useRef<() => Promise<void>>(async () => undefined);
+    const connectorsRef = useRef<any[]>([]);
 
     useEffect(() => {
         pendingItemIdRef.current = pendingItemId;
     }, [pendingItemId]);
+
+    useEffect(() => {
+        connectorsRef.current = connectors;
+    }, [connectors]);
 
     const clearBankSyncBannerTimer = useCallback(() => {
         if (bankSyncBannerTimerRef.current) {
@@ -877,6 +981,14 @@ export default function OpenFinanceScreen() {
         const serverAccountErrors: any[] = Array.isArray(syncData?.accountErrors) ? [...syncData.accountErrors] : [];
         const accountWarnings: any[] = Array.isArray(syncData?.accountWarnings) ? [...syncData.accountWarnings] : [];
         const localPersistErrors: any[] = [];
+        let savedAccountsCount = 0;
+
+        if (syncedAccounts.length === 0) {
+            throw new Error(
+                serverAccountErrors[0]?.error ||
+                'Banco autorizado, mas nenhuma conta foi retornada. Credito nao consumido.'
+            );
+        }
 
         if (syncedAccounts.length > 0) {
             setStatusText?.(`Organizando ${syncedAccounts.length} contas...`);
@@ -900,6 +1012,12 @@ export default function OpenFinanceScreen() {
                     });
                 }
             });
+
+            savedAccountsCount = accountResults.filter((result: any) => result?.success).length;
+
+            if (savedAccountsCount === 0) {
+                throw new Error('Nao foi possivel salvar as contas no banco de dados. Credito nao consumido.');
+            }
 
             setStatusText?.(`Salvando ${totalTx} transacoes...`);
 
@@ -928,6 +1046,7 @@ export default function OpenFinanceScreen() {
 
         return {
             totalTx,
+            savedAccountsCount,
             partial: syncData?.partial === true || serverAccountErrors.length > 0 || localPersistErrors.length > 0,
             accountErrors: [...serverAccountErrors, ...localPersistErrors],
             accountWarnings,
@@ -1390,7 +1509,7 @@ export default function OpenFinanceScreen() {
                             showWarning('Sincronizacao parcial', 'Algumas contas ou transacoes nao foram atualizadas. Tente sincronizar novamente depois.');
                         }
 
-                        const creditResult = await consumeCredit('connect');
+                        const creditResult = await consumeCredit('connect', itemId);
                         if (!creditResult.success) {
                             console.warn('[OpenFinance] Connection completed but credit was not consumed:', creditResult.error);
                             refreshCredits();
@@ -1772,7 +1891,91 @@ export default function OpenFinanceScreen() {
         fetchAccounts();
     };
 
-    const fetchConnectors = async () => {
+    const fetchConnectors = useCallback(async (options: { force?: boolean; silent?: boolean } = {}) => {
+        const { force = false, silent = false } = options;
+
+        if (!user) {
+            setLoadingConnectors(false);
+            return;
+        }
+
+        const now = Date.now();
+        const hasCachedConnectors = cachedBankConnectors.length > 0;
+        const cacheIsFresh = hasCachedConnectors && (now - cachedBankConnectorsAt) < CONNECTORS_CACHE_TTL_MS;
+
+        if (!force && hasCachedConnectors) {
+            setConnectors(cachedBankConnectors);
+            setConnectorsFetchError(null);
+
+            if (cacheIsFresh) {
+                setLoadingConnectors(false);
+                return;
+            }
+        }
+
+        const hasVisibleConnectors = connectorsRef.current.length > 0 || hasCachedConnectors;
+        setLoadingConnectors(!silent && !hasVisibleConnectors);
+        setConnectorsFetchError(null);
+
+        let request: Promise<any[]> | null = null;
+
+        try {
+            if (!force && bankConnectorsRequest) {
+                request = bankConnectorsRequest;
+            } else {
+                request = (async () => {
+                    const token = await user.getIdToken();
+
+                    const response = await apiFetch('/api/pluggy/connectors', {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        timeout: CONNECTORS_TIMEOUT_MS
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json().catch(() => null);
+                        throw new Error(errData?.error || `HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    return normalizeBankConnectorsPayload(data);
+                })();
+
+                if (!force) {
+                    bankConnectorsRequest = request;
+                }
+            }
+
+            const bankConnectors = await request;
+            cachedBankConnectors = bankConnectors;
+            cachedBankConnectorsAt = Date.now();
+            setConnectors(bankConnectors);
+        } catch (error: any) {
+            const msg = isNetworkTransportError(error)
+                ? getApiConnectionErrorMessage(error instanceof Error ? error.message : undefined)
+                : error instanceof Error
+                    ? error.message
+                    : 'NÃ£o foi possÃ­vel carregar os bancos.';
+
+            if (connectorsRef.current.length === 0 && cachedBankConnectors.length === 0) {
+                setConnectorsFetchError(msg);
+            } else {
+                console.warn('[OpenFinance] Failed to refresh bank connectors:', msg);
+            }
+        } finally {
+            if (request && bankConnectorsRequest === request) {
+                bankConnectorsRequest = null;
+            }
+
+            setLoadingConnectors(false);
+        }
+    }, [apiFetch, user]);
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const fetchConnectorsLegacy = async () => {
         setLoadingConnectors(true);
         setConnectorsFetchError(null);
 
@@ -1807,7 +2010,7 @@ export default function OpenFinanceScreen() {
                         credentials: Array.isArray(c.credentials) ? c.credentials : []
                     }));
 
-                setConnectors(bankConnectors);
+                setConnectors(deduplicateBankConnectors(bankConnectors));
             }
         } catch (error: any) {
             const msg = isNetworkTransportError(error)
@@ -1822,8 +2025,91 @@ export default function OpenFinanceScreen() {
         }
     };
 
-    // Fetch which banks are currently having issues according to Pluggy
-    const fetchBankHealthStatus = async () => {
+    // Fetch which banks are currently having issues according to Pluggy.
+    const fetchBankHealthStatus = useCallback(async (options: { force?: boolean } = {}) => {
+        const { force = false } = options;
+
+        if (!user) {
+            setBankHealthLoading(false);
+            return;
+        }
+
+        const now = Date.now();
+        const hasCachedHealth = cachedUnhealthyBankIds !== null;
+        const cacheIsFresh = hasCachedHealth && (now - cachedUnhealthyBankIdsAt) < BANK_HEALTH_CACHE_TTL_MS;
+
+        if (!force && cachedUnhealthyBankIds) {
+            setUnhealthyBankIds(new Set(cachedUnhealthyBankIds));
+
+            if (cacheIsFresh) {
+                setBankHealthLoading(false);
+                return;
+            }
+        }
+
+        if (!hasCachedHealth) {
+            setBankHealthLoading(true);
+        }
+
+        let request: Promise<Set<string>> | null = null;
+
+        try {
+            if (!force && bankHealthRequest) {
+                request = bankHealthRequest;
+            } else {
+                request = (async () => {
+                    const token = await user.getIdToken();
+
+                    const response = await apiFetch('/api/pluggy/connectors/health', {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        timeout: 15000,
+                    });
+
+                    if (!response.ok) {
+                        console.warn('[BankHealth] Failed to fetch health status');
+                        return new Set<string>();
+                    }
+
+                    const data = await response.json();
+
+                    if (data.success && Array.isArray(data.unhealthy)) {
+                        return new Set<string>(
+                            data.unhealthy
+                                .map((b: any) => String(b.id))
+                                .filter(Boolean)
+                        );
+                    }
+
+                    return new Set<string>();
+                })();
+
+                if (!force) {
+                    bankHealthRequest = request;
+                }
+            }
+
+            const badIds = await request;
+            cachedUnhealthyBankIds = new Set(badIds);
+            cachedUnhealthyBankIdsAt = Date.now();
+            setUnhealthyBankIds(badIds);
+        } catch (e) {
+            console.warn('[BankHealth] Error fetching health:', e);
+            setUnhealthyBankIds(cachedUnhealthyBankIds ? new Set(cachedUnhealthyBankIds) : new Set());
+        } finally {
+            if (request && bankHealthRequest === request) {
+                bankHealthRequest = null;
+            }
+
+            setBankHealthLoading(false);
+        }
+    }, [apiFetch, user]);
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const fetchBankHealthStatusLegacy = async () => {
         setBankHealthLoading(true);
         try {
             if (!user) return;
@@ -1866,6 +2152,22 @@ export default function OpenFinanceScreen() {
         }
     };
 
+    useEffect(() => {
+        if (!user) return;
+
+        let cancelled = false;
+        const task = InteractionManager.runAfterInteractions(() => {
+            if (!cancelled) {
+                void fetchConnectors({ silent: true });
+            }
+        });
+
+        return () => {
+            cancelled = true;
+            task?.cancel?.();
+        };
+    }, [fetchConnectors, user]);
+
     const handleOpenModal = () => {
         pendingCpfAfterBankDismissRef.current = false;
         clearCpfModalOpenTimer();
@@ -1879,16 +2181,13 @@ export default function OpenFinanceScreen() {
         setConnectionStatusText('');
         setSearchQuery('');
 
-        // Load bank health warnings (non-blocking)
-        void fetchBankHealthStatus();
         setShowCpfModal(false);
         setCpfInput('');
         setCpfConnector(null);
 
         openFinanceConnectionState.clearCallbackPayload().catch(() => null);
 
-        fetchConnectors();
-        // Also fetch health status for warnings on banks
+        void fetchConnectors();
         void fetchBankHealthStatus();
     };
 
@@ -1974,6 +2273,12 @@ export default function OpenFinanceScreen() {
 
         if (!cpfConnector) return;
 
+        if (!hasCredits) {
+            const resetTime = databaseService.getTimeUntilReset();
+            showWarning('Creditos esgotados', `Seus creditos renovam em ${resetTime.formatted}.`);
+            return;
+        }
+
         Keyboard.dismiss();
         setCpfModalStep('confirm');
 
@@ -1994,6 +2299,38 @@ export default function OpenFinanceScreen() {
             }),
         ]).start();
     };
+
+    useEffect(() => {
+        if (showCpfModal && cpfModalStep === 'confirm') {
+            confirmFlowLoopRef.current?.stop();
+            confirmFlowProgress.setValue(0);
+
+            const flowLoop = Animated.loop(
+                Animated.sequence([
+                    Animated.timing(confirmFlowProgress, {
+                        toValue: 1,
+                        duration: 1250,
+                        easing: Easing.inOut(Easing.cubic),
+                        useNativeDriver: true,
+                    }),
+                    Animated.delay(260),
+                ]),
+                { resetBeforeIteration: true }
+            );
+
+            confirmFlowLoopRef.current = flowLoop;
+            flowLoop.start();
+
+            return () => {
+                flowLoop.stop();
+                confirmFlowLoopRef.current = null;
+            };
+        }
+
+        confirmFlowLoopRef.current?.stop();
+        confirmFlowLoopRef.current = null;
+        confirmFlowProgress.setValue(0);
+    }, [showCpfModal, cpfModalStep, confirmFlowProgress]);
 
     const handleStartConnection = async () => {
         if (!cpfConnector) return;
@@ -2465,11 +2802,7 @@ export default function OpenFinanceScreen() {
         }
     };
 
-    const filteredConnectors = connectors.filter((connector) =>
-        connector.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    const sortedConnectors = [...connectors].sort((a, b) => {
+    const sortedConnectors = useMemo(() => [...connectors].sort((a, b) => {
         const priorityA = getBankPriority(a.name);
         const priorityB = getBankPriority(b.name);
 
@@ -2478,12 +2811,37 @@ export default function OpenFinanceScreen() {
         }
 
         return priorityA - priorityB;
+    }), [connectors]);
+
+    const displayConnectors = useMemo(() => {
+        const normalizedQuery = normalizeConnectorSearchKey(searchQuery);
+
+        if (!normalizedQuery) return sortedConnectors;
+
+        return sortedConnectors.filter((connector) =>
+            normalizeConnectorSearchKey(connector.name).includes(normalizedQuery)
+        );
+    }, [searchQuery, sortedConnectors]);
+
+    const banksListMaxHeight = Math.max(
+        isShortPhone ? 260 : 320,
+        Math.floor(height * 0.75) - (isShortPhone ? 190 : 178)
+    );
+
+    const confirmFlowTranslateX = confirmFlowProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-6, 74],
     });
 
-    const displayConnectors =
-        searchQuery.trim() === ''
-            ? sortedConnectors.slice(0, 15)
-            : filteredConnectors;
+    const confirmFlowOpacity = confirmFlowProgress.interpolate({
+        inputRange: [0, 0.12, 0.84, 1],
+        outputRange: [0, 1, 1, 0],
+    });
+
+    const confirmFlowScale = confirmFlowProgress.interpolate({
+        inputRange: [0, 0.18, 0.82, 1],
+        outputRange: [0.72, 1, 1, 0.72],
+    });
 
     const shouldShowConnectorsNetworkError =
         !loadingConnectors &&
@@ -2548,7 +2906,7 @@ export default function OpenFinanceScreen() {
     const renderModalContent = () => {
         switch (connectionStep) {
             case 'banks':
-                if (loadingConnectors) {
+                if (loadingConnectors && displayConnectors.length === 0) {
                     return (
                         <IosCoreLoader style={{ minHeight: 400 }} />
                     );
@@ -2584,7 +2942,7 @@ export default function OpenFinanceScreen() {
 
                             <TouchableOpacity
                                 style={styles.connectorsRetryButton}
-                                onPress={fetchConnectors}
+                                onPress={() => fetchConnectors({ force: true })}
                                 activeOpacity={0.8}
                             >
                                 <Text style={styles.connectorsRetryButtonText}>Tentar novamente</Text>
@@ -2595,36 +2953,60 @@ export default function OpenFinanceScreen() {
 
             default:
                 return (
-                    <ScrollView
-                        style={styles.banksListContainer}
+                    <FlatList
+                        style={[styles.banksListContainer, { height: banksListMaxHeight }]}
                         contentContainerStyle={[
                             styles.banksListContent,
                             { paddingHorizontal: horizontalPadding },
                             isShortPhone && styles.banksListContentShort
                         ]}
+                        data={displayConnectors}
+                        keyExtractor={(item, index) => `${item.id || item.name}-${index}`}
                         keyboardShouldPersistTaps="handled"
+                        nestedScrollEnabled
+                        bounces
+                        alwaysBounceVertical={false}
                         showsVerticalScrollIndicator={false}
-                    >
-                        {displayConnectors.length === 0 ? (
+                        initialNumToRender={14}
+                        maxToRenderPerBatch={12}
+                        updateCellsBatchingPeriod={40}
+                        windowSize={7}
+                        removeClippedSubviews={Platform.OS === 'android'}
+                        getItemLayout={(_, index) => ({
+                            length: BANK_ROW_HEIGHT,
+                            offset: BANK_ROW_HEIGHT * index,
+                            index,
+                        })}
+                        ListEmptyComponent={(
                             <Text style={[styles.emptyText, { padding: 20 }]}>
                                 Nenhum banco encontrado
                             </Text>
-                        ) : (
-                            displayConnectors.map((item, index) => {
-                                const isUnhealthy = unhealthyBankIds.has(String(item.id));
-                                return (
+                        )}
+                        renderItem={({ item, index }) => {
+                            const isUnhealthy = unhealthyBankIds.has(String(item.id));
+
+                            return (
+                                <View
+                                    style={[
+                                        styles.banksVirtualizedRow,
+                                        index === 0 && styles.banksVirtualizedRowFirst,
+                                        index === displayConnectors.length - 1 && styles.banksVirtualizedRowLast,
+                                    ]}
+                                >
                                     <ConnectorCard
-                                        key={item.id.toString()}
                                         item={item}
                                         index={index}
                                         onSelect={handleSelectConnector}
                                         styles={styles}
                                         isUnhealthy={isUnhealthy}
                                     />
-                                );
-                            })
-                        )}
-                    </ScrollView>
+                                    {index < displayConnectors.length - 1 && (
+                                        <View style={styles.banksRowDivider} />
+                                    )}
+                                </View>
+                            );
+                        }}
+                    />
                 );
         }
     };
@@ -2782,6 +3164,7 @@ export default function OpenFinanceScreen() {
                     isBanksLoading={loadingConnectors}
                     credentialsCount={selectedConnector?.credentials?.length || 0}
                     onBack={connectionStep === 'credentials' ? () => setConnectionStep('banks') : undefined}
+                    scrollable={connectionStep !== 'banks'}
                     searchElement={
                         connectionStep === 'banks' ? (
                             <SearchInputShell
@@ -2798,7 +3181,7 @@ export default function OpenFinanceScreen() {
                 <ModalPadrao
                     visible={showCpfModal}
                     onClose={handleCloseCpfModal}
-                    title={cpfModalStep === 'cpf' ? 'Confirme seu CPF' : 'Confirmar conexão'}
+                    title={cpfModalStep === 'cpf' ? 'Confirme seu CPF' : 'Confirmar'}
                     presentation="bottom"
                     size="md"
                     maxWidth={Math.min(390, width - 24)}
@@ -2808,25 +3191,29 @@ export default function OpenFinanceScreen() {
                         cpfModalStep === 'cpf' ? (
                             <View style={{ paddingTop: 10 }}>
                                 <TouchableOpacity
-                                    style={[styles.cpfModalFooterButton, styles.cpfModalConfirmButton, cpfInput.length < 14 && { opacity: 0.5 }]}
+                                    style={[
+                                        styles.cpfModalFooterButton,
+                                        styles.cpfModalConfirmButton,
+                                        cpfInput.length < 14 && styles.cpfModalConfirmButtonDisabled
+                                    ]}
                                     activeOpacity={0.7}
                                     onPress={handleConfirmCpf}
                                     disabled={cpfInput.length < 14}
                                 >
-                                    <Text style={styles.cpfModalConfirmButtonText}>Avançar</Text>
+                                    <Text
+                                        style={[
+                                            styles.cpfModalConfirmButtonText,
+                                            cpfInput.length < 14 && styles.cpfModalConfirmButtonTextDisabled
+                                        ]}
+                                    >
+                                        Avançar
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
                         ) : (
-                            <View style={{ paddingTop: 10, flexDirection: 'row', gap: 10 }}>
+                            <View style={{ paddingTop: 10 }}>
                                 <TouchableOpacity
-                                    style={[styles.cpfModalFooterButton, styles.cpfModalCancelButton, { flex: 1 }]}
-                                    activeOpacity={0.7}
-                                    onPress={() => setCpfModalStep('cpf')}
-                                >
-                                    <Text style={styles.cpfModalCancelButtonText}>Voltar</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.cpfModalFooterButton, styles.cpfModalConfirmButton, { flex: 1 }]}
+                                    style={[styles.cpfModalFooterButton, styles.cpfModalConfirmButton]}
                                     activeOpacity={0.7}
                                     onPress={handleStartConnection}
                                 >
@@ -2858,54 +3245,74 @@ export default function OpenFinanceScreen() {
                     ) : (
                         <>
                             <View style={styles.confirmLogosRow}>
-                                <Animated.View
-                                    style={[
-                                        styles.confirmLogoCircle,
-                                        {
-                                            transform: [{ scale: confirmLogoScale }],
-                                            opacity: confirmLogoOpacity
-                                        }
-                                    ]}
-                                >
-                                    <View style={styles.confirmLogoInner}>
-                                        <BankConnectorLogo
-                                            connector={cpfConnector}
-                                            size={38}
-                                            borderRadius={19}
-                                            backgroundColor="transparent"
-                                            showBorder={false}
-                                        />
-                                    </View>
-                                </Animated.View>
+                                <View style={styles.confirmEndpointColumn}>
+                                    <Text style={styles.confirmEndpointLabel} numberOfLines={1}>
+                                        {cpfConnector?.name || 'Banco'}
+                                    </Text>
+                                    <Animated.View
+                                        style={[
+                                            styles.confirmLogoCircle,
+                                            {
+                                                transform: [{ scale: confirmLogoScale }],
+                                                opacity: confirmLogoOpacity
+                                            }
+                                        ]}
+                                    >
+                                        <View style={styles.confirmLogoInner}>
+                                            <BankConnectorLogo
+                                                connector={cpfConnector}
+                                                size={34}
+                                                borderRadius={17}
+                                                backgroundColor="transparent"
+                                                showBorder={false}
+                                            />
+                                        </View>
+                                    </Animated.View>
+                                </View>
 
                                 <Animated.View
                                     style={[
-                                        styles.confirmDashedLineContainer,
+                                        styles.confirmFlowTrack,
                                         {
                                             opacity: confirmLogoOpacity
                                         }
                                     ]}
                                 >
-                                    <View style={styles.confirmDashedLine} />
+                                    <View style={styles.confirmFlowLine} />
+                                    <Animated.View
+                                        style={[
+                                            styles.confirmFlowDot,
+                                            {
+                                                opacity: confirmFlowOpacity,
+                                                transform: [
+                                                    { translateX: confirmFlowTranslateX },
+                                                    { scale: confirmFlowScale },
+                                                ],
+                                            },
+                                        ]}
+                                    />
                                 </Animated.View>
 
-                                <Animated.View
-                                    style={[
-                                        styles.confirmAppLogoCircle,
-                                        {
-                                            transform: [{ scale: confirmLogoScale }],
-                                            opacity: confirmLogoOpacity
-                                        }
-                                    ]}
-                                >
-                                    <View style={styles.confirmLogoInner}>
-                                        <Image
-                                            source={require('@/assets/images/logo.png')}
-                                            style={styles.confirmAppLogoImage}
-                                            resizeMode="contain"
-                                        />
-                                    </View>
-                                </Animated.View>
+                                <View style={styles.confirmEndpointColumn}>
+                                    <Text style={styles.confirmEndpointLabel}>Controlar</Text>
+                                    <Animated.View
+                                        style={[
+                                            styles.confirmAppLogoCircle,
+                                            {
+                                                transform: [{ scale: confirmLogoScale }],
+                                                opacity: confirmLogoOpacity
+                                            }
+                                        ]}
+                                    >
+                                        <View style={styles.confirmLogoInner}>
+                                            <Image
+                                                source={require('@/assets/images/logo.png')}
+                                                style={styles.confirmAppLogoImage}
+                                                resizeMode="contain"
+                                            />
+                                        </View>
+                                    </Animated.View>
+                                </View>
                             </View>
 
                             <View style={styles.confirmSummaryCard}>
@@ -2987,6 +3394,8 @@ export default function OpenFinanceScreen() {
                     onClose={() => setShowCreateChoiceModal(false)}
                     onSelectManual={() => setShowManualBankAccountModal(true)}
                     onSelectConnect={handleOpenModal}
+                    credits={credits?.credits}
+                    unlimited={credits?.unlimited}
                 />
 
                 {showManualBankAccountModal && (
@@ -3178,28 +3587,33 @@ const ConnectorCard = ({ item, index, onSelect, styles, isUnhealthy }: any) => {
     const showWarning = !!isUnhealthy;
 
     return (
-        <AnimatedTouchableOpacity
-            onPress={() => onSelect(item)}
-            onPressIn={() => {
-                press.value = withSpring(1, PRESS_SPRING);
-            }}
-            onPressOut={() => {
-                press.value = withSpring(0, PRESS_SPRING);
-            }}
-            style={[styles.bankListRow, cardStyle, showWarning && styles.bankListRowWarning]}
-            activeOpacity={0.9}
+        <Reanimated.View
             entering={FadeInDown
                 .springify()
                 .damping(16)
                 .stiffness(195)
                 .mass(1.05)
-                .delay(index * 26)}
+                .delay(Math.min(index * BANK_ROW_ANIMATION_DELAY_MS, BANK_ROW_ANIMATION_MAX_DELAY_MS))}
             exiting={FadeOut.duration(120)}
             layout={LinearTransition.springify()
                 .damping(15)
                 .stiffness(185)
                 .mass(1.08)}
         >
+            <AnimatedTouchableOpacity
+                onPress={showWarning ? undefined : () => onSelect(item)}
+                onPressIn={() => {
+                    if (showWarning) return;
+                    press.value = withSpring(1, PRESS_SPRING);
+                }}
+                onPressOut={() => {
+                    if (showWarning) return;
+                    press.value = withSpring(0, PRESS_SPRING);
+                }}
+                style={[styles.bankListRow, cardStyle, showWarning && styles.bankListRowWarning]}
+                activeOpacity={showWarning ? 1 : 0.88}
+                disabled={showWarning}
+            >
             <View style={styles.bankListLogoContainer}>
                 <View style={styles.bankListLogoBubble}>
                     <BankConnectorLogo
@@ -3223,10 +3637,17 @@ const ConnectorCard = ({ item, index, onSelect, styles, isUnhealthy }: any) => {
                 )}
             </View>
 
-            <Reanimated.View style={chevronStyle}>
-                <ChevronRight size={18} color={showWarning ? "#F59E0B" : "#7A7A7A"} />
-            </Reanimated.View>
-        </AnimatedTouchableOpacity>
+            {showWarning ? (
+                <View style={styles.bankLockedIcon}>
+                    <Lock size={14} color="#6F6F76" strokeWidth={1.8} />
+                </View>
+            ) : (
+                <Reanimated.View style={chevronStyle}>
+                    <ChevronRight size={18} color="#6F6F76" />
+                </Reanimated.View>
+            )}
+            </AnimatedTouchableOpacity>
+        </Reanimated.View>
     );
 };
 
@@ -3341,11 +3762,45 @@ const styles = StyleSheet.create({
     banksListContent: {
         paddingBottom: 40,
         paddingHorizontal: 20,
-        gap: 10,
     },
 
     banksListContentShort: {
         paddingBottom: 24,
+    },
+
+    banksGroupCard: {
+        backgroundColor: '#171717',
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#242424',
+        overflow: 'hidden',
+    },
+
+    banksVirtualizedRow: {
+        backgroundColor: '#171717',
+        borderLeftWidth: StyleSheet.hairlineWidth,
+        borderRightWidth: StyleSheet.hairlineWidth,
+        borderColor: '#242424',
+        overflow: 'hidden',
+    },
+
+    banksVirtualizedRowFirst: {
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopLeftRadius: 14,
+        borderTopRightRadius: 14,
+    },
+
+    banksVirtualizedRowLast: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomLeftRadius: 14,
+        borderBottomRightRadius: 14,
+    },
+
+    banksRowDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#282828',
+        marginLeft: 0,
+        marginRight: 0,
     },
 
     connectorsErrorContainer: {
@@ -3394,21 +3849,16 @@ const styles = StyleSheet.create({
     },
 
     bankListRow: {
-        minHeight: 68,
+        minHeight: 62,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 14,
-        borderRadius: 20,
+        paddingVertical: 9,
+        paddingHorizontal: 16,
+        borderRadius: 0,
         overflow: 'hidden',
-        backgroundColor: '#101010',
-        borderWidth: 1,
-        borderColor: '#252525',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.24,
-        shadowRadius: 18,
-        elevation: 8,
+        backgroundColor: '#171717',
+        borderWidth: 0,
+        elevation: 0,
     },
 
     cardBlurLayer: {
@@ -3436,34 +3886,32 @@ const styles = StyleSheet.create({
     },
 
     bankListLogoContainer: {
-        marginRight: 12,
+        marginRight: 14,
         zIndex: 4,
     },
 
     bankListLogoBubble: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#222222',
         justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
+        borderWidth: 0,
         overflow: 'hidden',
     },
 
     bankRowTitle: {
         flex: 1,
-        fontSize: 16,
-        color: '#E5E5E5',
+        fontSize: 15,
+        color: '#F2F2F2',
         fontFamily: 'AROneSans_400Regular',
         zIndex: 4,
     },
 
-    // New styles for bank health warnings
     bankListRowWarning: {
-        borderColor: 'rgba(245, 158, 11, 0.35)',
-        backgroundColor: 'rgba(245, 158, 11, 0.03)',
+        backgroundColor: '#171717',
+        opacity: 0.58,
     },
 
     bankRowTitleContainer: {
@@ -3475,24 +3923,28 @@ const styles = StyleSheet.create({
     },
 
     bankRowTitleWarning: {
-        color: '#FCD34D',
+        color: '#A9A9AD',
     },
 
     bankWarningBadge: {
-        backgroundColor: 'rgba(245, 158, 11, 0.15)',
-        paddingHorizontal: 7,
-        paddingVertical: 2,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: 'rgba(245, 158, 11, 0.3)',
+        backgroundColor: '#252525',
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+        borderRadius: 5,
+        borderWidth: 0,
     },
 
     bankWarningText: {
-        color: '#F59E0B',
-        fontSize: 10,
+        color: '#8E8E93',
+        fontSize: 9,
         fontFamily: 'AROneSans_600SemiBold',
         textTransform: 'uppercase',
-        letterSpacing: 0.3,
+        letterSpacing: 0.5,
+    },
+
+    bankLockedIcon: {
+        width: 22,
+        alignItems: 'flex-end',
     },
 
     bankCardMorphWrapper: {
@@ -3702,7 +4154,8 @@ const styles = StyleSheet.create({
     cpfModalFooter: {
         backgroundColor: '#101010',
         paddingHorizontal: 20,
-        paddingTop: 8,
+        paddingTop: 12,
+        paddingBottom: 12,
         borderTopWidth: 0,
     },
 
@@ -3756,101 +4209,183 @@ const styles = StyleSheet.create({
         fontFamily: 'AROneSans_400Regular'
     },
 
+    cpfModalFooterButton: {
+        minHeight: 48,
+        alignSelf: 'stretch',
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+    },
+
+    cpfModalConfirmButton: {
+        backgroundColor: '#D97757',
+    },
+
+    cpfModalConfirmButtonDisabled: {
+        backgroundColor: '#262626',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#303030',
+    },
+
+    cpfModalCancelButton: {
+        backgroundColor: '#19191B',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#29292B',
+    },
+
+    cpfModalConfirmButtonText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontFamily: 'AROneSans_600SemiBold',
+        textAlign: 'center',
+    },
+
+    cpfModalConfirmButtonTextDisabled: {
+        color: '#777777',
+    },
+
+    cpfModalCancelButtonText: {
+        color: '#E5E5E5',
+        fontSize: 15,
+        fontFamily: 'AROneSans_600SemiBold',
+        textAlign: 'center',
+    },
+
     confirmLogosRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginVertical: 24,
-        gap: 0
+        marginTop: 24,
+        marginBottom: 22,
+    },
+
+    confirmEndpointColumn: {
+        width: 72,
+        height: 54,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
+    confirmEndpointLabel: {
+        position: 'absolute',
+        top: -21,
+        maxWidth: 72,
+        color: '#727276',
+        fontSize: 11,
+        lineHeight: 13,
+        fontFamily: 'AROneSans_600SemiBold',
+        textAlign: 'center',
     },
 
     confirmLogoCircle: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        width: 54,
+        height: 54,
+        borderRadius: 27,
+        backgroundColor: '#18181A',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#2C2C2E',
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
     },
 
     confirmLogoInner: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
         backgroundColor: '#FFFFFF',
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
+        overflow: 'hidden',
     },
 
-    confirmDashedLineContainer: {
-        width: 50,
-        height: 2,
+    confirmFlowTrack: {
+        width: 80,
+        height: 54,
         justifyContent: 'center',
-        alignItems: 'center'
+        marginHorizontal: 2,
     },
 
-    confirmDashedLine: {
+    confirmFlowLine: {
         width: '100%',
-        height: 2,
-        borderStyle: 'dashed',
-        borderWidth: 1,
-        borderColor: '#D97757',
-        borderRadius: 1
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#343436',
+    },
+
+    confirmFlowDot: {
+        position: 'absolute',
+        left: 0,
+        top: 23,
+        width: 9,
+        height: 9,
+        borderRadius: 4.5,
+        backgroundColor: '#D97757',
     },
 
     confirmAppLogoCircle: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: 'rgba(217, 119, 87, 0.12)',
+        width: 54,
+        height: 54,
+        borderRadius: 27,
+        backgroundColor: '#18181A',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(217, 119, 87, 0.32)',
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
     },
 
     confirmAppLogoImage: {
-        width: 40,
-        height: 40,
-        borderRadius: 20
+        width: 34,
+        height: 34,
+        borderRadius: 17,
     },
 
     confirmSummaryCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        borderRadius: 18,
-        padding: 16,
-        marginBottom: 20,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: 'transparent',
+        borderRadius: 0,
+        paddingVertical: 2,
+        marginBottom: 16,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderColor: '#28282A',
     },
 
     confirmSummaryRow: {
+        minHeight: 38,
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center'
+        alignItems: 'center',
+        gap: 16,
+        paddingVertical: 8,
     },
 
     confirmSummaryLabel: {
-        fontSize: 14,
-        color: '#8E8E93'
+        fontSize: 13,
+        color: '#77777B',
+        fontFamily: 'AROneSans_400Regular',
     },
 
     confirmSummaryValue: {
-        fontSize: 14,
+        flex: 1,
+        fontSize: 13,
         fontWeight: '600',
-        color: '#FFFFFF'
+        color: '#F4F4F5',
+        textAlign: 'right',
+        fontFamily: 'AROneSans_600SemiBold',
     },
 
     confirmSummarySeparator: {
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        marginVertical: 12
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#242426',
     },
 
     confirmDisclaimer: {
-        fontSize: 12,
-        color: '#8E8E93',
+        alignSelf: 'center',
+        maxWidth: 300,
+        fontSize: 11.5,
+        color: '#77777B',
         textAlign: 'center',
         lineHeight: 16,
-        marginBottom: 24
+        marginBottom: 18,
     },
 
     confirmConnectButton: {

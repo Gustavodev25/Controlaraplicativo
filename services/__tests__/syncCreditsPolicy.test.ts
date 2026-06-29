@@ -13,7 +13,20 @@ describe('sync credit policy', () => {
             lastResetDate: today,
             lastSyncDate: null,
             syncedItems: {},
+            connectedItems: {},
         });
+    });
+
+    test('charges connect once per item when itemId is provided', () => {
+        const first = consumeSyncCreditState({ credits: 3, syncedItems: {} }, 'connect', 'item-1', today);
+        expect(first.success).toBe(true);
+        expect(first.remainingCredits).toBe(2);
+        expect(first.nextState?.connectedItems).toEqual({ 'item-1': today });
+
+        const repeated = consumeSyncCreditState(first.nextState, 'connect', 'item-1', today);
+        expect(repeated.success).toBe(true);
+        expect(repeated.remainingCredits).toBe(2);
+        expect(repeated.nextState?.credits).toBe(2);
     });
 
     test('charges successful sync and marks item as synced today', () => {
@@ -22,6 +35,7 @@ describe('sync credit policy', () => {
         expect(result.success).toBe(true);
         expect(result.remainingCredits).toBe(1);
         expect(result.nextState?.syncedItems).toEqual({ 'item-1': today });
+        expect(result.nextState?.connectedItems).toEqual({});
         expect(result.nextState?.lastSyncDate).toBe(today);
     });
 

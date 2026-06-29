@@ -1,441 +1,773 @@
 import { GlobalSyncBanner } from '@/components/ui/GlobalSyncBanner';
+import { IosCoreLoader } from '@/components/ui/IosCoreLoader';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { useAuthContext } from '@/contexts/AuthContext';
-import { Redirect, Tabs } from 'expo-router';
+import { BlurView } from 'expo-blur';
+import { Redirect, router, Tabs } from 'expo-router';
 import {
   Bell,
   CalendarDays,
   CreditCard,
-  House,
+  Home,
   Landmark,
   PiggyBank,
-  Repeat2,
+  Repeat,
   WalletCards,
-  type LucideIcon,
 } from 'lucide-react-native';
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator } from 'react-native';
+import { type ComponentType, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
-  Platform,
+  Dimensions,
   Pressable,
   StyleSheet,
   Text,
-  useWindowDimensions,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import Animated, {
   Easing,
   Extrapolation,
-  FadeIn,
-  FadeOut,
   interpolate,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
+  withSequence,
   withSpring,
   withTiming,
+  ZoomOut,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const TAB_BAR_HEIGHT = 58;
-const TAB_BAR_MAX_WIDTH = 340;
-const TAB_BAR_WIDTH_RATIO = 0.78;
-const TAB_BAR_RADIUS = 34;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const ACTIVE_PILL_SIZE = 38;
-const ACTIVE_PILL_RADIUS = ACTIVE_PILL_SIZE / 2;
+const ACCENT_ORANGE = '#D97757';
+const TEXT_DARK = '#F2F2F2';
+const TEXT_MUTED = '#8E8E93';
 
-const MENU_WIDTH = 195;
+const TAB_BAR_HEIGHT = 46;
+const TAB_BAR_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 320);
+const TAB_BAR_RADIUS = 23;
 
-const COLORS = {
-  background: '#141414',
-  surface: '#101010',
-  surfaceElevated: '#121212',
-  surfaceSoft: '#1A1A1A',
-  border: '#252525',
-  borderSoft: '#202020',
-  text: '#F4F1EF',
-  textMuted: 'rgba(244,241,239,0.48)',
-  iconInactive: '#F7F2EF',
-  accent: '#D97757',
-  accentSoft: 'rgba(217,119,87,0.18)',
-  accentStrong: 'rgba(217,119,87,0.28)',
-  backdrop: 'rgba(0,0,0,0.46)',
-};
+const ACTIVE_PILL_WIDTH = 40;
+const ACTIVE_PILL_HEIGHT = 30;
+const ACTIVE_PILL_RADIUS = 12;
 
-const SPRING_FAST = {
-  damping: 22,
-  stiffness: 220,
-  mass: 0.9,
+const MENU_WIDTH = 190;
+
+const SPRING_ENTRY = {
+  damping: 18,
+  stiffness: 210,
+  mass: 1,
   overshootClamping: false,
   restDisplacementThreshold: 0.001,
   restSpeedThreshold: 0.001,
 } as const;
 
-const SPRING_SOFT = {
-  damping: 24,
-  stiffness: 180,
-  mass: 0.95,
+const SPRING_MORPH = {
+  damping: 18,
+  stiffness: 190,
+  mass: 1,
   overshootClamping: false,
   restDisplacementThreshold: 0.001,
   restSpeedThreshold: 0.001,
+} as const;
+
+const SPRING_STRETCH = {
+  damping: 13,
+  stiffness: 170,
+  mass: 1.05,
+  overshootClamping: false,
+  restDisplacementThreshold: 0.001,
+  restSpeedThreshold: 0.001,
+} as const;
+
+const SPRING_RECOIL = {
+  damping: 18,
+  stiffness: 155,
+  mass: 1,
+  overshootClamping: false,
+  restDisplacementThreshold: 0.001,
+  restSpeedThreshold: 0.001,
+} as const;
+
+const SPRING_SETTLE = {
+  damping: 24,
+  stiffness: 170,
+  mass: 1,
+  overshootClamping: false,
+  restDisplacementThreshold: 0.001,
+  restSpeedThreshold: 0.001,
+} as const;
+
+const MICRO_SPRING = {
+  damping: 18,
+  stiffness: 390,
+  mass: 0.55,
+  overshootClamping: false,
 } as const;
 
 const TABS = [
-  { key: 'dashboard', title: 'Visão Geral', icon: House },
-  { key: 'open-finance', title: 'Contas Bancárias', icon: Landmark },
-  { key: 'transactions', title: 'Transações', icon: WalletCards },
-  { key: 'recurrence', title: 'Recorrências', icon: CalendarDays },
-  { key: 'planning', title: 'Caixinhas', icon: PiggyBank },
+  { key: 'dashboard', Icon: Home },
+  { key: 'open-finance', Icon: Landmark },
+  { key: 'transactions', Icon: WalletCards },
+  { key: 'recurrence', Icon: CalendarDays },
+  { key: 'planning', Icon: PiggyBank },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
+
+function getVisualTabFromRoute(routeName: string): TabKey {
+  if (routeName === 'invoices') return 'transactions';
+
+  return TABS.some((tab) => tab.key === routeName)
+    ? (routeName as TabKey)
+    : 'dashboard';
+}
+
+function getTabIndex(tabKey: TabKey) {
+  return TABS.findIndex((tab) => tab.key === tabKey);
+}
+
+function getIndicatorX(tabKey: TabKey, barWidth = TAB_BAR_WIDTH) {
+  const itemWidth = barWidth / TABS.length;
+  const index = Math.max(getTabIndex(tabKey), 0);
+
+  return index * itemWidth + (itemWidth - ACTIVE_PILL_WIDTH) / 2;
+}
+
 type MenuKey = 'transactions' | 'recurrence' | null;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 interface TabItemProps {
-  title: string;
-  icon: LucideIcon;
+  Icon: ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
   isActive: boolean;
   onPress: () => void;
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 }
 
-const TabItem = memo(({ title, icon: IconSource, isActive, onPress }: TabItemProps) => {
+const TabItem = ({
+  Icon,
+  isActive,
+  onPress,
+  onInteractionStart,
+  onInteractionEnd,
+}: TabItemProps) => {
   const activeProgress = useSharedValue(isActive ? 1 : 0);
   const pressProgress = useSharedValue(0);
 
   useEffect(() => {
-    activeProgress.value = withTiming(isActive ? 1 : 0, {
-      duration: 160,
-      easing: Easing.out(Easing.cubic),
-    });
+    activeProgress.value = withSpring(isActive ? 1 : 0, MICRO_SPRING);
   }, [isActive, activeProgress]);
 
-  const iconStyle = useAnimatedStyle(() => {
-    const activeScale = interpolate(
-      activeProgress.value,
-      [0, 1],
-      [0.96, 1.07],
-      Extrapolation.CLAMP
-    );
-
-    const activeY = interpolate(
-      activeProgress.value,
-      [0, 1],
-      [0, -1],
-      Extrapolation.CLAMP
-    );
-
-    const pressedScale = interpolate(
+  const itemStyle = useAnimatedStyle(() => {
+    const pressScale = interpolate(
       pressProgress.value,
       [0, 1],
-      [1, 0.94],
+      [1, 0.955],
       Extrapolation.CLAMP
     );
 
     return {
-      opacity: interpolate(
-        activeProgress.value,
-        [0, 1],
-        [0.58, 1],
-        Extrapolation.CLAMP
-      ),
+      transform: [{ scale: pressScale }],
+    };
+  });
+
+  const iconStyle = useAnimatedStyle(() => {
+    const scale = interpolate(
+      activeProgress.value,
+      [0, 1],
+      [0.94, 1.06],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      opacity: interpolate(activeProgress.value, [0, 1], [0.72, 1], Extrapolation.CLAMP),
       transform: [
-        { translateY: activeY + pressProgress.value * 1.2 },
-        { scale: activeScale * pressedScale },
+        { translateY: pressProgress.value * 0.6 },
+        { scale },
       ],
     };
   });
 
-  const pressLayerStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      pressProgress.value,
-      [0, 1],
-      [0, 1],
-      Extrapolation.CLAMP
-    ),
-    transform: [
-      {
-        scale: interpolate(
-          pressProgress.value,
-          [0, 1],
-          [0.86, 1],
-          Extrapolation.CLAMP
-        ),
-      },
-    ],
-  }));
-
-  const handlePressIn = useCallback(() => {
-    pressProgress.value = withTiming(1, {
-      duration: 80,
-      easing: Easing.out(Easing.quad),
-    });
-  }, [pressProgress]);
-
-  const handlePressOut = useCallback(() => {
-    pressProgress.value = withTiming(0, {
-      duration: 130,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [pressProgress]);
-
   return (
     <AnimatedPressable
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      accessibilityState={{ selected: isActive }}
       onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      onTouchCancel={handlePressOut}
-      style={styles.tabItem}
+      onPressIn={() => {
+        onInteractionStart?.();
+        pressProgress.value = withSpring(1, MICRO_SPRING);
+      }}
+      onPressOut={() => {
+        onInteractionEnd?.();
+        pressProgress.value = withSpring(0, MICRO_SPRING);
+      }}
+      onTouchCancel={onInteractionEnd}
+      style={[styles.tabItem, itemStyle]}
     >
-      <Animated.View pointerEvents="none" style={[styles.tabPressLayer, pressLayerStyle]} />
-
       <Animated.View style={[styles.iconContainer, iconStyle]}>
-        <IconSource
-          size={21}
-          color={isActive ? COLORS.accent : COLORS.iconInactive}
-          strokeWidth={2.1}
+        <Icon
+          size={20}
+          color={isActive ? ACCENT_ORANGE : TEXT_MUTED}
+          strokeWidth={isActive ? 2.35 : 2}
         />
       </Animated.View>
     </AnimatedPressable>
   );
-});
-
-TabItem.displayName = 'TabItem';
-
-function getActiveTabFromRoute(routeName: string): string {
-  if (routeName === 'invoices') return 'transactions';
-  return routeName;
-}
+};
 
 function CustomTabBar({ state, navigation }: { state: any; navigation: any }) {
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
 
   const currentRouteName = state.routes[state.index].name;
+  const initialActiveTab = getVisualTabFromRoute(currentRouteName);
 
-  const [activeTab, setActiveTab] = useState<string>(() => getActiveTabFromRoute(currentRouteName));
+  const [activeTab, setActiveTab] = useState<TabKey>(() => initialActiveTab);
+  const [tabBarWidth, setTabBarWidth] = useState(0);
   const [visibleMenu, setVisibleMenu] = useState<MenuKey>(null);
 
   const reducedMotionRef = useRef(false);
 
-  const barProgress = useSharedValue(1);
-  const indicatorX = useSharedValue(0);
+  const barVisibility = useSharedValue(0);
+  const barSquash = useSharedValue(1);
+  const barPressProgress = useSharedValue(0);
+  const barMorphProgress = useSharedValue(0);
+
+  const targetBarWidth = useSharedValue(TAB_BAR_WIDTH);
+  const targetBarHeight = useSharedValue(TAB_BAR_HEIGHT);
+  const targetBarRadius = useSharedValue(TAB_BAR_RADIUS);
+
+  const indicatorTargetX = useSharedValue(getIndicatorX(initialActiveTab));
+  const indicatorTargetWidth = useSharedValue(ACTIVE_PILL_WIDTH);
+  const indicatorSquash = useSharedValue(1);
+  const liquidFlash = useSharedValue(0);
+
   const menuProgress = useSharedValue(0);
+  const menuSquash = useSharedValue(1);
+  const menuContentReveal = useSharedValue(0);
 
-  const tabBarWidth = useMemo(() => {
-    return Math.min(screenWidth * TAB_BAR_WIDTH_RATIO, TAB_BAR_MAX_WIDTH);
-  }, [screenWidth]);
+  const animatedBarWidth = useDerivedValue(() =>
+    withSpring(targetBarWidth.value, SPRING_MORPH)
+  );
 
-  const tabWidth = tabBarWidth / TABS.length;
-  const tabBarLeft = (screenWidth - tabBarWidth) / 2;
+  const animatedBarHeight = useDerivedValue(() =>
+    withSpring(targetBarHeight.value, SPRING_MORPH)
+  );
 
-  const anchors = useMemo(() => {
-    const transactionsIndex = TABS.findIndex((tab) => tab.key === 'transactions');
-    const recurrenceIndex = TABS.findIndex((tab) => tab.key === 'recurrence');
+  const animatedBarRadius = useDerivedValue(() =>
+    withSpring(targetBarRadius.value, SPRING_MORPH)
+  );
 
-    return {
-      transactions: tabBarLeft + tabWidth * transactionsIndex + tabWidth / 2,
-      recurrence: tabBarLeft + tabWidth * recurrenceIndex + tabWidth / 2,
-    };
-  }, [tabBarLeft, tabWidth]);
+  const animatedIndicatorX = useDerivedValue(() =>
+    withSpring(indicatorTargetX.value, SPRING_MORPH)
+  );
 
-  const activeMenuAnchorX = visibleMenu === 'recurrence' ? anchors.recurrence : anchors.transactions;
+  const animatedIndicatorWidth = useDerivedValue(() =>
+    withSpring(indicatorTargetWidth.value, SPRING_MORPH)
+  );
 
-  const menuLeft = useMemo(() => {
-    return Math.max(
-      14,
-      Math.min(activeMenuAnchorX - MENU_WIDTH / 2, screenWidth - MENU_WIDTH - 14)
-    );
-  }, [activeMenuAnchorX, screenWidth]);
+  const tabWidth = tabBarWidth > 0 ? tabBarWidth / TABS.length : TAB_BAR_WIDTH / TABS.length;
 
-  const menuBottom = 90 + Math.max(insets.bottom - 8, 0);
-  const tabBottom = 20 + Math.max(insets.bottom, 0);
+  const tabBarLeft = (SCREEN_WIDTH - TAB_BAR_WIDTH) / 2;
+  const screenTabWidth = TAB_BAR_WIDTH / TABS.length;
+
+  const transactionsAnchorX = tabBarLeft + screenTabWidth * 2 + screenTabWidth / 2;
+  const recurrenceAnchorX = tabBarLeft + screenTabWidth * 3 + screenTabWidth / 2;
+
+  const activeMenuAnchorX =
+    visibleMenu === 'recurrence' ? recurrenceAnchorX : transactionsAnchorX;
+
+  const menuLeft = Math.max(
+    14,
+    Math.min(activeMenuAnchorX - MENU_WIDTH / 2, SCREEN_WIDTH - MENU_WIDTH - 14)
+  );
+
+  const menuBottom = 68 + Math.max(insets.bottom - 8, 0);
+
+  const menuIconColor = '#F2F2F2';
 
   useEffect(() => {
     let mounted = true;
 
     AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) {
-        reducedMotionRef.current = enabled;
-      }
+      if (mounted) reducedMotionRef.current = enabled;
     });
 
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
       reducedMotionRef.current = enabled;
     });
 
     return () => {
       mounted = false;
-      subscription.remove();
+      sub.remove();
     };
   }, []);
 
-  // barProgress starts at 1 — the tab bar is always visible immediately.
-  // No entrance animation needed.
+  useEffect(() => {
+    const reduced = reducedMotionRef.current;
+
+    barSquash.value = 0.84;
+
+    barVisibility.value = reduced
+      ? withTiming(1, { duration: 120 })
+      : withSpring(1, SPRING_ENTRY);
+
+    barSquash.value = reduced
+      ? withTiming(1, { duration: 120 })
+      : withSequence(
+        withSpring(1.075, SPRING_STRETCH),
+        withSpring(0.982, SPRING_RECOIL),
+        withSpring(1, SPRING_SETTLE)
+      );
+  }, [barVisibility, barSquash]);
 
   useEffect(() => {
     if (!visibleMenu) {
-      setActiveTab(getActiveTabFromRoute(currentRouteName));
+      setActiveTab(getVisualTabFromRoute(currentRouteName));
     }
   }, [currentRouteName, visibleMenu]);
 
   useEffect(() => {
-    const index = TABS.findIndex((tab) => tab.key === activeTab);
+    if (tabWidth > 0) {
+      const centeredX = getIndicatorX(
+        activeTab,
+        tabBarWidth > 0 ? tabBarWidth : TAB_BAR_WIDTH
+      );
 
-    if (index < 0) return;
+      indicatorTargetX.value = centeredX;
+      indicatorTargetWidth.value = ACTIVE_PILL_WIDTH;
 
-    const nextX = index * tabWidth + (tabWidth - ACTIVE_PILL_SIZE) / 2;
+      const reduced = reducedMotionRef.current;
 
-    indicatorX.value = reducedMotionRef.current
-      ? withTiming(nextX, { duration: 100 })
-      : withSpring(nextX, SPRING_FAST);
-  }, [activeTab, indicatorX, tabWidth]);
+      if (reduced) {
+        indicatorSquash.value = withTiming(1, { duration: 120 });
+      } else {
+        indicatorSquash.value = withSequence(
+          withSpring(1.065, SPRING_STRETCH),
+          withSpring(0.986, SPRING_RECOIL),
+          withSpring(1, SPRING_SETTLE)
+        );
+      }
+
+      liquidFlash.value = 0;
+      liquidFlash.value = withSequence(
+        withTiming(1, { duration: 120, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: 380, easing: Easing.out(Easing.cubic) })
+      );
+    }
+  }, [
+    activeTab,
+    tabBarWidth,
+    tabWidth,
+    indicatorTargetX,
+    indicatorTargetWidth,
+    indicatorSquash,
+    liquidFlash,
+  ]);
 
   useEffect(() => {
     const isOpen = !!visibleMenu;
     const reduced = reducedMotionRef.current;
 
-    menuProgress.value = withTiming(isOpen ? 1 : 0, {
-      duration: reduced ? 100 : 180,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [visibleMenu, menuProgress]);
+    targetBarWidth.value = isOpen ? TAB_BAR_WIDTH + 8 : TAB_BAR_WIDTH;
+    targetBarHeight.value = isOpen ? TAB_BAR_HEIGHT + 2 : TAB_BAR_HEIGHT;
+    targetBarRadius.value = isOpen ? TAB_BAR_RADIUS + 2 : TAB_BAR_RADIUS;
 
-  const closeMenus = useCallback(() => {
+    if (isOpen) {
+      menuSquash.value = 0.84;
+      menuContentReveal.value = 0;
+
+      menuProgress.value = reduced
+        ? withTiming(1, { duration: 120 })
+        : withSpring(1, SPRING_ENTRY);
+
+      menuSquash.value = reduced
+        ? withTiming(1, { duration: 120 })
+        : withSequence(
+          withSpring(1.075, SPRING_STRETCH),
+          withSpring(0.982, SPRING_RECOIL),
+          withSpring(1, SPRING_SETTLE)
+        );
+
+      menuContentReveal.value = withTiming(1, {
+        duration: reduced ? 90 : 220,
+        easing: Easing.out(Easing.cubic),
+      });
+    } else {
+      menuContentReveal.value = withTiming(0, {
+        duration: 90,
+        easing: Easing.out(Easing.quad),
+      });
+
+      menuSquash.value = withTiming(0.84, {
+        duration: 150,
+        easing: Easing.inOut(Easing.cubic),
+      });
+
+      menuProgress.value = withTiming(0, {
+        duration: 180,
+        easing: Easing.inOut(Easing.cubic),
+      });
+    }
+
+  }, [
+    visibleMenu,
+    menuProgress,
+    menuSquash,
+    menuContentReveal,
+    targetBarWidth,
+    targetBarHeight,
+    targetBarRadius,
+  ]);
+
+  const closeMenus = () => {
     setVisibleMenu(null);
-    setActiveTab(getActiveTabFromRoute(currentRouteName));
-  }, [currentRouteName]);
+    setActiveTab(getVisualTabFromRoute(currentRouteName));
+  };
 
-  const handlePress = useCallback(
-    (tabKey: TabKey) => {
-      if (tabKey === 'transactions' || tabKey === 'recurrence') {
-        const nextMenu = visibleMenu === tabKey ? null : tabKey;
+  const startNavMorph = () => {
+    barPressProgress.value = withSpring(1, {
+      damping: 17,
+      stiffness: 260,
+      mass: 0.42,
+    });
 
-        setVisibleMenu(nextMenu);
+    barMorphProgress.value = withSpring(1, {
+      damping: 14,
+      stiffness: 190,
+      mass: 0.48,
+    });
+  };
 
-        if (nextMenu) {
-          setActiveTab(nextMenu);
-        } else {
-          setActiveTab(getActiveTabFromRoute(currentRouteName));
-        }
+  const endNavMorph = () => {
+    barPressProgress.value = withSpring(0, {
+      damping: 16,
+      stiffness: 220,
+      mass: 0.45,
+    });
 
-        return;
+    barMorphProgress.value = withSpring(0, {
+      damping: 12,
+      stiffness: 150,
+      mass: 0.52,
+    });
+  };
+
+  const handlePress = (tabKey: TabKey) => {
+    if (tabKey === 'transactions' || tabKey === 'recurrence') {
+      const nextMenu: MenuKey = visibleMenu === tabKey ? null : tabKey;
+
+      if (nextMenu && visibleMenu !== nextMenu) {
+        menuProgress.value = 0;
+        menuSquash.value = 0.84;
+        menuContentReveal.value = 0;
       }
 
-      setVisibleMenu(null);
-      setActiveTab(tabKey);
-      navigation.navigate(tabKey);
-    },
-    [currentRouteName, navigation, visibleMenu]
-  );
+      setVisibleMenu(nextMenu);
 
-  const handleTransactionsPress = useCallback(() => {
+      if (nextMenu) {
+        setActiveTab(nextMenu);
+      } else if (currentRouteName === 'invoices') {
+        setActiveTab('transactions');
+      } else {
+        setActiveTab(getVisualTabFromRoute(currentRouteName));
+      }
+
+      return;
+    }
+
+    setVisibleMenu(null);
+    setActiveTab(tabKey);
+    navigation.navigate(tabKey);
+  };
+
+  const handleTransactionsPress = () => {
     setVisibleMenu(null);
     setActiveTab('transactions');
-    navigation.navigate('transactions', { filter: 'account' });
-  }, [navigation]);
+    router.push(`/transactions?filter=account`);
+  };
 
-  const handleInvoicesPress = useCallback(() => {
+  const handleInvoicesPress = () => {
     setVisibleMenu(null);
     setActiveTab('transactions');
-    navigation.navigate('invoices');
-  }, [navigation]);
+    router.push('/invoices');
+  };
 
-  const handleSubscriptionsPress = useCallback(() => {
+  const handleSubscriptionsPress = () => {
     setVisibleMenu(null);
     setActiveTab('recurrence');
-    navigation.navigate('recurrence', { tab: 'subscriptions' });
-  }, [navigation]);
+    router.push({
+      pathname: '/recurrence',
+      params: { tab: 'subscriptions' },
+    });
+  };
 
-  const handleRemindersPress = useCallback(() => {
+  const handleRemindersPress = () => {
     setVisibleMenu(null);
     setActiveTab('recurrence');
-    navigation.navigate('recurrence', { tab: 'reminders' });
-  }, [navigation]);
+    router.push({
+      pathname: '/recurrence',
+      params: { tab: 'reminders' },
+    });
+  };
 
   const tabBarAnimatedStyle = useAnimatedStyle(() => {
-    const progress = barProgress.value;
+    const pressed = barPressProgress.value;
+    const morph = barMorphProgress.value;
+
+    const stretchX = interpolate(
+      barSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [0.93, 0.992, 1, 1.032],
+      Extrapolation.CLAMP
+    );
+
+    const stretchY = interpolate(
+      barSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [1.07, 1.012, 1, 0.982],
+      Extrapolation.CLAMP
+    );
+
+    const baseScaleX = interpolate(
+      barVisibility.value,
+      [0, 0.34, 0.72, 1],
+      [0.22, 1.024, 0.994, 1],
+      Extrapolation.CLAMP
+    );
+
+    const baseScaleY = interpolate(
+      barVisibility.value,
+      [0, 0.42, 0.8, 1],
+      [0.18, 0.95, 1.008, 1],
+      Extrapolation.CLAMP
+    );
+
+    const translateY = interpolate(
+      barVisibility.value,
+      [0, 0.5, 0.82, 1],
+      [26, -3, 1, 0],
+      Extrapolation.CLAMP
+    );
 
     return {
-      opacity: interpolate(progress, [0, 1], [0, 1], Extrapolation.CLAMP),
+      width: animatedBarWidth.value,
+      height: animatedBarHeight.value,
+      opacity: interpolate(barVisibility.value, [0, 0.22, 1], [0, 0.88, 1]),
       transform: [
-        {
-          translateY: interpolate(progress, [0, 1], [18, 0], Extrapolation.CLAMP),
-        },
-        {
-          scale: interpolate(progress, [0, 1], [0.94, 1], Extrapolation.CLAMP),
-        },
+        { translateY: translateY + pressed * 1.2 },
+        { scaleX: baseScaleX * stretchX * (1 + morph * 0.01 - pressed * 0.01) },
+        { scaleY: baseScaleY * stretchY * (1 + morph * 0.012 + pressed * 0.006) },
       ],
+    };
+  });
+
+  const tabBarInnerAnimatedStyle = useAnimatedStyle(() => {
+    const pressed = barPressProgress.value;
+    const morph = barMorphProgress.value;
+
+    return {
+      borderRadius: animatedBarRadius.value + morph * 3 - pressed * 1,
+      backgroundColor: '#171717',
+    };
+  });
+
+  const tabBarContentCounterStyle = useAnimatedStyle(() => {
+    const counterX = interpolate(
+      barSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [1.08, 1.01, 1, 0.97],
+      Extrapolation.CLAMP
+    );
+
+    const counterY = interpolate(
+      barSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [0.94, 0.988, 1, 1.02],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      transform: [{ scaleX: counterX }, { scaleY: counterY }],
+    };
+  });
+
+  const indicatorLayerCounterStyle = useAnimatedStyle(() => {
+    const counterX = interpolate(
+      barSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [1.08, 1.01, 1, 0.97],
+      Extrapolation.CLAMP
+    );
+
+    const counterY = interpolate(
+      barSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [0.94, 0.988, 1, 1.02],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      transform: [{ scaleX: counterX }, { scaleY: counterY }],
     };
   });
 
   const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: indicatorX.value }],
+    width: animatedIndicatorWidth.value,
+    transform: [{ translateX: animatedIndicatorX.value }],
   }));
 
-  const menuAnimatedStyle = useAnimatedStyle(() => {
-    const progress = menuProgress.value;
-    const startX = activeMenuAnchorX - (menuLeft + MENU_WIDTH / 2);
+  const indicatorInnerStyle = useAnimatedStyle(() => {
+    const flashScaleX = interpolate(
+      liquidFlash.value,
+      [0, 0.45, 1],
+      [1, 1.12, 1],
+      Extrapolation.CLAMP
+    );
+
+    const flashScaleY = interpolate(
+      liquidFlash.value,
+      [0, 0.45, 1],
+      [1, 0.96, 1],
+      Extrapolation.CLAMP
+    );
+
+    const stretchX = interpolate(
+      indicatorSquash.value,
+      [0.982, 1, 1.075],
+      [0.992, 1, 1.055],
+      Extrapolation.CLAMP
+    );
+
+    const stretchY = interpolate(
+      indicatorSquash.value,
+      [0.982, 1, 1.075],
+      [1.012, 1, 0.965],
+      Extrapolation.CLAMP
+    );
 
     return {
-      opacity: interpolate(progress, [0, 1], [0, 1], Extrapolation.CLAMP),
+      transform: [
+        { scaleX: flashScaleX * stretchX },
+        { scaleY: flashScaleY * stretchY },
+      ],
+    };
+  });
+
+  const menuAnimatedStyle = useAnimatedStyle(() => {
+    const p = menuProgress.value;
+    const startX = activeMenuAnchorX - (menuLeft + MENU_WIDTH / 2);
+
+    const stretchX = interpolate(
+      menuSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [0.93, 0.992, 1, 1.032],
+      Extrapolation.CLAMP
+    );
+
+    const stretchY = interpolate(
+      menuSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [1.07, 1.012, 1, 0.982],
+      Extrapolation.CLAMP
+    );
+
+    const baseScaleX = interpolate(
+      p,
+      [0, 0.36, 0.72, 1],
+      [0.2, 1.032, 0.994, 1],
+      Extrapolation.CLAMP
+    );
+
+    const baseScaleY = interpolate(
+      p,
+      [0, 0.42, 0.8, 1],
+      [0.18, 0.95, 1.01, 1],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      opacity: interpolate(p, [0, 0.22, 1], [0, 0.88, 1], Extrapolation.CLAMP),
       transform: [
         {
-          translateX: interpolate(progress, [0, 1], [startX * 0.18, 0], Extrapolation.CLAMP),
+          translateX: interpolate(p, [0, 1], [startX, 0], Extrapolation.CLAMP),
         },
         {
-          translateY: interpolate(progress, [0, 1], [12, 0], Extrapolation.CLAMP),
+          translateY: interpolate(
+            p,
+            [0, 0.55, 0.82, 1],
+            [28, -3, 1, 0],
+            Extrapolation.CLAMP
+          ),
         },
+        { scaleX: baseScaleX * stretchX },
+        { scaleY: baseScaleY * stretchY },
+      ],
+    };
+  });
+
+  const menuContentAnimatedStyle = useAnimatedStyle(() => {
+    const counterX = interpolate(
+      menuSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [1.08, 1.01, 1, 0.97],
+      Extrapolation.CLAMP
+    );
+
+    const counterY = interpolate(
+      menuSquash.value,
+      [0.84, 0.982, 1, 1.075],
+      [0.94, 0.988, 1, 1.02],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      opacity: menuContentReveal.value,
+      transform: [
         {
-          scale: interpolate(progress, [0, 1], [0.96, 1], Extrapolation.CLAMP),
+          translateY: interpolate(menuContentReveal.value, [0, 1], [4, 0], Extrapolation.CLAMP),
+        },
+        { scaleX: counterX },
+        { scaleY: counterY },
+      ],
+    };
+  });
+
+  const menuArrowStyle = useAnimatedStyle(() => {
+    const p = menuProgress.value;
+
+    return {
+      opacity: interpolate(p, [0, 0.76, 1], [0, 0, 1], Extrapolation.CLAMP),
+      transform: [
+        { rotate: '45deg' },
+        {
+          scale: interpolate(p, [0, 1], [0.38, 1], Extrapolation.CLAMP),
         },
       ],
     };
   });
 
-  const menuContentStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(menuProgress.value, [0, 0.65, 1], [0, 0.7, 1], Extrapolation.CLAMP),
-    transform: [
-      {
-        translateY: interpolate(menuProgress.value, [0, 1], [3, 0], Extrapolation.CLAMP),
-      },
-    ],
-  }));
-
-  const menuArrowStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(menuProgress.value, [0, 0.75, 1], [0, 0, 1], Extrapolation.CLAMP),
-    transform: [
-      { rotate: '45deg' },
-      {
-        scale: interpolate(menuProgress.value, [0, 1], [0.72, 1], Extrapolation.CLAMP),
-      },
-    ],
-  }));
-
   return (
     <View style={styles.fullScreenContainer} pointerEvents="box-none">
       {!!visibleMenu && (
-        <Animated.View
-          entering={FadeIn.duration(90)}
-          exiting={FadeOut.duration(120)}
-          style={[StyleSheet.absoluteFill, styles.backdropLayer]}
-        >
+        <View style={[StyleSheet.absoluteFill, styles.backdropLayer]}>
+          <BlurView
+            intensity={10}
+            tint="dark"
+            blurMethod="dimezisBlurViewSdk31Plus"
+            style={StyleSheet.absoluteFill}
+          />
+          <View pointerEvents="none" style={styles.backdropBlurTint} />
           <Pressable
             style={[StyleSheet.absoluteFill, styles.backdropPressable]}
             onPress={closeMenus}
           />
-        </Animated.View>
+        </View>
       )}
 
       {!!visibleMenu && (
         <Animated.View
-          entering={FadeIn.duration(90)}
-          exiting={FadeOut.duration(110)}
+          exiting={ZoomOut.duration(130)}
           style={[
             styles.menuContainer,
             {
@@ -446,88 +778,77 @@ function CustomTabBar({ state, navigation }: { state: any; navigation: any }) {
           ]}
         >
           <View style={styles.menuBox}>
-            <Animated.View style={[styles.menuContent, menuContentStyle]}>
+            <View pointerEvents="none" style={styles.menuBlurTint} />
+            <Animated.View style={[styles.menuContent, menuContentAnimatedStyle]}>
               {visibleMenu === 'transactions' && (
                 <>
-                  <Pressable
-                    android_ripple={{ color: 'rgba(255,255,255,0.05)' }}
-                    style={({ pressed }) => [
-                      styles.menuItem,
-                      pressed && Platform.OS === 'ios' ? styles.menuItemPressed : null,
-                    ]}
+                  <TouchableOpacity
+                    activeOpacity={0.78}
+                    style={styles.menuItem}
                     onPress={handleTransactionsPress}
                   >
                     <View style={styles.menuIconBubble}>
-                      <WalletCards size={17} color={COLORS.text} strokeWidth={2} />
+                      <WalletCards size={17} color={menuIconColor} strokeWidth={2.1} />
                     </View>
 
                     <View style={styles.menuTextBlock}>
                       <Text style={styles.menuText}>Transações</Text>
                       <Text style={styles.menuDescription}>Entradas, saídas e filtros</Text>
                     </View>
-                  </Pressable>
+                  </TouchableOpacity>
 
                   <View style={styles.menuDivider} />
 
-                  <Pressable
-                    android_ripple={{ color: 'rgba(255,255,255,0.05)' }}
-                    style={({ pressed }) => [
-                      styles.menuItem,
-                      pressed && Platform.OS === 'ios' ? styles.menuItemPressed : null,
-                    ]}
+                  <TouchableOpacity
+                    activeOpacity={0.78}
+                    style={styles.menuItem}
                     onPress={handleInvoicesPress}
                   >
                     <View style={styles.menuIconBubble}>
-                      <CreditCard size={17} color={COLORS.text} strokeWidth={2} />
+                      <CreditCard size={17} color={menuIconColor} strokeWidth={2.1} />
                     </View>
 
                     <View style={styles.menuTextBlock}>
                       <Text style={styles.menuText}>Cartão de Crédito</Text>
                       <Text style={styles.menuDescription}>Faturas e lançamentos</Text>
                     </View>
-                  </Pressable>
+                  </TouchableOpacity>
                 </>
               )}
 
               {visibleMenu === 'recurrence' && (
                 <>
-                  <Pressable
-                    android_ripple={{ color: 'rgba(255,255,255,0.05)' }}
-                    style={({ pressed }) => [
-                      styles.menuItem,
-                      pressed && Platform.OS === 'ios' ? styles.menuItemPressed : null,
-                    ]}
+                  <TouchableOpacity
+                    activeOpacity={0.78}
+                    style={styles.menuItem}
                     onPress={handleSubscriptionsPress}
                   >
                     <View style={styles.menuIconBubble}>
-                      <Repeat2 size={17} color={COLORS.text} strokeWidth={2} />
+                      <Repeat size={17} color={menuIconColor} strokeWidth={2.1} />
                     </View>
 
                     <View style={styles.menuTextBlock}>
                       <Text style={styles.menuText}>Assinaturas</Text>
                       <Text style={styles.menuDescription}>Pagamentos recorrentes</Text>
                     </View>
-                  </Pressable>
+                  </TouchableOpacity>
 
                   <View style={styles.menuDivider} />
 
-                  <Pressable
-                    android_ripple={{ color: 'rgba(255,255,255,0.05)' }}
-                    style={({ pressed }) => [
-                      styles.menuItem,
-                      pressed && Platform.OS === 'ios' ? styles.menuItemPressed : null,
-                    ]}
+                  <TouchableOpacity
+                    activeOpacity={0.78}
+                    style={styles.menuItem}
                     onPress={handleRemindersPress}
                   >
                     <View style={styles.menuIconBubble}>
-                      <Bell size={17} color={COLORS.text} strokeWidth={2} />
+                      <Bell size={17} color={menuIconColor} strokeWidth={2.1} />
                     </View>
 
                     <View style={styles.menuTextBlock}>
                       <Text style={styles.menuText}>Lembretes</Text>
                       <Text style={styles.menuDescription}>Alertas e vencimentos</Text>
                     </View>
-                  </Pressable>
+                  </TouchableOpacity>
                 </>
               )}
             </Animated.View>
@@ -543,49 +864,50 @@ function CustomTabBar({ state, navigation }: { state: any; navigation: any }) {
       <Animated.View
         style={[
           styles.tabBarShadow,
-          {
-            width: tabBarWidth,
-            bottom: tabBottom,
-          },
           tabBarAnimatedStyle,
+          {
+            bottom: 14 + Math.max(insets.bottom, 0),
+          },
         ]}
       >
-        <View style={styles.tabBarInner}>
-          <View pointerEvents="none" style={styles.innerTopLine} />
-          <View pointerEvents="none" style={styles.innerBottomShade} />
+        <Animated.View
+          style={[styles.tabBarInner, tabBarInnerAnimatedStyle]}
+          onLayout={(event) => setTabBarWidth(event.nativeEvent.layout.width)}
+        >
+          {tabBarWidth > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.indicatorLayer, indicatorLayerCounterStyle]}
+            >
+              <Animated.View style={[styles.indicatorWrapper, indicatorStyle]}>
+                <Animated.View style={[styles.indicatorFill, indicatorInnerStyle]} />
+              </Animated.View>
+            </Animated.View>
+          )}
 
-          <Animated.View style={[styles.indicatorWrapper, indicatorStyle]}>
-            <View style={styles.indicatorPill} />
-          </Animated.View>
-
-          <View style={styles.tabsSection}>
+          <Animated.View style={[styles.tabsSection, tabBarContentCounterStyle]}>
             {TABS.map((tab) => (
               <TabItem
                 key={tab.key}
-                title={tab.title}
-                icon={tab.icon}
+                Icon={tab.Icon}
                 isActive={activeTab === tab.key}
                 onPress={() => handlePress(tab.key)}
+                onInteractionStart={startNavMorph}
+                onInteractionEnd={endNavMorph}
               />
             ))}
-          </View>
-        </View>
+          </Animated.View>
+        </Animated.View>
       </Animated.View>
     </View>
   );
 }
 
-const renderTabBar = (props: any) => <CustomTabBar {...props} />;
-
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuthContext();
 
   if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#F5F5F7" />
-      </View>
-    );
+    return <IosCoreLoader style={styles.loadingContainer} />;
   }
 
   if (!isAuthenticated) {
@@ -594,12 +916,8 @@ export default function TabLayout() {
 
   return (
     <Tabs
-      tabBar={renderTabBar}
-      screenOptions={{
-        headerShown: false,
-        animation: 'none',
-        lazy: true,
-      }}
+      tabBar={(props) => <CustomTabBar {...props} />}
+      screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen name="dashboard" />
       <Tabs.Screen name="open-finance" />
@@ -614,7 +932,7 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#0A0A0A',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -632,22 +950,24 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
 
-  backdropPressable: {
-    backgroundColor: COLORS.backdrop,
+  backdropBlurTint: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
+
+  backdropPressable: {},
 
   tabBarShadow: {
     position: 'absolute',
     alignSelf: 'center',
-    height: TAB_BAR_HEIGHT,
-    zIndex: 100,
-    elevation: 20,
+    zIndex: 10,
+    elevation: 10,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 12,
+      height: 10,
     },
-    shadowOpacity: 0.28,
+    shadowOpacity: 0.24,
     shadowRadius: 18,
   },
 
@@ -655,31 +975,11 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     overflow: 'hidden',
-    borderRadius: TAB_BAR_RADIUS,
-    backgroundColor: COLORS.surface,
+    backgroundColor: '#171717',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#242424',
   },
 
-  innerTopLine: {
-    position: 'absolute',
-    top: 0,
-    left: 16,
-    right: 16,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    zIndex: 2,
-  },
-
-  innerBottomShade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 20,
-    backgroundColor: 'rgba(0,0,0,0.12)',
-    zIndex: 2,
-  },
 
   tabsSection: {
     position: 'absolute',
@@ -696,44 +996,59 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
     zIndex: 7,
+    position: 'relative',
+    paddingTop: 0,
   },
 
-  tabPressLayer: {
-    position: 'absolute',
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-  },
 
   iconContainer: {
-    width: ACTIVE_PILL_SIZE,
-    height: ACTIVE_PILL_SIZE,
+    width: ACTIVE_PILL_WIDTH,
+    height: ACTIVE_PILL_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2,
   },
 
+  tabIcon: {
+    width: 25,
+    height: 25,
+  },
+
+  indicatorLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: TAB_BAR_HEIGHT,
+    zIndex: 4,
+  },
+
   indicatorWrapper: {
     position: 'absolute',
     left: 0,
-    top: 0,
-    bottom: 0,
-    width: ACTIVE_PILL_SIZE,
+    top: (TAB_BAR_HEIGHT - ACTIVE_PILL_HEIGHT) / 2,
+    height: ACTIVE_PILL_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 4,
   },
 
-  indicatorPill: {
-    width: ACTIVE_PILL_SIZE,
-    height: ACTIVE_PILL_SIZE,
+  indicatorFill: {
+    width: ACTIVE_PILL_WIDTH,
+    height: ACTIVE_PILL_HEIGHT,
     borderRadius: ACTIVE_PILL_RADIUS,
-    backgroundColor: COLORS.accentSoft,
+    backgroundColor: 'rgba(217,119,87,0.14)',
     borderWidth: 1,
-    borderColor: COLORS.accentStrong,
+    borderColor: 'rgba(217,119,87,0.34)',
+    shadowColor: ACCENT_ORANGE,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.16,
+    shadowRadius: 9,
+    elevation: 2,
   },
 
   menuContainer: {
@@ -746,36 +1061,40 @@ const styles = StyleSheet.create({
   menuBox: {
     width: MENU_WIDTH,
     overflow: 'hidden',
-    borderRadius: 22,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(23,23,23,0.72)',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 14,
+      height: 8,
     },
-    shadowOpacity: 0.3,
-    shadowRadius: 22,
-    elevation: 12,
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+
+  menuBlurTint: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(18,18,18,0.66)',
+    zIndex: 1,
   },
 
   menuContent: {
-    paddingVertical: 4,
-    backgroundColor: COLORS.surface,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+    zIndex: 2,
+    backgroundColor: 'transparent',
   },
 
   menuItem: {
-    minHeight: 48,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 14,
-    backgroundColor: COLORS.surface,
-  },
-
-  menuItemPressed: {
-    backgroundColor: COLORS.surfaceElevated,
+    paddingHorizontal: 12,
+    borderRadius: 0,
   },
 
   menuIconBubble: {
@@ -785,9 +1104,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 9,
-    backgroundColor: COLORS.surfaceSoft,
-    borderWidth: 1,
-    borderColor: COLORS.borderSoft,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+
+  menuIcon: {
+    width: 21,
+    height: 21,
   },
 
   menuTextBlock: {
@@ -795,33 +1118,36 @@ const styles = StyleSheet.create({
   },
 
   menuText: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    color: TEXT_DARK,
+    fontSize: 12.5,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
 
   menuDescription: {
-    marginTop: 1,
-    color: COLORS.textMuted,
-    fontSize: 10.5,
-    fontWeight: '400',
-    letterSpacing: -0.15,
+    marginTop: 2,
+    color: TEXT_MUTED,
+    fontSize: 10,
+    fontWeight: '500',
+    letterSpacing: 0,
   },
 
   menuDivider: {
-    height: 1,
-    backgroundColor: COLORS.border,
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 0,
+    marginLeft: 0,
+    marginRight: 0,
+    backgroundColor: '#282828',
   },
 
   menuArrow: {
-    width: 18,
-    height: 18,
-    marginTop: -9,
-    backgroundColor: COLORS.surface,
+    width: 14,
+    height: 14,
+    marginTop: -7,
+    backgroundColor: 'rgba(18,18,18,0.92)',
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: 'rgba(255,255,255,0.08)',
     zIndex: 1,
   },
 });

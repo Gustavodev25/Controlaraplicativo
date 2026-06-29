@@ -39,6 +39,83 @@ const getPluggyErrorMessage = (payload = {}, fallback = 'Falha na comunicacao co
     );
 };
 
+const normalizeConnectorSearchKey = (value) => {
+    const text = String(value || '');
+    const normalizedText = typeof text.normalize === 'function' ? text.normalize('NFD') : text;
+
+    return normalizedText
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+};
+
+const getConnectorDedupeKey = (connector = {}) => {
+    const name = normalizeConnectorSearchKey(connector.name);
+    const type = normalizeConnectorSearchKey(connector.type);
+
+    if (name) return `${type || 'bank'}:${name}`;
+    if (connector.id) return `id:${String(connector.id)}`;
+
+    return null;
+};
+
+const getConnectorQualityScore = (connector = {}) => {
+    let score = 0;
+
+    if (connector.id) score += 4;
+    if (
+        connector.imageUrl ||
+        connector.logoUrl ||
+        connector.iconUrl ||
+        connector.image ||
+        connector.logo ||
+        connector.icon
+    ) {
+        score += 3;
+    }
+    if (connector.primaryColor) score += 1;
+    if (Array.isArray(connector.credentials)) score += connector.credentials.length;
+
+    return score;
+};
+
+const deduplicatePluggyConnectors = (connectors = []) => {
+    if (!Array.isArray(connectors)) return [];
+
+    const result = [];
+    const keyToIndex = new Map();
+
+    connectors.forEach((connector) => {
+        if (!connector || typeof connector !== 'object') return;
+
+        const keys = [
+            connector.id ? `id:${String(connector.id)}` : null,
+            getConnectorDedupeKey(connector),
+        ].filter(Boolean);
+
+        const existingIndex = keys
+            .map((key) => keyToIndex.get(key))
+            .find((index) => index !== undefined);
+
+        if (existingIndex === undefined) {
+            const nextIndex = result.length;
+            result.push(connector);
+            keys.forEach((key) => keyToIndex.set(key, nextIndex));
+            return;
+        }
+
+        const current = result[existingIndex];
+        if (getConnectorQualityScore(connector) > getConnectorQualityScore(current)) {
+            result[existingIndex] = connector;
+        }
+
+        keys.forEach((key) => keyToIndex.set(key, existingIndex));
+    });
+
+    return result;
+};
+
 const isRetryablePluggyError = (status, errorCode) => {
     const code = normalizeCode(errorCode);
     if (RETRYABLE_HTTP_STATUSES.has(Number(status))) return true;
@@ -111,6 +188,7 @@ const readResponseBody = async (response) => {
 };
 
 module.exports = {
+    deduplicatePluggyConnectors,
     getPluggyErrorCode,
     getPluggyErrorMessage,
     isActionRequiredPluggyError,

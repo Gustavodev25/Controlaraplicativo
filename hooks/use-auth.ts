@@ -55,12 +55,12 @@ interface UserProfile {
             day: number;
             isExempt: boolean;
         };
-        discounts: Array<{
+        discounts: {
             id: string;
             name: string;
             value: number;
             type: string;
-        }>;
+        }[];
     };
     preferences?: {
         balanceAccountIds?: string[];
@@ -191,8 +191,14 @@ export function useAuth() {
             });
 
             if (!registrationResult.success) {
+                const remainingAttempts = typeof registrationResult.remainingAttempts === 'number'
+                    ? ` Tentativas restantes: ${registrationResult.remainingAttempts}.`
+                    : '';
                 setState(prev => ({ ...prev, isLoading: false }));
-                return { success: false, error: registrationResult.error || 'Nao foi possivel verificar o e-mail.' };
+                return {
+                    success: false,
+                    error: `${registrationResult.error || 'Nao foi possivel verificar o e-mail.'}${remainingAttempts}`,
+                };
             }
 
             const signInResult = await authService.signIn(email, password);

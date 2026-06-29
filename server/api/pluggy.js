@@ -3,6 +3,7 @@ const fetch = require('node-fetch');
 const { z } = require('zod');
 const { getFirebaseAdmin, isFirebaseConfigured } = require('../lib/firebaseAdmin');
 const {
+    deduplicatePluggyConnectors,
     normalizePluggyError,
     readResponseBody,
 } = require('./pluggy.helpers');
@@ -34,6 +35,11 @@ const AUTH_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 const AUTH_TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
 const ACCOUNT_ENRICH_RETRY_ATTEMPTS = 3;
 const ACCOUNT_ENRICH_RETRY_BASE_DELAY_MS = 900;
+const CONNECTORS_CACHE_TTL_MS = 10 * 60 * 1000;
+const CONNECTORS_HEALTH_CACHE_TTL_MS = 2 * 60 * 1000;
+
+const connectorsCache = new Map();
+const connectorsInFlight = new Map();
 
 const normalizeUrlBase = (value) => String(value || '').trim().replace(/\/+$/, '');
 
@@ -321,6 +327,77 @@ const sendPluggyError = async (res, response, fallbackMessage, fallbackCode = nu
         fallbackCode
     );
     return res.status(normalized.status).json(normalized.body);
+};
+
+const normalizeConnectorsPayload = (data) => {
+    if (Array.isArray(data?.results)) {
+        return {
+            ...data,
+            results: deduplicatePluggyConnectors(data.results),
+        };
+    }
+
+    if (Array.isArray(data)) {
+        return deduplicatePluggyConnectors(data);
+    }
+
+    return data;
+};
+
+const getConnectorsCacheKey = (healthDetails) => (
+    `${env.PLUGGY_SANDBOX}:${healthDetails ? 'with-health' : 'basic'}`
+);
+
+const fetchConnectorsPayload = async ({
+    healthDetails = false,
+    ttlMs = CONNECTORS_CACHE_TTL_MS,
+    fallbackMessage = 'Servico temporariamente indisponivel',
+    fallbackCode = 'CONNECTORS_FETCH_FAILED',
+} = {}) => {
+    const key = getConnectorsCacheKey(healthDetails);
+    const cached = connectorsCache.get(key);
+    const now = Date.now();
+
+    if (cached && now - cached.cachedAt < ttlMs) {
+        return { ok: true, payload: cached.payload, cached: true };
+    }
+
+    if (connectorsInFlight.has(key)) {
+        return connectorsInFlight.get(key);
+    }
+
+    const request = (async () => {
+        let url = `${PLUGGY_API_URL}/connectors?sandbox=${env.PLUGGY_SANDBOX}&types=PERSONAL_BANK,BUSINESS_BANK`;
+
+        if (healthDetails) {
+            url += '&healthDetails=true';
+        }
+
+        const resp = await pluggy.safeFetch(url);
+
+        if (!resp.ok) {
+            const payload = await readResponseBody(resp);
+            const normalized = buildErrorResponse(resp.status, payload, fallbackMessage, fallbackCode);
+            return { ok: false, status: normalized.status, body: normalized.body };
+        }
+
+        const data = await readResponseBody(resp);
+        const payload = normalizeConnectorsPayload(data);
+        connectorsCache.set(key, {
+            payload,
+            cachedAt: Date.now(),
+        });
+
+        return { ok: true, payload, cached: false };
+    })();
+
+    connectorsInFlight.set(key, request);
+
+    try {
+        return await request;
+    } finally {
+        connectorsInFlight.delete(key);
+    }
 };
 
 const shouldRetrySyncError = (error) => (
@@ -710,21 +787,18 @@ router.get('/ping', (req, res) => {
 router.get('/connectors', async (req, res) => {
     try {
         const healthDetails = req.query.healthDetails === 'true' || req.query.healthDetails === '1';
-        
-        let url = `${PLUGGY_API_URL}/connectors?sandbox=${env.PLUGGY_SANDBOX}&types=PERSONAL_BANK,BUSINESS_BANK`;
-        
-        if (healthDetails) {
-            url += '&healthDetails=true';
+        const result = await fetchConnectorsPayload({
+            healthDetails,
+            ttlMs: healthDetails ? CONNECTORS_HEALTH_CACHE_TTL_MS : CONNECTORS_CACHE_TTL_MS,
+            fallbackMessage: 'Servico temporariamente indisponivel',
+            fallbackCode: 'CONNECTORS_FETCH_FAILED',
+        });
+
+        if (!result.ok) {
+            return res.status(result.status).json(result.body);
         }
 
-        const resp = await pluggy.safeFetch(url);
-        
-        if (!resp.ok) {
-            return sendPluggyError(res, resp, 'Servico temporariamente indisponivel', 'CONNECTORS_FETCH_FAILED');
-        }
-        
-        const data = await readResponseBody(resp);
-        res.json(data);
+        res.json(result.payload);
     } catch (err) {
         res.status(502).json({
             success: false,
@@ -739,6 +813,53 @@ router.get('/connectors', async (req, res) => {
 // Lightweight endpoint for bank health status (used by app to show warnings)
 router.get('/connectors/health', async (req, res) => {
     try {
+        const result = await fetchConnectorsPayload({
+            healthDetails: true,
+            ttlMs: CONNECTORS_HEALTH_CACHE_TTL_MS,
+            fallbackMessage: 'Nao foi possivel verificar status dos bancos',
+            fallbackCode: 'HEALTH_CHECK_FAILED',
+        });
+
+        if (!result.ok) {
+            return res.status(result.status).json(result.body);
+        }
+
+        const data = result.payload;
+        const connectors = Array.isArray(data?.results)
+            ? data.results
+            : Array.isArray(data)
+                ? data
+                : [];
+
+        const unhealthy = connectors
+            .filter((c) => {
+                const health = c.health || {};
+                const status = (health.status || '').toUpperCase();
+                return status !== 'ONLINE' && status !== 'OPERATIONAL';
+            })
+            .map((c) => ({
+                id: c.id,
+                name: c.name,
+                health: c.health || { status: 'UNKNOWN' },
+            }));
+
+        res.json({
+            success: true,
+            unhealthy,
+            totalChecked: connectors.length,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (err) {
+        res.status(502).json({
+            success: false,
+            error: err?.message || 'Falha ao verificar status dos bancos',
+            errorCode: 'HEALTH_CHECK_FAILED',
+        });
+    }
+});
+
+router.get('/connectors/health-legacy', async (req, res) => {
+    try {
         const resp = await pluggy.safeFetch(
             `${PLUGGY_API_URL}/connectors?sandbox=${env.PLUGGY_SANDBOX}&types=PERSONAL_BANK,BUSINESS_BANK&healthDetails=true`
         );
@@ -752,7 +873,7 @@ router.get('/connectors/health', async (req, res) => {
         }
 
         const data = await readResponseBody(resp);
-        const connectors = data.results || data || [];
+        const connectors = deduplicatePluggyConnectors(data.results || data || []);
 
         // Extract only connectors that have health issues
         const unhealthy = connectors

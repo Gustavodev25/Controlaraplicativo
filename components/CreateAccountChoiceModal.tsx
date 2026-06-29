@@ -7,6 +7,8 @@ interface CreateAccountChoiceModalProps {
     onClose: () => void;
     onSelectManual: () => void;
     onSelectConnect: () => void;
+    credits?: number;
+    unlimited?: boolean;
 }
 
 export function CreateAccountChoiceModal({
@@ -14,6 +16,8 @@ export function CreateAccountChoiceModal({
     onClose,
     onSelectManual,
     onSelectConnect,
+    credits,
+    unlimited,
 }: CreateAccountChoiceModalProps) {
     return (
         <ModalPadrao
@@ -39,7 +43,14 @@ export function CreateAccountChoiceModal({
                         }}
                     >
                         <View style={styles.optionContent}>
-                            <Text style={styles.optionTitle}>Conectar banco automático</Text>
+                            <View style={styles.titleRow}>
+                                <Text style={styles.optionTitle}>Conectar banco automático</Text>
+                                {(credits !== undefined || unlimited) && (
+                                    <View style={styles.pillContainer}>
+                                        <Text style={styles.pillText}>{unlimited ? '∞' : credits}</Text>
+                                    </View>
+                                )}
+                            </View>
                             <Text style={styles.optionDescription}>
                                 Sincronize via Open Finance. Saldos e transações atualizam sozinhos.
                             </Text>
@@ -102,6 +113,25 @@ const styles = StyleSheet.create({
         color: '#909090',
         fontSize: 14,
         lineHeight: 20,
+        fontFamily: 'AROneSans_400Regular',
+    },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    pillContainer: {
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    pillText: {
+        color: '#E5E5E5',
+        fontSize: 12,
+        fontWeight: '600',
         fontFamily: 'AROneSans_400Regular',
     },
 });

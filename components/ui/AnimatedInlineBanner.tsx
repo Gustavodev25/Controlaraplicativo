@@ -57,13 +57,17 @@ export interface AnimatedInlineBannerProps {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const FLOATING_TAB_BAR_BOTTOM = 20;
-const FLOATING_TAB_BAR_HEIGHT = 58;
-const BANNER_BOTTOM_OFFSET = FLOATING_TAB_BAR_BOTTOM + FLOATING_TAB_BAR_HEIGHT - 1;
+const FLOATING_TAB_BAR_BOTTOM = 14;
+const FLOATING_TAB_BAR_HEIGHT = 46;
+const BANNER_NAV_GAP = 10;
+const BANNER_BOTTOM_OFFSET = FLOATING_TAB_BAR_BOTTOM + FLOATING_TAB_BAR_HEIGHT + BANNER_NAV_GAP;
 
-const TOP_BAR_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 340);
+const TOP_BAR_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 320);
 
-const BANNER_MAX_WIDTH = Math.round(TOP_BAR_WIDTH * 0.8);
+const BANNER_EDGE_INSET = 16;
+const BANNER_TEXT_MAX_WIDTH = Math.round(TOP_BAR_WIDTH * 0.82);
+const BANNER_ACTION_WIDTH = Math.min(SCREEN_WIDTH - 40, TOP_BAR_WIDTH - BANNER_EDGE_INSET);
+const BANNER_MAX_WIDTH = Math.max(BANNER_TEXT_MAX_WIDTH, BANNER_ACTION_WIDTH);
 const BANNER_HORIZONTAL_PADDING = 14;   // Increased padding to keep content away from the borders
 const TEXT_ONLY_WIDTH_BUFFER = BANNER_HORIZONTAL_PADDING * 2 + 2;
 const ESTIMATED_TEXT_CHAR_WIDTH = 7.4;
@@ -137,24 +141,24 @@ const SPRING_SETTLE = {
 function getBannerColors(step: InlineBannerStep) {
     if (step === 'error') {
         return {
-            text: '#FFB3B3',
-            rightBlur: 'rgba(239,68,68,0.18)',
-            rightBlurSoft: 'rgba(239,68,68,0.06)',
+            text: '#F2F2F2',
+            rightBlur: 'rgba(217,119,87,0.18)',
+            rightBlurSoft: 'rgba(217,119,87,0.06)',
             edgeLight: 'rgba(255,255,255,0.025)',
         };
     }
     if (step === 'success') {
         return {
-            text: '#B3FFCC',
-            rightBlur: 'rgba(34,197,94,0.17)',
-            rightBlurSoft: 'rgba(34,197,94,0.06)',
+            text: '#F2F2F2',
+            rightBlur: 'rgba(217,119,87,0.16)',
+            rightBlurSoft: 'rgba(217,119,87,0.05)',
             edgeLight: 'rgba(255,255,255,0.025)',
         };
     }
     return {
-        text: '#66BB6A',
-        rightBlur: 'rgba(102,187,106,0.18)',
-        rightBlurSoft: 'rgba(102,187,106,0.06)',
+        text: '#F2F2F2',
+        rightBlur: 'rgba(217,119,87,0.16)',
+        rightBlurSoft: 'rgba(217,119,87,0.05)',
         edgeLight: 'rgba(255,255,255,0.025)',
     };
 }
@@ -460,6 +464,8 @@ export function AnimatedInlineBanner({
             height: animatedHeight.value,
             borderTopLeftRadius: animatedRadius.value,
             borderTopRightRadius: animatedRadius.value,
+            borderBottomLeftRadius: animatedRadius.value,
+            borderBottomRightRadius: animatedRadius.value,
             transform: [
                 { scaleX: baseScaleX * stretchX },
                 { scaleY: baseScaleY * stretchY },
@@ -683,15 +689,10 @@ const styles = StyleSheet.create({
     banner: {
         alignSelf: 'center',
         overflow: 'hidden',
-        backgroundColor: 'rgba(20,20,20,0.08)',
-
-        // bottom is flat — banner sits on top of the floating tab bar
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 0,
+        backgroundColor: '#171717',
 
         borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: '#2B2B2B',
+        borderColor: '#242424',
 
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -8 },
@@ -709,7 +710,7 @@ const styles = StyleSheet.create({
     baseTint: {
         ...StyleSheet.absoluteFill,
         zIndex: 1,
-        opacity: 0.9,
+        opacity: 0.96,
     },
 
     rightBlurMask: {
@@ -770,7 +771,7 @@ const styles = StyleSheet.create({
     text: {
         fontSize: 12,
         fontWeight: '600',
-        letterSpacing: -0.15,
+        letterSpacing: 0,
         flexShrink: 1,
     },
 
@@ -796,7 +797,7 @@ const styles = StyleSheet.create({
     },
 
     cancelButtonText: {
-        color: '#A0A0A0',
+        color: '#8E8E93',
         fontSize: 10.5,
         fontWeight: '600',
     },
@@ -805,8 +806,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         height: 26,
         minWidth: 54,
-        borderRadius: 8,
-        backgroundColor: '#D97757',
+        borderRadius: 10,
+        backgroundColor: 'rgba(217,119,87,0.84)',
+        borderWidth: 1,
+        borderColor: 'rgba(217,119,87,0.38)',
         justifyContent: 'center',
         alignItems: 'center',
     },
