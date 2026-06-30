@@ -644,6 +644,15 @@ export default function OpenFinanceScreen() {
     const handleOAuthCallbackRef = useRef<((url: string) => Promise<void>) | null>(null);
     const fetchAccountsRef = useRef<() => Promise<void>>(async () => undefined);
     const connectorsRef = useRef<any[]>([]);
+    const isOpenFinanceMountedRef = useRef(false);
+
+    useEffect(() => {
+        isOpenFinanceMountedRef.current = true;
+
+        return () => {
+            isOpenFinanceMountedRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         pendingItemIdRef.current = pendingItemId;
@@ -653,15 +662,21 @@ export default function OpenFinanceScreen() {
         connectorsRef.current = connectors;
     }, [connectors]);
 
-    useEffect(() => queryCache.subscribe<any[]>(BANK_CONNECTORS_CACHE_KEY, (nextConnectors) => {
-        const bankConnectors = normalizeBankConnectorsPayload(nextConnectors);
-        if (bankConnectors.length === 0) return;
+    useEffect(() => {
+        const unsubscribe = queryCache.subscribe<any[]>(BANK_CONNECTORS_CACHE_KEY, (nextConnectors) => {
+            if (!isOpenFinanceMountedRef.current) return;
 
-        rememberBankConnectors(bankConnectors);
-        setConnectors(bankConnectors);
-        setConnectorsFetchError(null);
-        setLoadingConnectors(false);
-    }), []);
+            const bankConnectors = normalizeBankConnectorsPayload(nextConnectors);
+            if (bankConnectors.length === 0) return;
+
+            rememberBankConnectors(bankConnectors);
+            setConnectors(bankConnectors);
+            setConnectorsFetchError(null);
+            setLoadingConnectors(false);
+        });
+
+        return unsubscribe;
+    }, []);
 
     const clearBankSyncBannerTimer = useCallback(() => {
         if (bankSyncBannerTimerRef.current) {
@@ -972,14 +987,18 @@ export default function OpenFinanceScreen() {
 
                     if (response.ok) {
                         lastApiHealthCheckRef.current = Date.now();
-                        setApiBaseUrl(candidate);
+                        if (isOpenFinanceMountedRef.current) {
+                            setApiBaseUrl(candidate);
+                        }
                         return candidate;
                     }
                 } catch { }
             }
 
             lastApiHealthCheckRef.current = Date.now();
-            setApiBaseUrl(bestEffortFallback);
+            if (isOpenFinanceMountedRef.current) {
+                setApiBaseUrl(bestEffortFallback);
+            }
             return bestEffortFallback;
         })();
 
@@ -2003,13 +2022,19 @@ export default function OpenFinanceScreen() {
 
             const bankConnectors = await request;
             rememberBankConnectors(bankConnectors);
-            setConnectors(bankConnectors);
+            if (isOpenFinanceMountedRef.current) {
+                setConnectors(bankConnectors);
+            }
         } catch (error: any) {
             const msg = isNetworkTransportError(error)
                 ? getApiConnectionErrorMessage(error instanceof Error ? error.message : undefined)
                 : error instanceof Error
                     ? error.message
                     : 'NÃ£o foi possÃ­vel carregar os bancos.';
+
+            if (!isOpenFinanceMountedRef.current) {
+                return;
+            }
 
             if (connectorsRef.current.length === 0 && cachedBankConnectors.length === 0) {
                 setConnectorsFetchError(msg);
@@ -2021,7 +2046,9 @@ export default function OpenFinanceScreen() {
                 bankConnectorsRequest = null;
             }
 
-            setLoadingConnectors(false);
+            if (isOpenFinanceMountedRef.current) {
+                setLoadingConnectors(false);
+            }
         }
     }, [apiFetch, user]);
 
