@@ -458,11 +458,16 @@ function buildStatusSnapshot(sub) {
 
     const now = Date.now();
     const plan = String(sub.plan || '').trim().toLowerCase() || 'free';
-    const status = String(sub.status || '').trim().toLowerCase() || 'inactive';
+    let status = String(sub.status || '').trim().toLowerCase() || 'inactive';
     const expiresMs = dateValueToMillis(sub.expiresAt || sub.renewalDate || sub.nextBillingDate);
+    const isPaidPlan = plan === 'pro' || plan === 'premium';
+    const isActiveStatus = status === 'active' || status === 'trial' || status === 'trialing';
+    if (isPaidPlan && isActiveStatus && expiresMs && expiresMs <= now) {
+        status = 'expired';
+    }
     const hasPro =
-        (plan === 'pro' || plan === 'premium') &&
-        (status === 'active' || status === 'trial' || status === 'trialing') &&
+        isPaidPlan &&
+        isActiveStatus &&
         (!expiresMs || expiresMs > now);
 
     const subscription = {
@@ -489,6 +494,21 @@ function buildStatusSnapshot(sub) {
         autoRenewStatus: sub.autoRenewStatus || null,
         subscription,
     };
+}
+
+async function persistComputedGoogleStatus({ admin, userRef, sub, snapshot }) {
+    if (!sub || !GOOGLE_PROVIDER_VALUES.has(resolveProvider(sub))) return false;
+
+    const currentStatus = String(sub.status || '').trim().toLowerCase() || 'inactive';
+    if (currentStatus === snapshot.status) return false;
+
+    const update = {};
+    const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
+    mirrorSubscriptionField(update, 'status', snapshot.status);
+    mirrorSubscriptionField(update, 'updatedAt', serverTimestamp);
+
+    await userRef.set(update, { merge: true });
+    return true;
 }
 
 async function verifyFirebaseUser(req, expectedUid) {
@@ -903,7 +923,9 @@ router.get('/subscription-status', async (req, res) => {
             console.error('[Google Play] subscription refresh failed:', refreshError.message);
         }
 
-        return res.json(buildStatusSnapshot(sub));
+        const snapshot = buildStatusSnapshot(sub);
+        await persistComputedGoogleStatus({ admin, userRef, sub, snapshot });
+        return res.json(snapshot);
     } catch (error) {
         console.error('[Google Play] subscription-status error:', error);
         return res.status(error.statusCode || 500).json({
@@ -960,6 +982,7 @@ module.exports._test = {
     GOOGLE_PLAY_PRO_PRODUCT_ID,
     GOOGLE_PLAY_TRIAL_OFFER_ID,
     GOOGLE_PLAY_TRIAL_DAYS,
+    buildStatusSnapshot,
     getGoogleAcknowledgeExternalAccountIds,
     getGooglePurchaseAccountId,
     getLatestProLineItem,

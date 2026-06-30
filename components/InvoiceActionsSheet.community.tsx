@@ -14,7 +14,6 @@ export function InvoiceActionsSheet({
     showInvoiceCards,
     onConfigureInvoice,
     onSearchTransaction,
-    onCreateManualAccount,
     onCreateManualTransaction,
     onToggleInvoiceCards,
 }: InvoiceActionsSheetProps) {
@@ -69,7 +68,6 @@ export function InvoiceActionsSheet({
                     showInvoiceCards={showInvoiceCards}
                     onConfigureInvoice={() => dismissWithAction(onConfigureInvoice)}
                     onSearchTransaction={() => dismissWithAction(onSearchTransaction)}
-                    onCreateManualAccount={() => dismissWithAction(onCreateManualAccount)}
                     onCreateManualTransaction={() => dismissWithAction(onCreateManualTransaction)}
                     onToggleInvoiceCards={() => dismissWithAction(onToggleInvoiceCards)}
                 />

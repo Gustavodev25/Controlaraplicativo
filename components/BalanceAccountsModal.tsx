@@ -3,6 +3,7 @@ import { AuthButton } from '@/components/ui/AuthButton';
 import { databaseService } from '@/services/firebase';
 import { Landmark } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
+import Animated, { FadeInDown, withRepeat, withTiming, useAnimatedStyle, useSharedValue, Easing } from 'react-native-reanimated';
 import {
     StyleSheet,
     Text,
@@ -42,7 +43,6 @@ export function BalanceAccountsModal({
     onSave,
 }: BalanceAccountsModalProps) {
     const [selected, setSelected] = useState<string[]>(selectedAccountIds);
-
 
     // Sync with props when modal opens
     useEffect(() => {
@@ -119,11 +119,12 @@ export function BalanceAccountsModal({
                 {/* Accounts List */}
                 {(displayedAccounts?.length || 0) === 0 ? (
                     <View style={styles.emptyStateContainer}>
-                        <Landmark size={52} color="#D97757" strokeWidth={1.7} style={styles.emptyStateIcon} />
-                        <Text style={styles.emptyStateTitle}>Nenhuma conta</Text>
-                        <Text style={styles.emptyStateDescription}>
+                        <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={styles.emptyStateTitle}>
+                            Nenhuma conta
+                        </Animated.Text>
+                        <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={styles.emptyStateDescription}>
                             Conecte uma conta para ver seu saldo.
-                        </Text>
+                        </Animated.Text>
                     </View>
                 ) : (
                     <>
@@ -291,11 +292,8 @@ const styles = StyleSheet.create({
     emptyStateContainer: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 48,
+        paddingVertical: 64,
         paddingHorizontal: 32,
-    },
-    emptyStateIcon: {
-        marginBottom: 12,
     },
     emptyStateTitle: {
         fontSize: 17,

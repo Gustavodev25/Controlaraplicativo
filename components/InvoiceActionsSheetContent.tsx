@@ -5,7 +5,6 @@ interface InvoiceActionsSheetContentProps {
     showInvoiceCards: boolean;
     onConfigureInvoice: () => void;
     onSearchTransaction: () => void;
-    onCreateManualAccount: () => void;
     onCreateManualTransaction: () => void;
     onToggleInvoiceCards: () => void;
 }
@@ -14,7 +13,6 @@ export function InvoiceActionsSheetContent({
     showInvoiceCards,
     onConfigureInvoice,
     onSearchTransaction,
-    onCreateManualAccount,
     onCreateManualTransaction,
     onToggleInvoiceCards,
 }: InvoiceActionsSheetContentProps) {

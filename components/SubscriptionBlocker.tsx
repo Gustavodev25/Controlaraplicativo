@@ -1,34 +1,13 @@
 import { useAuthContext } from '@/contexts/AuthContext';
+import { getSubscriptionAccessState } from '@/services/subscriptionAccess';
 import { getStoreSubscriptionStatus } from '@/services/storeSubscriptionStatus';
 import { usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 
-const ACTIVE_PRO_STATUSES = new Set(['active', 'trial', 'trialing']);
 const NATIVE_STORE_PROVIDERS = new Set(['apple', 'app_store', 'storekit', 'google', 'google_play', 'play_store']);
 const STORE_STATUS_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_REFRESH_TIMER_MS = 2_147_483_647;
 const STARTUP_TIME_MS = Date.now();
-
-const parseSubscriptionDateMs = (value: any): number | null => {
-    if (!value) return null;
-
-    if (typeof value?.toDate === 'function') {
-        const date = value.toDate();
-        return Number.isNaN(date?.getTime?.()) ? null : date.getTime();
-    }
-
-    if (value instanceof Date) {
-        return Number.isNaN(value.getTime()) ? null : value.getTime();
-    }
-
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-
-    if (typeof value === 'object' && Number.isFinite(value?.seconds)) {
-        return Number(value.seconds) * 1000;
-    }
-
-    const parsed = new Date(value).getTime();
-    return Number.isFinite(parsed) ? parsed : null;
-};
 
 /**
  * Keeps non-Pro users on the subscription screen while allowing native-store
@@ -44,21 +23,15 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
     const [, forceStoreSyncRender] = useState(0);
 
     const subscription = profile?.subscription as any;
-    const plan = String(subscription?.plan || '').trim().toLowerCase();
-    const status = String(subscription?.status || '').trim().toLowerCase();
-    const provider = String(
-        subscription?.provider ||
-        subscription?.paymentProvider ||
-        subscription?.iapSource ||
-        ''
-    ).trim().toLowerCase();
-    const expiresMs = parseSubscriptionDateMs(
-        subscription?.expiresAt ||
-        subscription?.renewalDate ||
-        subscription?.nextBillingDate
-    );
-    const isPaidPlan = plan === 'pro' || plan === 'premium';
-    const isActiveStatus = ACTIVE_PRO_STATUSES.has(status);
+    const {
+        plan,
+        status,
+        provider,
+        expiresMs,
+        isPaidPlan,
+        isActiveStatus,
+        hasAccess,
+    } = getSubscriptionAccessState(subscription);
     const isNativeStoreSubscription = NATIVE_STORE_PROVIDERS.has(provider);
     const subscriptionKey = [
         user?.uid || '',
@@ -123,6 +96,20 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
     }, [expiresMs, refreshProfile, shouldSyncNativeStoreStatus, subscriptionKey, user?.uid]);
 
     useEffect(() => {
+        if (!expiresMs || expiresMs <= Date.now()) return;
+
+        const refreshDelayMs = Math.min(
+            Math.max(expiresMs - Date.now() + 1000, 1000),
+            MAX_REFRESH_TIMER_MS
+        );
+        const timer = setTimeout(() => {
+            forceStoreSyncRender((value) => value + 1);
+        }, refreshDelayMs);
+
+        return () => clearTimeout(timer);
+    }, [expiresMs]);
+
+    useEffect(() => {
         if (isLoading || !isAuthenticated) {
             hasRedirectedRef.current = false;
             syncInFlightKeyRef.current = null;
@@ -132,21 +119,14 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
 
         if (profile?.isAdmin) return;
 
-        const isExpiredNativeStoreSubscription =
-            isNativeStoreSubscription &&
-            isPaidPlan &&
-            isActiveStatus &&
-            !!expiresMs &&
-            expiresMs <= Date.now();
         const isWaitingForStoreSync =
             shouldSyncNativeStoreStatus &&
             (
                 syncInFlightKeyRef.current === subscriptionKey ||
                 syncedSubscriptionKeyRef.current !== subscriptionKey
             );
-        const isPro = isPaidPlan && isActiveStatus && !isExpiredNativeStoreSubscription;
 
-        if (isPro) {
+        if (hasAccess) {
             hasRedirectedRef.current = false;
             return;
         }
@@ -182,6 +162,7 @@ export function SubscriptionBlocker({ children }: { children: React.ReactNode })
         }, 0);
     }, [
         expiresMs,
+        hasAccess,
         isActiveStatus,
         isAuthenticated,
         isLoading,

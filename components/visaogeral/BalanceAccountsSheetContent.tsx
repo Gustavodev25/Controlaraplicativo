@@ -1,6 +1,8 @@
 import { databaseService } from '@/services/firebase';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { FadeInDown, withRepeat, withTiming, useAnimatedStyle, useSharedValue, Easing } from 'react-native-reanimated';
+import { Landmark } from 'lucide-react-native';
 
 interface BalanceAccountsSheetContentProps {
     userId: string;
@@ -79,10 +81,12 @@ export function BalanceAccountsSheetContent({
 
             {displayedAccounts.length === 0 ? (
                 <View style={styles.emptyState}>
-                    <Text style={styles.emptyTitle}>Nenhuma conta</Text>
-                    <Text style={styles.emptyDescription}>
+                    <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={styles.emptyTitle}>
+                        Nenhuma conta
+                    </Animated.Text>
+                    <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={styles.emptyDescription}>
                         Conecte uma conta para ver seu saldo.
-                    </Text>
+                    </Animated.Text>
                 </View>
             ) : (
                 <View style={styles.accountsList}>
@@ -216,8 +220,8 @@ const styles = StyleSheet.create({
     emptyState: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 32,
-        paddingHorizontal: 20,
+        paddingVertical: 64,
+        paddingHorizontal: 32,
     },
     emptyTitle: {
         fontSize: 17,

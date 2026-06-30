@@ -190,6 +190,20 @@ consegue acessar o catalogo de assinaturas do app/package na Android Publisher A
 check `google_play_purchases_api_access` confirma a permissao da Purchases API usada na
 validacao de assinaturas.
 
+### Gate antes de trafego pago
+
+Depois do deploy e das variaveis no Railway, rode o gate operacional:
+
+```powershell
+$env:ADMIN_API_TOKEN="SEU_ADMIN_API_TOKEN"
+npm run iap:readiness
+```
+
+O comando consulta `/health`, Apple production, Apple sandbox e o diagnostico protegido
+do Google. Para liberar investimento em trafego, todos os itens precisam aparecer como
+`PASS`. Se aparecer `BLOCKED`, falta evidencia obrigatoria; se aparecer `FAIL`, corrija
+antes de testar compras reais.
+
 ### Notificacoes Google em tempo real
 
 As notificacoes mantem cancelamentos, renovacoes e falhas sincronizados mesmo quando o usuario

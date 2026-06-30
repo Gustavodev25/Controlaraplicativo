@@ -13,7 +13,7 @@ import { MoreVertical, PiggyBank, Plus } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated as NativeAnimated, Easing as RNEasing, FlatList, Image, InteractionManager, StyleSheet, Text, View } from 'react-native';
 import { TextInput } from 'react-native-gesture-handler'; // Ensure TextInput is available or use standard RN
-import Animated, { Easing, FadeInUp, runOnJS, useAnimatedProps, useAnimatedReaction, useAnimatedStyle, useDerivedValue, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, FadeInDown, FadeInUp, runOnJS, useAnimatedProps, useAnimatedReaction, useAnimatedStyle, useDerivedValue, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
@@ -422,17 +422,13 @@ export default function PlanningScreen() {
                     />
                 ) : (
                     <View style={styles.emptyContainer}>
-                        <View style={styles.emptyIconWrapper}>
-                            <PiggyBank size={44} color="#D97757" strokeWidth={1.8} />
-                        </View>
-
-                        <Text style={styles.emptyTitle}>
+                        <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={styles.emptyTitle}>
                             Nenhuma caixinha
-                        </Text>
+                        </Animated.Text>
 
-                        <Text style={styles.emptyText}>
+                        <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={styles.emptyText}>
                             Crie caixinhas para organizar seus objetivos financeiros.
-                        </Text>
+                        </Animated.Text>
                     </View>
                 )}
             </View>

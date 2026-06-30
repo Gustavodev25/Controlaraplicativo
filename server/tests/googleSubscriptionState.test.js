@@ -20,6 +20,7 @@ const {
   GOOGLE_PLAY_TRIAL_OFFER_ID,
   GOOGLE_PLAY_TRIAL_DAYS,
   assertGooglePurchaseAccountMatchesUser,
+  buildStatusSnapshot,
   getGoogleAcknowledgeExternalAccountIds,
   getGooglePurchaseAccountId,
   isGoogleSubscriptionAcknowledgementPending,
@@ -104,6 +105,19 @@ describe('Google Play subscription state', () => {
 
     expect(result.hasPro).toBe(false);
     expect(result.status).toBe('past_due');
+  });
+
+  test('marks a stale active Google Play profile as expired after expiry time', () => {
+    const snapshot = buildStatusSnapshot({
+      plan: 'pro',
+      status: 'active',
+      provider: 'google',
+      expiresAt: '2026-06-01T12:00:00.000Z',
+    });
+
+    expect(snapshot.hasPro).toBe(false);
+    expect(snapshot.status).toBe('expired');
+    expect(snapshot.subscription.status).toBe('expired');
   });
 
   test('uses a stable sha256 account identifier', () => {

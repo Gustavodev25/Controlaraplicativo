@@ -28,11 +28,14 @@ const appleRouter = require('../api/apple');
 const {
   APPLE_MONTHLY_FALLBACK_MS,
   assertAppleAppAccountTokenMatches,
+  buildStatusSnapshot,
   getExpectedAppleAppAccountToken,
   getAppleNotificationAutoRenewStatus,
+  getAppleTrustedRootFingerprints,
   inferAppleNotificationStatusCode,
   isAppleFreeTrial,
   resolveMonthlyEntitlementPeriod,
+  shouldAllowAppleSandboxRelink,
   persistAppleSubscription,
   persistStoreKitSubscription,
   persistAppStoreServerSubscription,
@@ -135,6 +138,66 @@ describe('Apple subscription entitlement period', () => {
       'AUTO_RENEW_DISABLED',
       null
     )).toBe('disabled');
+  });
+
+  test('trusts only official Apple root certificate fingerprints for JWS verification', () => {
+    expect(getAppleTrustedRootFingerprints()).toEqual(expect.arrayContaining([
+      'B0:B1:73:0E:CB:C7:FF:45:05:14:2C:49:F1:29:5E:6E:DA:6B:CA:ED:7E:2C:68:C5:BE:91:B5:A1:10:01:F0:24',
+      'C2:B9:B0:42:DD:57:83:0E:7D:11:7D:AC:55:AC:8A:E1:94:07:D3:8E:41:D8:8F:32:15:BC:3A:89:04:44:A0:50',
+      '63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE:7C:4F:5C:75:6F:30:17:B3:A8:C4:88:C3:65:3E:91:79',
+    ]));
+  });
+
+  test('allows Apple purchase re-linking only for explicit sandbox environments', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalAppleEnvironment = process.env.APPLE_SERVER_API_ENVIRONMENT;
+
+    try {
+      process.env.NODE_ENV = 'development';
+      delete process.env.APPLE_SERVER_API_ENVIRONMENT;
+
+      expect(shouldAllowAppleSandboxRelink('Sandbox')).toBe(true);
+      expect(shouldAllowAppleSandboxRelink('Production')).toBe(false);
+      expect(shouldAllowAppleSandboxRelink(null)).toBe(false);
+
+      process.env.APPLE_SERVER_API_ENVIRONMENT = 'sandbox';
+      expect(shouldAllowAppleSandboxRelink(null)).toBe(true);
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalAppleEnvironment === undefined) {
+        delete process.env.APPLE_SERVER_API_ENVIRONMENT;
+      } else {
+        process.env.APPLE_SERVER_API_ENVIRONMENT = originalAppleEnvironment;
+      }
+    }
+  });
+
+  test('marks stale active Apple profiles as expired after expiry time', () => {
+    const snapshot = buildStatusSnapshot({
+      plan: 'pro',
+      status: 'active',
+      provider: 'apple',
+      expiresAt: '2026-06-01T12:00:00.000Z',
+    });
+
+    expect(snapshot.hasPro).toBe(false);
+    expect(snapshot.status).toBe('expired');
+    expect(snapshot.subscription.status).toBe('expired');
+  });
+
+  test('does not grant stale paid access when provider is missing', () => {
+    const snapshot = buildStatusSnapshot({
+      plan: 'pro',
+      status: 'active',
+      expiresAt: '2026-06-01T12:00:00.000Z',
+    });
+
+    expect(snapshot.hasPro).toBe(false);
+    expect(snapshot.status).toBe('expired');
   });
 });
 

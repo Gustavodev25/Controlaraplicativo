@@ -55,6 +55,7 @@ import {
 
 import Animated, {
     Extrapolation,
+    FadeInDown,
     FadeIn,
     FadeOut,
     interpolate,
@@ -604,23 +605,15 @@ const EmptyState = ({ type }: { type: RecurrenceTab }) => {
 
     return (
         <View style={styles.emptyRemindersContainer}>
-            <View style={styles.emptyRemindersIconWrapper}>
-                {isSubscription ? (
-                    <Repeat2 size={44} color="#D97757" strokeWidth={1.8} />
-                ) : (
-                    <Bell size={44} color="#D97757" strokeWidth={1.8} />
-                )}
-            </View>
-
-            <Text style={styles.emptyRemindersTitle}>
+            <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={styles.emptyRemindersTitle}>
                 {isSubscription ? 'Nenhuma assinatura' : 'Nenhum lembrete'}
-            </Text>
+            </Animated.Text>
 
-            <Text style={styles.emptyRemindersText}>
+            <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={styles.emptyRemindersText}>
                 {isSubscription
                     ? 'Você ainda não possui assinaturas cadastradas.'
                     : 'Você não tem lembretes pendentes para este mês.'}
-            </Text>
+            </Animated.Text>
         </View>
     );
 };
@@ -1745,7 +1738,10 @@ export function RecurrenceView({ initialTab = 'subscriptions' }: { initialTab?: 
                                 showsVerticalScrollIndicator={false}
                                 ListEmptyComponent={
                                     <View style={{ padding: 20, alignItems: 'center' }}>
-                                        <Text style={{ color: '#6E6E73', fontSize: 14 }}>Nenhum vencimento neste dia</Text>
+                                        <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={{ color: '#6E6E73', fontSize: 14 }}>Nenhum vencimento neste dia</Animated.Text>
+                                        <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={{ color: '#555', fontSize: 12, marginTop: 4 }}>
+                                            Toque no botão + para adicionar
+                                        </Animated.Text>
                                     </View>
                                 }
                                 ListHeaderComponent={

@@ -209,7 +209,7 @@ export const SyncCreditsDisplay = ({
                         ]}
                     >
                         <Text style={styles.unifiedButtonText} numberOfLines={1}>
-                            Conectar / Criar
+                            Conectar
                         </Text>
                     </MorphTouchable>
                 )}

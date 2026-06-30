@@ -65,6 +65,7 @@ import {
 } from 'react-native';
 import Animated, {
     Extrapolation,
+    FadeInDown,
     FadeIn,
     FadeOut,
     interpolate,
@@ -1283,17 +1284,14 @@ export default function TransactionsScreen() {
                             }
                             ListEmptyComponent={
                                 <View style={styles.emptyState}>
-                                    <View style={styles.emptyIconContainer}>
-                                        <WalletCards size={54} color="#F5F5F7" strokeWidth={1.7} />
-                                    </View>
-                                    <Text style={styles.emptyTitle}>
+                                    <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={styles.emptyTitle}>
                                         {hasActiveFilters ? 'Nenhum resultado' : 'Nenhuma transação'}
-                                    </Text>
-                                    <Text style={styles.emptyText}>
+                                    </Animated.Text>
+                                    <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={styles.emptyText}>
                                         {hasActiveFilters
                                             ? 'Tente ajustar os filtros para encontrar transações.'
                                             : 'Suas movimentações financeiras aparecerão aqui.'}
-                                    </Text>
+                                    </Animated.Text>
 
                                     {!hasActiveFilters && (
                                         <View style={styles.emptyActions}>

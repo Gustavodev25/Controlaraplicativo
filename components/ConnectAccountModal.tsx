@@ -1,7 +1,7 @@
 import { ArrowLeft, X } from 'lucide-react-native';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import { ModalPadrao } from '@/components/ui/ModalPadrao';
+import { ModalPadraoFallback } from '@/components/ui/ModalPadraoFallback';
 
 interface ConnectAccountModalProps {
     visible: boolean;
@@ -62,7 +62,7 @@ export function ConnectAccountModal({
     );
 
     return (
-        <ModalPadrao
+        <ModalPadraoFallback
             visible={visible}
             onClose={handleClose}
             title={CustomTitle}
@@ -70,6 +70,7 @@ export function ConnectAccountModal({
             scrollable={scrollable}
             enableDragToClose={scrollable}
             showHandle={true}
+            hideCloseButton
             maxHeightRatio={0.75}
             onAfterClose={onDismiss}
             bodyStyle={[
@@ -98,7 +99,7 @@ export function ConnectAccountModal({
                 </View>
             </View>
             {overlayElement}
-        </ModalPadrao>
+        </ModalPadraoFallback>
     );
 }
 

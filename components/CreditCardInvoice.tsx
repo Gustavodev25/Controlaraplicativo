@@ -7,7 +7,6 @@ import { RefundSheet } from '@/components/RefundSheet';
 import { SwipeTutorial } from '@/components/SwipeTutorial';
 import { TransactionOptionsSheet } from '@/components/TransactionOptionsSheet';
 import { InvoiceActionsSheet } from '@/components/InvoiceActionsSheet';
-import { ManualCreditCardAccountModal, type ManualCreditCardAccountInput } from '@/components/ManualCreditCardAccountModal';
 import { ManualCreditCardTransactionModal, type ManualCreditCardTransactionInput } from '@/components/ManualCreditCardTransactionModal';
 import { AnimatedInlineBanner } from '@/components/ui/AnimatedInlineBanner';
 import { ModalPadrao } from '@/components/ui/ModalPadrao';
@@ -33,7 +32,6 @@ import { LinearGradient } from 'expo-linear-gradient'; // Added
 import { doc, onSnapshot } from 'firebase/firestore';
 import {
     Check,
-    CreditCard,
     FileText,
     ReceiptText,
     RotateCcw,
@@ -63,6 +61,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     Extrapolation,
+    FadeInDown,
     FadeIn,
     FadeOut,
     interpolate,
@@ -1107,7 +1106,6 @@ export function CreditCardInvoice({
     const [selectedTransactionForOptions, setSelectedTransactionForOptions] = useState<InvoiceItem | null>(null);
     const [transactionSearchModalVisible, setTransactionSearchModalVisible] = useState(false);
     const [invoiceActionsModalVisible, setInvoiceActionsModalVisible] = useState(false);
-    const [manualAccountModalVisible, setManualAccountModalVisible] = useState(false);
     const [manualTransactionModalVisible, setManualTransactionModalVisible] = useState(false);
     const [transactionSearchQuery, setTransactionSearchQuery] = useState('');
     const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
@@ -1689,25 +1687,6 @@ export function CreditCardInvoice({
         return Math.max(limit - used, 0);
     }, [filteredTransactions, selectedCard]);
 
-    const handleCreateManualAccount = useCallback(async (data: ManualCreditCardAccountInput) => {
-        if (!userId) {
-            throw new Error('Usuário não autenticado.');
-        }
-
-        const result = await databaseService.createManualCreditCardAccount(userId, data);
-        if (!result?.success) {
-            throw new Error(result?.error || 'Não foi possível criar a conta.');
-        }
-
-        if (result.id) {
-            setSelectedCardId(result.id);
-        }
-
-        if (onRefresh) {
-            await onRefresh();
-        }
-    }, [onRefresh, userId]);
-
     const handleCreateManualTransaction = useCallback(async (data: ManualCreditCardTransactionInput) => {
         if (!userId) {
             throw new Error('Usuário não autenticado.');
@@ -2204,12 +2183,6 @@ export function CreditCardInvoice({
 
     if (creditCards.length === 0) return (
         <View style={styles.screen}>
-            <ManualCreditCardAccountModal
-                visible={manualAccountModalVisible}
-                onClose={() => setManualAccountModalVisible(false)}
-                onSubmit={handleCreateManualAccount}
-            />
-
             <View style={styles.headerRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <Image
@@ -2221,41 +2194,26 @@ export function CreditCardInvoice({
                 </View>
             </View>
             <View style={styles.emptyState}>
-                <CreditCard size={56} color="#F5F5F7" strokeWidth={1.7} style={styles.emptyIcon} />
-                <Text style={styles.emptyTitle}>Nenhum cartão</Text>
-                <Text style={styles.emptyText}>Conecte ou crie um cartão manual para visualizar suas faturas.</Text>
+                <Animated.Text entering={FadeInDown.duration(500).delay(100)} style={styles.emptyTitle}>Nenhum cartão</Animated.Text>
+                <Animated.Text entering={FadeInDown.duration(500).delay(200)} style={styles.emptyText}>Conecte um banco ou crie uma conta manual pela tela de contas bancárias para visualizar suas faturas.</Animated.Text>
 
-                <View style={styles.emptyActions}>
-                    {onNavigateToOpenFinance ? (
+                {onNavigateToOpenFinance ? (
+                    <View style={styles.emptyActions}>
                         <TouchableOpacity
                             style={[styles.emptyActionButton, styles.emptyPrimaryAction]}
                             activeOpacity={0.8}
                             onPress={onNavigateToOpenFinance}
                         >
-                            <Text style={styles.emptyPrimaryActionText}>Conectar banco</Text>
+                            <Text style={styles.emptyPrimaryActionText}>Ir para contas bancárias</Text>
                         </TouchableOpacity>
-                    ) : null}
-
-                    <TouchableOpacity
-                        style={[styles.emptyActionButton, styles.emptySecondaryAction]}
-                        activeOpacity={0.8}
-                        onPress={() => setManualAccountModalVisible(true)}
-                    >
-                        <Text style={styles.emptySecondaryActionText}>Criar manualmente</Text>
-                    </TouchableOpacity>
-                </View>
+                    </View>
+                ) : null}
             </View>
         </View>
     );
 
     return (
         <View style={styles.screen}>
-
-            <ManualCreditCardAccountModal
-                visible={manualAccountModalVisible}
-                onClose={() => setManualAccountModalVisible(false)}
-                onSubmit={handleCreateManualAccount}
-            />
 
             <ManualCreditCardTransactionModal
                 visible={manualTransactionModalVisible}
@@ -2381,9 +2339,9 @@ export function CreditCardInvoice({
                         {transactionSearchResults.length === 0 ? (
                             <View style={searchStyles.resultsGroup}>
                                 <View style={searchStyles.emptyContainer}>
-                                    <Text style={searchStyles.emptyText}>
+                                    <Animated.Text entering={FadeInDown.duration(500)} style={searchStyles.emptyText}>
                                         {transactionSearchQuery.trim() ? 'Nenhuma transação encontrada' : 'Digite para buscar'}
-                                    </Text>
+                                    </Animated.Text>
                                 </View>
                             </View>
                         ) : (
@@ -2437,7 +2395,6 @@ export function CreditCardInvoice({
                 showInvoiceCards={showInvoiceCards}
                 onConfigureInvoice={() => setClosingDateModalVisible(true)}
                 onSearchTransaction={() => setTransactionSearchModalVisible(true)}
-                onCreateManualAccount={() => setManualAccountModalVisible(true)}
                 onCreateManualTransaction={() => setManualTransactionModalVisible(true)}
                 onToggleInvoiceCards={toggleInvoiceCards}
             />

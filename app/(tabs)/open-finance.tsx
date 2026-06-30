@@ -3574,56 +3574,9 @@ const SearchInputShell = ({ searchQuery, setSearchQuery, styles }: any) => {
 
 const EmptyAccountsState = ({ styles }: any) => {
     const entranceStyle = useElasticEntrance(120, 18);
-    const pulse = useSharedValue(0);
-    const isFocused = useIsFocused();
-
-    useEffect(() => {
-        cancelAnimation(pulse);
-
-        if (!isFocused) {
-            pulse.value = 0;
-            return;
-        }
-
-        pulse.value = withDelay(
-            450,
-            withRepeat(
-                withSequence(
-                    withTiming(1, {
-                        duration: 1700,
-                        easing: Easing.inOut(Easing.quad),
-                    }),
-                    withTiming(0, {
-                        duration: 1700,
-                        easing: Easing.inOut(Easing.quad),
-                    })
-                ),
-                -1,
-                false
-            ),
-        );
-
-        return () => {
-            cancelAnimation(pulse);
-        };
-    }, [isFocused, pulse]);
-
-    const glowStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(pulse.value, [0, 1], [0.12, 0.26], Extrapolation.CLAMP),
-        transform: [
-            {
-                scale: interpolate(pulse.value, [0, 1], [0.94, 1.08], Extrapolation.CLAMP),
-            },
-        ],
-    }));
 
     return (
         <Reanimated.View style={[styles.emptyState, entranceStyle]}>
-            <View style={styles.emptyIconShell}>
-                <Reanimated.View pointerEvents="none" style={[styles.emptyIconGlow, glowStyle]} />
-                <Landmark size={20} color="#A1A1AA" strokeWidth={1.7} />
-            </View>
-
             <Text style={styles.emptyTitle}>
                 Nenhuma conta
             </Text>
