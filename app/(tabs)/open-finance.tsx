@@ -15,6 +15,7 @@ import { API_BASE_URL_CANDIDATES } from '@/services/apiBaseUrl';
 import { databaseService } from '@/services/firebase';
 import { notificationService } from '@/services/notifications';
 import { openFinanceConnectionState } from '@/services/openFinanceConnectionState';
+import { queryCache } from '@/services/queryCache';
 import { getConnectorLogoUrl, normalizeHexColor } from '@/utils/connectorLogo';
 import { useIsFocused } from 'expo-router';
 import { BlurView } from 'expo-blur';
@@ -135,7 +136,7 @@ const API_BASE_URL_FALLBACKS = Array.from(new Set([
     RAILWAY_FALLBACK_API_URL
 ]));
 
-const API_HEALTH_CHECK_TIMEOUT_MS = 20000;
+const API_HEALTH_CHECK_TIMEOUT_MS = 3500;
 const API_HEALTH_CACHE_TTL_MS = 120000;
 const API_DEFAULT_TIMEOUT_MS = 60000;
 const CONNECTORS_TIMEOUT_MS = 40000;
@@ -147,6 +148,8 @@ const MANUAL_REFRESH_MAX_DURATION_MS = 5 * 60 * 1000;
 const CPF_MODAL_IOS_PRESENT_DELAY_MS = 90;
 const CPF_MODAL_IOS_DISMISS_FALLBACK_MS = 900;
 const CONNECTORS_CACHE_TTL_MS = 10 * 60 * 1000;
+const CONNECTORS_CACHE_TTL_MINUTES = CONNECTORS_CACHE_TTL_MS / (60 * 1000);
+const BANK_CONNECTORS_CACHE_KEY = 'open_finance_bank_connectors_v1';
 const BANK_HEALTH_CACHE_TTL_MS = 2 * 60 * 1000;
 const BANK_ROW_HEIGHT = 63;
 const BANK_ROW_ANIMATION_DELAY_MS = 18;
@@ -158,6 +161,11 @@ let bankConnectorsRequest: Promise<any[]> | null = null;
 let cachedUnhealthyBankIds: Set<string> | null = null;
 let cachedUnhealthyBankIdsAt = 0;
 let bankHealthRequest: Promise<Set<string>> | null = null;
+
+const rememberBankConnectors = (bankConnectors: any[]) => {
+    cachedBankConnectors = bankConnectors;
+    cachedBankConnectorsAt = Date.now();
+};
 
 const normalizeConnectorSearchKey = (value: any) => {
     const text = String(value || '');
@@ -620,6 +628,7 @@ export default function OpenFinanceScreen() {
     const confirmFlowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
     const lastApiHealthCheckRef = useRef(0);
+    const apiHealthRequestRef = useRef<Promise<string> | null>(null);
     const [apiBaseUrl, setApiBaseUrl] = useState(API_BASE_URL_FALLBACKS[0] || RAILWAY_FALLBACK_API_URL);
     const pendingItemIdRef = useRef<string | null>(null);
     const openedOAuthUrlRef = useRef(false);
@@ -643,6 +652,16 @@ export default function OpenFinanceScreen() {
     useEffect(() => {
         connectorsRef.current = connectors;
     }, [connectors]);
+
+    useEffect(() => queryCache.subscribe<any[]>(BANK_CONNECTORS_CACHE_KEY, (nextConnectors) => {
+        const bankConnectors = normalizeBankConnectorsPayload(nextConnectors);
+        if (bankConnectors.length === 0) return;
+
+        rememberBankConnectors(bankConnectors);
+        setConnectors(bankConnectors);
+        setConnectorsFetchError(null);
+        setLoadingConnectors(false);
+    }), []);
 
     const clearBankSyncBannerTimer = useCallback(() => {
         if (bankSyncBannerTimerRef.current) {
@@ -930,27 +949,49 @@ export default function OpenFinanceScreen() {
             return apiBaseUrl;
         }
 
-        const candidates = [
-            apiBaseUrl,
-            ...API_BASE_URL_FALLBACKS.filter((url) => url !== apiBaseUrl)
-        ];
-
-        for (const candidate of candidates) {
-            try {
-                const response = await fetchWithTimeout(`${candidate}/health`, {
-                    method: 'GET',
-                    timeout: API_HEALTH_CHECK_TIMEOUT_MS
-                });
-
-                if (response.ok) {
-                    lastApiHealthCheckRef.current = Date.now();
-                    setApiBaseUrl(candidate);
-                    return candidate;
-                }
-            } catch { }
+        if (apiHealthRequestRef.current) {
+            return apiHealthRequestRef.current;
         }
 
-        return apiBaseUrl;
+        const request = (async () => {
+            const candidates = [
+                apiBaseUrl,
+                ...API_BASE_URL_FALLBACKS.filter((url) => url !== apiBaseUrl)
+            ];
+            const bestEffortFallback =
+                candidates.find((url) => url === RAILWAY_FALLBACK_API_URL) ||
+                candidates[candidates.length - 1] ||
+                apiBaseUrl;
+
+            for (const candidate of candidates) {
+                try {
+                    const response = await fetchWithTimeout(`${candidate}/health`, {
+                        method: 'GET',
+                        timeout: API_HEALTH_CHECK_TIMEOUT_MS
+                    });
+
+                    if (response.ok) {
+                        lastApiHealthCheckRef.current = Date.now();
+                        setApiBaseUrl(candidate);
+                        return candidate;
+                    }
+                } catch { }
+            }
+
+            lastApiHealthCheckRef.current = Date.now();
+            setApiBaseUrl(bestEffortFallback);
+            return bestEffortFallback;
+        })();
+
+        apiHealthRequestRef.current = request;
+
+        try {
+            return await request;
+        } finally {
+            if (apiHealthRequestRef.current === request) {
+                apiHealthRequestRef.current = null;
+            }
+        }
     }, [apiBaseUrl]);
 
     const apiFetch = useCallback(async (
@@ -1918,40 +1959,50 @@ export default function OpenFinanceScreen() {
         setConnectorsFetchError(null);
 
         let request: Promise<any[]> | null = null;
+        const fetchBankConnectorsFromApi = async () => {
+            const token = await user.getIdToken();
+
+            const response = await apiFetch('/api/pluggy/connectors', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                timeout: CONNECTORS_TIMEOUT_MS
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => null);
+                throw new Error(errData?.error || `HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            return normalizeBankConnectorsPayload(data);
+        };
 
         try {
             if (!force && bankConnectorsRequest) {
                 request = bankConnectorsRequest;
-            } else {
+            } else if (force) {
                 request = (async () => {
-                    const token = await user.getIdToken();
-
-                    const response = await apiFetch('/api/pluggy/connectors', {
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
-                        },
-                        timeout: CONNECTORS_TIMEOUT_MS
-                    });
-
-                    if (!response.ok) {
-                        const errData = await response.json().catch(() => null);
-                        throw new Error(errData?.error || `HTTP error! status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    return normalizeBankConnectorsPayload(data);
+                    const bankConnectors = await fetchBankConnectorsFromApi();
+                    await queryCache.set(BANK_CONNECTORS_CACHE_KEY, bankConnectors, true);
+                    return bankConnectors;
                 })();
+            } else {
+                request = queryCache
+                    .get<any[]>(
+                        BANK_CONNECTORS_CACHE_KEY,
+                        fetchBankConnectorsFromApi,
+                        { ttlMinutes: CONNECTORS_CACHE_TTL_MINUTES, persist: true }
+                    )
+                    .then((bankConnectors) => normalizeBankConnectorsPayload(bankConnectors || []));
 
-                if (!force) {
-                    bankConnectorsRequest = request;
-                }
+                bankConnectorsRequest = request;
             }
 
             const bankConnectors = await request;
-            cachedBankConnectors = bankConnectors;
-            cachedBankConnectorsAt = Date.now();
+            rememberBankConnectors(bankConnectors);
             setConnectors(bankConnectors);
         } catch (error: any) {
             const msg = isNetworkTransportError(error)
